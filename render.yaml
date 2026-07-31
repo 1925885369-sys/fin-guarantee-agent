@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: yandan-agent
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: PUBLIC_DEMO
+        value: true
+      - key: LLM_BASE_URL
+        value: https://api.deepseek.com
+      - key: LLM_MODEL
+        value: deepseek-chat
+      - key: LLM_API_KEY
+        sync: false
+      - key: APP_DATA_DIR
+        value: /var/data
+      - key: MAX_FILE_MB
+        value: 15
+      - key: RETENTION_HOURS
+        value: 24
+      - key: LLM_INPUT_PRICE_PER_M
+        value: 2
+      - key: LLM_OUTPUT_PRICE_PER_M
+        value: 8
+    disk:
+      name: yandan-data
+      mountPath: /var/data
+      sizeGB: 1
