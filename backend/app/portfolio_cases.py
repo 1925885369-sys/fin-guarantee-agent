@@ -211,6 +211,10 @@ def evaluation_manifest() -> dict[str, dict]:
     return {
         case["id"]: {
             "expected_fact_count": len(case["facts"]),
+            "expected_facts": [
+                {"fact_key": fact_key, "period": period, "value": value, "unit": unit}
+                for fact_key, period, value, unit, _ in case["facts"]
+            ],
             "expected_warning_keys": case["expected_warnings"],
         }
         for case in CASES

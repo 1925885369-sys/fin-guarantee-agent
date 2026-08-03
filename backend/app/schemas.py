@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
 Severity = Literal["high", "medium", "low"]
@@ -31,14 +31,33 @@ class LlmSection(BaseModel):
 
 
 class ExtractedFact(BaseModel):
-    fact_key: str = Field(min_length=2, max_length=80)
+    fact_key: str = Field(min_length=2, max_length=80, validation_alias=AliasChoices("fact_key", "field"))
     period: str = Field(default="", max_length=20)
     value: Optional[float] = None
     unit: str = Field(default="", max_length=20)
     text_value: str = Field(default="", max_length=1000)
     raw_value: str = Field(default="", max_length=200)
-    source_ids: list[str] = Field(min_length=1, max_length=8)
+    source_ids: list[str] = Field(
+        min_length=1,
+        max_length=8,
+        validation_alias=AliasChoices("source_ids", "source_id", "citation_ids"),
+    )
     confidence: float = Field(default=0.8, ge=0, le=1)
+
+    @field_validator("period", "unit", "text_value", "raw_value", mode="before")
+    @classmethod
+    def normalize_nullable_text(cls, value: object) -> object:
+        return "" if value is None else value
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_nullable_confidence(cls, value: object) -> object:
+        return 0.8 if value is None else value
+
+    @field_validator("source_ids", mode="before")
+    @classmethod
+    def normalize_single_source_id(cls, value: object) -> object:
+        return [value] if isinstance(value, str) else value
 
 
 class ExtractedFactBatch(BaseModel):

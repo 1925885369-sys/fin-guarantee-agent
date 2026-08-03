@@ -46,3 +46,31 @@ def test_unit_normalization_and_labelled_excel_extraction():
     facts = deterministic_extract(sources)
     assert [(item["period"], item["value"]) for item in facts if item["fact_key"] == "revenue"] == [("2024", 1000.0), ("2025", 1200.0)]
 
+
+def test_excel_amount_that_looks_like_a_year_uses_header_periods():
+    sources = [
+        {"id": "h", "document_id": "d", "locator_type": "xlsx_range", "locator": "财务!A1:C1", "text": "指标（万元） | 2024 | 2025"},
+        {"id": "r", "document_id": "d", "locator_type": "xlsx_range", "locator": "财务!A2:C2", "text": "流动资产 | 1700 | 2000"},
+    ]
+
+    facts = deterministic_extract(sources)
+
+    assert [(item["period"], item["value"]) for item in facts if item["fact_key"] == "current_assets"] == [
+        ("2024", 1700.0),
+        ("2025", 2000.0),
+    ]
+
+
+def test_overdue_receivables_are_derived_from_aging_buckets():
+    sources = [
+        {"id": "one", "document_id": "d", "locator_type": "xlsx_range", "locator": "账龄!A2:C2", "text": "1年以内 | 1100 | 66.7%"},
+        {"id": "two", "document_id": "d", "locator_type": "xlsx_range", "locator": "账龄!A3:C3", "text": "1-2年 | 350 | 21.2%"},
+        {"id": "three", "document_id": "d", "locator_type": "xlsx_range", "locator": "账龄!A4:C4", "text": "2年以上 | 200 | 12.1%"},
+    ]
+
+    facts = deterministic_extract(sources)
+    overdue = next(item for item in facts if item["fact_key"] == "overdue_receivables")
+
+    assert overdue["value"] == 550
+    assert overdue["period"] == ""
+    assert overdue["source_ids"] == ["two", "three"]

@@ -15,7 +15,7 @@ class Settings:
     data_dir: Path = Path(os.getenv("APP_DATA_DIR", ".data"))
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
-    llm_model: str = os.getenv("LLM_MODEL", "deepseek-chat")
+    llm_model: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
     input_price_per_m: float = float(os.getenv("LLM_INPUT_PRICE_PER_M", "2"))
     output_price_per_m: float = float(os.getenv("LLM_OUTPUT_PRICE_PER_M", "8"))
     public_demo: bool = _bool("PUBLIC_DEMO")

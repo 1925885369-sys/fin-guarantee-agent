@@ -10,3 +10,6 @@ frontend/playwright-report/
 *.tsbuildinfo
 .data/
 *.db
+.llm-smoke/
+docs/assets/*smoke*.json
+docs/assets/*after-fix*.json

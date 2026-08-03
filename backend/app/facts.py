@@ -138,14 +138,15 @@ def deterministic_extract(source_rows: list[dict]) -> list[dict]:
                     seen.add(key)
                 continue
 
+            sheet = str(source.get("locator", "")).split("!", 1)[0]
+            years = headers.get((source["document_id"], sheet), []) if source.get("locator_type") == "xlsx_range" else []
             numbers = _numbers(text)
-            years_in_text = re.findall(r"20\d{2}", text)
-            numbers = [number for number in numbers if int(number) not in {int(year) for year in years_in_text}]
+            if not years:
+                years_in_text = re.findall(r"20\d{2}", text)
+                numbers = [number for number in numbers if int(number) not in {int(year) for year in years_in_text}]
             if not numbers:
                 continue
             unit = _unit(text, definition.unit_kind)
-            sheet = str(source.get("locator", "")).split("!", 1)[0]
-            years = headers.get((source["document_id"], sheet), []) if source.get("locator_type") == "xlsx_range" else []
 
             if definition.unit_kind == "percent":
                 percent_match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", text)
@@ -170,6 +171,35 @@ def deterministic_extract(source_rows: list[dict]) -> list[dict]:
                 if key not in seen:
                     output.append(item)
                     seen.add(key)
+
+    if not any(item["fact_key"] == "overdue_receivables" for item in output):
+        aging_groups: dict[tuple[str, str], list[tuple[float, str]]] = {}
+        for source in source_rows:
+            if source.get("locator_type") != "xlsx_range":
+                continue
+            label, separator, remainder = source["text"].partition("|")
+            label = re.sub(r"\s+", "", label)
+            if not separator or not (
+                re.fullmatch(r"1[-–—~至]2年", label)
+                or re.fullmatch(r"[2-9]\d*年以上", label)
+            ):
+                continue
+            amount_cell = remainder.split("|", 1)[0]
+            amounts = _numbers(amount_cell)
+            if not amounts:
+                continue
+            sheet = str(source.get("locator", "")).split("!", 1)[0]
+            aging_groups.setdefault((source["document_id"], sheet), []).append((amounts[0], source["id"]))
+
+        for values in aging_groups.values():
+            raw_total = sum(value for value, _ in values)
+            total, unit = normalize_numeric(raw_total, "万元", "amount")
+            item = _fact_dict(
+                "overdue_receivables", "", total, unit, "", " + ".join(str(value) for value, _ in values),
+                values[0][1], 0.95,
+            )
+            item["source_ids"] = [source_id for _, source_id in values]
+            output.append(item)
     return output
 
 

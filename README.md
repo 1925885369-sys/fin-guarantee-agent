@@ -31,7 +31,7 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```text
 LLM_BASE_URL=https://api.deepseek.com
 LLM_API_KEY=your-key
-LLM_MODEL=deepseek-chat
+LLM_MODEL=deepseek-v4-flash
 ```
 
 密钥只由后端读取。公开体验仅允许上传公开或虚构材料，材料会发送到所配置的模型服务。
@@ -41,17 +41,18 @@ LLM_MODEL=deepseek-chat
 ```powershell
 python -m pytest
 python -m scripts.evaluate --mode deterministic --case all
-python -m scripts.evaluate --mode agent --case all --repeat 3 --output docs/assets/agent-evaluation.json
+python -m scripts.evaluate --mode agent --case all --repeat 3 --api-base http://127.0.0.1:8001 --output docs/assets/agent-evaluation.json
 python -m scripts.evaluate --mode baseline --case all --repeat 3 --output docs/assets/baseline-evaluation.json
 Set-Location frontend
 npm.cmd run build
 npx.cmd playwright test
 ```
 
-本地已验证：13 项后端测试通过、4 项桌面/移动端 Playwright 测试通过。三套虚构标准案例的确定性回归结果为字段覆盖 100%、风险召回 100%、引用精确率 100%、章节引用覆盖率 96.67%。这些结果不代表真实业务表现。
+本地已验证：20 项后端测试通过、4 项桌面/移动端 Playwright 历史验收通过。`deepseek-v4-flash` 在三套虚构案例各三次评测中，Agent 将标注事实命中率由 one-shot baseline 的 71.27% 提升至 100%，风险召回率由 90.74% 提升至 100%；Agent 平均耗时 176.4 秒、成本 0.190 元，baseline 为 71.3 秒和 0.079 元。这些结果仅来自虚构标准案例，不代表真实业务表现。
 
 ## 作品集材料
 
+- [模型 API 启用指南](docs/API_SETUP.md)
 - [产品需求文档](docs/PRD.md)
 - [技术与 Agent 架构](docs/ARCHITECTURE.md)
 - [评测说明](docs/EVALUATION.md)
