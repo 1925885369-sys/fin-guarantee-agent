@@ -1,5 +1,8 @@
 .env
+.env.*
+!.env.example
 .venv/
+.models/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -9,7 +12,38 @@ frontend/test-results/
 frontend/playwright-report/
 *.tsbuildinfo
 .data/
+# 隔离数据目录：测试/评测/E2E 各自独立，绝不入库（也绝不与正式库 .data 混用）
+.data-probe*
+.data-e2e/
+.data-*/
 *.db
+*.sqlite*
+*.log
+
+# 本地导出的报告，按需重新生成
+尽调报告word/
 .llm-smoke/
 docs/assets/*smoke*.json
 docs/assets/*after-fix*.json
+
+# Local credentials, editor state, release audits and private working notes
+.aws/
+.ssh/
+.claude/
+.codex/
+.agents/
+.workbuddy/
+.release/
+*.pem
+*.key
+*.p12
+*.pfx
+*.tar.gz
+PLAN*.md
+electric-nebula-babbage-spVyZpwI.md
+docs/assets/pilot-ji
+
+# PDFs and report files are generated locally from fictional case definitions.
+*.pdf
+*.docx
+*.xlsx

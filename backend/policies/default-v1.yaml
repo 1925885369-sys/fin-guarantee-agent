@@ -1,0 +1,24 @@
+profile: default-v1
+version: 1.0.0
+name: 通用融资担保保前审查政策
+description: 公开作品集默认策略，不代表任何机构正式制度。
+rules:
+  - {key: material_completeness, title: 材料完整性核验, severity: medium, thresholds: {max_missing_groups: 0}}
+  - {key: fact_conflict, title: 重大事实冲突核验, severity: high, thresholds: {relative_difference_pct: 5}}
+  - {key: revenue_tax, title: 报表收入与纳税收入核验, severity: medium, thresholds: {difference_pct: 10}}
+  - {key: revenue_bank, title: 销售收入与经营流入核验, severity: high, thresholds: {min_pct: 80, max_pct: 120}}
+  - {key: revenue_trend, title: 营业收入趋势核验, severity: medium, thresholds: {decline_pct: 20}}
+  - {key: margin_volatility, title: 毛利率波动核验, severity: medium, thresholds: {change_pp: 5}}
+  - {key: ar_growth, title: 应收账款增速核验, severity: high, thresholds: {excess_growth_pp: 15}}
+  - {key: overdue_receivables, title: 逾期应收账款核验, severity: high, thresholds: {overdue_pct: 20, over_one_year_pct: 10}}
+  - {key: inventory_growth, title: 存货增速核验, severity: medium, thresholds: {excess_growth_pp: 20}}
+  - {key: cash_profit, title: 利润与经营现金流核验, severity: high, thresholds: {cash_profit_ratio: 0.8}}
+  - {key: leverage, title: 资产负债与流动性核验, severity: high, thresholds: {debt_ratio_pct: 70, current_ratio: 1.2, quick_ratio: 0.8}}
+  - {key: dscr, title: 债务偿付覆盖核验, severity: high, thresholds: {minimum: 1.2}}
+  - {key: customer_concentration, title: 客户集中度核验, severity: high, thresholds: {top1_pct: 30, top5_pct: 60}}
+  - {key: supplier_concentration, title: 供应商集中度核验, severity: medium, thresholds: {top1_pct: 30, top5_pct: 60}}
+  - {key: related_occupancy, title: 关联方及其他应收占款核验, severity: high, thresholds: {other_receivables_equity_pct: 20}}
+  - {key: purpose_coverage, title: 融资用途合同覆盖核验, severity: medium, thresholds: {minimum_pct: 100}}
+  - {key: debt_maturity, title: 短期债务集中度核验, severity: high, thresholds: {due_12m_pct: 50}}
+  - {key: external_guarantee, title: 对外担保及或有负债核验, severity: high, thresholds: {equity_pct: 50}}
+  - {key: collateral, title: 抵押物覆盖及权利核验, severity: high, thresholds: {minimum_pct: 100, max_age_months: 12}}

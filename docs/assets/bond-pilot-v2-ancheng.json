@@ -1,0 +1,676 @@
+{
+  "suite": "bond",
+  "mode": "agent",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v2",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v2",
+    "prompt_sha256": "b26dd6f4d78e311f80872e2553f6e7fa847ceaeb6dcdb0c1d5a1adae528c1280",
+    "chapter_prompt_sha256": "1012f6cc9ba501f8baf86e11c673e264ad08e7ee23fefa522f07d3249657dcb8",
+    "field_registry_sha256": "06bffcd3dfd929c1b33d72fa268fc9c83b2bdd7ca98f35de8e37b422a62bf853",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 1.0,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 1.0,
+    "risk_recall": 1.0,
+    "risk_precision": 1.0,
+    "risk_f1": 1.0,
+    "candidate_recall": 1.0,
+    "candidate_precision": 1.0,
+    "candidate_f1": 1.0,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": 1.0,
+    "section_citation_coverage": 1.0,
+    "report_fact_support_rate": 1.0,
+    "conflict_recall": 1.0,
+    "latency_ms": 117936.0,
+    "model_cost_cny": 0.2998,
+    "unsupported_claims": 0.0,
+    "unsupported_numeric_claims": 0.0,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": 0.0,
+    "node_retries": 0.0,
+    "degraded_nodes": 0.0,
+    "duplicate_candidate_count": 0.0,
+    "chapter_fallback_rate": 0.0,
+    "latency_anomaly_count": 0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.299796,
+    "error_counts": {},
+    "positive_case_candidate_recall": null,
+    "negative_case_false_positive_rate": 0.0,
+    "candidate_micro_precision": 1.0,
+    "candidate_micro_recall": 1.0,
+    "candidate_micro_f1": 1.0,
+    "candidate_true_positive_count": 0,
+    "candidate_false_positive_count": 0,
+    "candidate_false_negative_count": 0,
+    "duplicate_candidate_total": 0,
+    "chapter_fallback_count": 0,
+    "chapter_llm_section_count": 8,
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_f1": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "report_fact_support_rate": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "conflict_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 117936.0,
+        "max": 117936.0,
+        "mean": 117936.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.2998,
+        "max": 0.2998,
+        "mean": 0.2998,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "unsupported_numeric_claims": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "invalid_citations": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "node_retries": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "degraded_nodes": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "duplicate_candidate_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "chapter_fallback_rate": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "latency_anomaly_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-ancheng": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 1,
+      "evaluation_key": "82c6d6499b7f091d2bf07b3f6d152dc641a54162a2d53ca509b65f42ef390511",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 45,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 125,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "expected_candidate_taxonomies": [],
+      "predicted_candidate_taxonomies": [],
+      "candidate_true_positive_count": 0,
+      "candidate_false_positive_count": 0,
+      "candidate_false_negative_count": 0,
+      "candidate_positive_case": false,
+      "candidate_negative_case_false_positive": false,
+      "duplicate_candidate_count": 0,
+      "candidate_citation_precision": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": 1.0,
+      "report_fact_support_rate": 1.0,
+      "unsupported_claims": 0,
+      "unsupported_numeric_claims": 0,
+      "invalid_citations": 0,
+      "conflict_recall": 1.0,
+      "subject_scope_error_count": 0,
+      "model_attempts": 27,
+      "model_attempt_error_counts": {},
+      "last_model_error": "",
+      "model_attempt_summaries": [
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1014,
+          "output_tokens": 1078,
+          "cost": 0.010652,
+          "latency_ms": 5156,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 846,
+          "output_tokens": 5,
+          "cost": 0.001732,
+          "latency_ms": 568,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1123,
+          "output_tokens": 899,
+          "cost": 0.009438,
+          "latency_ms": 4490,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1044,
+          "output_tokens": 267,
+          "cost": 0.004224,
+          "latency_ms": 2061,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 995,
+          "output_tokens": 280,
+          "cost": 0.004229999999999999,
+          "latency_ms": 2195,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1066,
+          "output_tokens": 1703,
+          "cost": 0.015756,
+          "latency_ms": 7499,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1435,
+          "output_tokens": 4339,
+          "cost": 0.037582,
+          "latency_ms": 17999,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1115,
+          "output_tokens": 447,
+          "cost": 0.005806,
+          "latency_ms": 2701,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 985,
+          "output_tokens": 247,
+          "cost": 0.003946,
+          "latency_ms": 1952,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1061,
+          "output_tokens": 662,
+          "cost": 0.007418000000000001,
+          "latency_ms": 3505,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 993,
+          "output_tokens": 328,
+          "cost": 0.0046099999999999995,
+          "latency_ms": 2125,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1040,
+          "output_tokens": 5,
+          "cost": 0.00212,
+          "latency_ms": 635,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1036,
+          "output_tokens": 5,
+          "cost": 0.002112,
+          "latency_ms": 573,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 472,
+          "output_tokens": 5,
+          "cost": 0.000984,
+          "latency_ms": 810,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 939,
+          "output_tokens": 570,
+          "cost": 0.006437999999999999,
+          "latency_ms": 3085,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1121,
+          "output_tokens": 1708,
+          "cost": 0.015906,
+          "latency_ms": 7809,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 991,
+          "output_tokens": 664,
+          "cost": 0.007294,
+          "latency_ms": 4202,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1007,
+          "output_tokens": 866,
+          "cost": 0.008942,
+          "latency_ms": 4564,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1074,
+          "output_tokens": 1218,
+          "cost": 0.011892,
+          "latency_ms": 6157,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 510,
+          "output_tokens": 247,
+          "cost": 0.002996,
+          "latency_ms": 1813,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "candidate",
+          "task_type": "candidate",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 7440,
+          "output_tokens": 6,
+          "cost": 0.014928,
+          "latency_ms": 956,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 11337,
+          "output_tokens": 782,
+          "cost": 0.02893,
+          "latency_ms": 4820,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 12751,
+          "output_tokens": 411,
+          "cost": 0.02879,
+          "latency_ms": 3115,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 10368,
+          "output_tokens": 518,
+          "cost": 0.02488,
+          "latency_ms": 3398,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 6743,
+          "output_tokens": 478,
+          "cost": 0.01731,
+          "latency_ms": 3377,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 5225,
+          "output_tokens": 100,
+          "cost": 0.01125,
+          "latency_ms": 1739,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 4087,
+          "output_tokens": 182,
+          "cost": 0.009630000000000001,
+          "latency_ms": 1600,
+          "error_type": "",
+          "error_message": ""
+        }
+      ],
+      "node_retries": 0,
+      "degraded_nodes": 0,
+      "chapter_llm_section_count": 8,
+      "chapter_fallback_count": 0,
+      "chapter_fallback_rate": 0.0,
+      "report_attempts": 6,
+      "report_validation_attempts": 0,
+      "latency_anomaly_count": 0,
+      "latency_ms": 117936,
+      "model_cost_cny": 0.299796,
+      "predicted_warning_keys": [
+        "material_completeness"
+      ],
+      "missed_warning_keys": [],
+      "unexpected_warning_keys": [],
+      "missing_expected_facts": [],
+      "candidate_taxonomies": [],
+      "candidate_findings": [],
+      "conflicted_facts": [
+        {
+          "fact_key": "bond_name",
+          "period": ""
+        },
+        {
+          "fact_key": "bond_rating",
+          "period": ""
+        },
+        {
+          "fact_key": "guarantor_name",
+          "period": ""
+        },
+        {
+          "fact_key": "investor_scope",
+          "period": "2026"
+        },
+        {
+          "fact_key": "main_business",
+          "period": ""
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025"
+        },
+        {
+          "fact_key": "principal_repayment",
+          "period": "2026"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023"
+        },
+        {
+          "fact_key": "trustee",
+          "period": ""
+        }
+      ],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

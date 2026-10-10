@@ -1,0 +1,520 @@
+{
+  "mode": "agent",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "professional-v2",
+    "temperature": 0.2,
+    "prompt_version": "professional-v2",
+    "prompt_sha256": "a48147912143905c83ddd1c716e258008c79380d7d178ebdb94dffb221e85158",
+    "field_registry_sha256": "42d3e773eab99f13f535561c94cda8b560b1e9341968e0ee0885f99e935f9340",
+    "policy_profile": "default-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844"
+  },
+  "budget_cny": 3.0,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 0.7368,
+    "risk_recall": 0.5,
+    "risk_precision": 1.0,
+    "risk_f1": 0.6667,
+    "candidate_recall": 1.0,
+    "candidate_precision": 1.0,
+    "candidate_f1": 1.0,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": null,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": 1.0,
+    "latency_ms": 55114.0,
+    "model_cost_cny": 0.0755,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": null,
+    "invalid_citations": null,
+    "subject_scope_error_count": 0.0,
+    "node_retries": 0.0,
+    "degraded_nodes": 0.0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.1519,
+    "error_counts": {},
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 0.7368,
+        "max": 0.7368,
+        "mean": 0.7368,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 0.5,
+        "max": 0.5,
+        "mean": 0.5,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 0.6667,
+        "max": 0.6667,
+        "mean": 0.6667,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_f1": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 55114.0,
+        "max": 55114.0,
+        "mean": 55114.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.0755,
+        "max": 0.0755,
+        "mean": 0.0755,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "invalid_citations": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "subject_scope_error_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "node_retries": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "degraded_nodes": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      }
+    },
+    "per_case_stability": {
+      "demo-rongyi": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 0.7368,
+          "max": 0.7368,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 0.5,
+          "max": 0.5,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-rongyi",
+      "iteration": 1,
+      "evaluation_key": "7ab12be0874c440a2cf0e0041ad241b8b46d10ae20e4fba7617a88ae0f521edd",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v2",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7368,
+      "matched_fact_count": 14,
+      "expected_fact_count": 19,
+      "extracted_fact_count": 26,
+      "risk_recall": 0.5,
+      "risk_precision": 1.0,
+      "risk_f1": 0.6667,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "citation_precision": null,
+      "section_citation_coverage": null,
+      "report_fact_support_rate": null,
+      "unsupported_claims": null,
+      "unsupported_numeric_claims": null,
+      "invalid_citations": null,
+      "conflict_recall": 1.0,
+      "subject_scope_error_count": 0,
+      "model_attempts": 18,
+      "model_attempt_error_counts": {
+        "report_validation": 1
+      },
+      "last_model_error": "章节润色包含非法引用、新数字或审批结论，已回退模板",
+      "model_attempt_summaries": [
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 576,
+          "output_tokens": 237,
+          "cost": 0.003048,
+          "latency_ms": 2466,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 464,
+          "output_tokens": 92,
+          "cost": 0.0016640000000000001,
+          "latency_ms": 1141,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 660,
+          "output_tokens": 92,
+          "cost": 0.002056,
+          "latency_ms": 1409,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 727,
+          "output_tokens": 1088,
+          "cost": 0.010158,
+          "latency_ms": 5453,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 653,
+          "output_tokens": 250,
+          "cost": 0.003306,
+          "latency_ms": 2073,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "candidate",
+          "task_type": "candidate",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 745,
+          "output_tokens": 616,
+          "cost": 0.006418,
+          "latency_ms": 5265,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 339,
+          "output_tokens": 185,
+          "cost": 0.002158,
+          "latency_ms": 1729,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 324,
+          "output_tokens": 164,
+          "cost": 0.00196,
+          "latency_ms": 1859,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 377,
+          "output_tokens": 184,
+          "cost": 0.002226,
+          "latency_ms": 1479,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 463,
+          "output_tokens": 200,
+          "cost": 0.002526,
+          "latency_ms": 1925,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 810,
+          "output_tokens": 673,
+          "cost": 0.007004,
+          "latency_ms": 4300,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 366,
+          "output_tokens": 193,
+          "cost": 0.0022760000000000002,
+          "latency_ms": 1766,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 699,
+          "output_tokens": 482,
+          "cost": 0.005254,
+          "latency_ms": 3374,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 348,
+          "output_tokens": 216,
+          "cost": 0.002424,
+          "latency_ms": 1660,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 709,
+          "output_tokens": 557,
+          "cost": 0.005874,
+          "latency_ms": 3420,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 516,
+          "output_tokens": 362,
+          "cost": 0.003928,
+          "latency_ms": 2522,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 541,
+          "output_tokens": 382,
+          "cost": 0.004138,
+          "latency_ms": 3210,
+          "error_type": "report_validation",
+          "error_message": "章节润色包含非法引用、新数字或审批结论，已回退模板"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1157,
+          "output_tokens": 840,
+          "cost": 0.009034,
+          "latency_ms": 5069,
+          "error_type": "",
+          "error_message": ""
+        }
+      ],
+      "node_retries": 0,
+      "degraded_nodes": 0,
+      "latency_ms": 55114,
+      "model_cost_cny": 0.075452,
+      "predicted_warning_keys": [
+        "cash_profit",
+        "customer_concentration",
+        "fact_conflict",
+        "supplier_concentration"
+      ],
+      "missed_warning_keys": [
+        "collateral",
+        "debt_maturity",
+        "dscr",
+        "purpose_coverage"
+      ],
+      "unexpected_warning_keys": [],
+      "missing_expected_facts": [
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 5200,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 3500,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "debt_due_12m",
+          "period": "2026",
+          "value": 900,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "supporting_contract_amount",
+          "period": "2026",
+          "value": 500,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "collateral_valuation_age_months",
+          "period": "2026",
+          "value": 18,
+          "unit": "个月"
+        }
+      ],
+      "candidate_taxonomies": [],
+      "error_type": null,
+      "error_message": "",
+      "prior_failed_cost_cny": 0.076448
+    }
+  ]
+}

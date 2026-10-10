@@ -1,0 +1,206 @@
+version: "1.2.0"
+documents:
+  prospectus:
+    document_role: prospectus
+    sections:
+      cover_summary:
+        title_anchors: [募集说明书]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 4
+      risk_disclosures:
+        title_anchors: [第一节 风险提示及说明, 风险提示及说明]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 12
+      offering_terms:
+        title_anchors: [第二节 发行条款, 本期债券发行条款]
+        end_anchors: [第三节 募集资金运用]
+        subject_policy: issuer
+        scope_policy: [transaction]
+        allowed_fact_keys: [bond_name, registered_issue_amount, bond_issue_amount, coupon_rate, interest_frequency, principal_repayment, bond_exchange, investor_scope]
+        required: true
+        max_pages: 12
+      use_of_proceeds:
+        title_anchors: [第三节 募集资金运用, 本期债券募集资金运用]
+        end_anchors: [第四节 发行人基本情况]
+        subject_policy: issuer
+        scope_policy: [transaction]
+        allowed_fact_keys: [proceeds_amount, proceeds_purpose, repayment_account]
+        required: true
+        max_pages: 16
+      issuer_identity:
+        title_anchors: [第四节 发行人基本情况, 发行人基本情况]
+        end_anchors: [第五节 发行人财务状况]
+        subject_policy: issuer
+        scope_policy: [entity]
+        allowed_fact_keys: [registered_capital, legal_representative, registered_address, establishment_date, controller, controller_share, related_parties]
+        required: false
+        max_pages: 48
+      governance:
+        title_anchors: [治理结构, 公司治理, 董事、监事和高级管理人员]
+        allowed_fact_keys: [controller, controller_share, related_parties]
+        required: false
+        max_pages: 22
+      operations:
+        title_anchors: [七、发行人主营业务情况, 发行人主营业务情况]
+        allowed_fact_keys: [main_business, top_customer_share, top5_customer_share, top_supplier_share, top5_supplier_share, employee_count]
+        required: false
+        max_pages: 24
+      financial_basis:
+        title_anchors: [第五节 发行人财务状况, 发行人财务报告总体情况]
+        end_anchors: [发行人财务会计信息及主要财务指标]
+        subject_policy: issuer
+        scope_policy: [consolidated, standalone]
+        allowed_fact_keys: [audit_firm, audit_opinion, financial_statement_scope]
+        required: false
+        max_pages: 8
+      financial_statements:
+        title_anchors: [发行人财务会计信息及主要财务指标, 主要财务报表和指标]
+        end_anchors: [发行人财务状况分析]
+        subject_policy: issuer
+        scope_policy: [consolidated, standalone]
+        # operating_cashflow_forecast：预测经营现金流出现在财务报表章节的偿债说明里。
+        # 漏登记会让它在运行后从 facts 里消失——连同 6,500 万元与 9,000 万元的
+        # 口径对照一起丢掉（实测：facts 与 canonical_facts 双双为空）。
+        allowed_fact_keys: [revenue, net_profit, operating_cash_flow, operating_cashflow_forecast, cost_of_goods_sold, cash_received_from_sales, investing_cash_flow, financing_cash_flow, interest_bearing_debt, short_term_debt, long_term_debt, bonds_payable, finance_expense, interest_expense, other_receivables, total_overdue_receivables, debt_due_12m, restricted_cash, total_assets, total_liabilities, equity, current_assets, current_liabilities, accounts_receivable, inventory, cash]
+        required: true
+        max_pages: 18
+      financial_analysis:
+        title_anchors: [发行人财务状况分析, 财务状况分析]
+        end_anchors: [第六节 发行人信用状况]
+        subject_policy: issuer
+        scope_policy: [consolidated, standalone]
+        allowed_fact_keys: [interest_bearing_debt, short_term_debt, long_term_debt, bonds_payable, debt_due_12m, interest_expense, accounts_receivable, total_overdue_receivables, restricted_cash, external_guarantee, contingent_liabilities, credit_limit, utilized_credit]
+        required: false
+        max_pages: 42
+      credit_status:
+        title_anchors: [第六节 发行人信用状况, 第六节 信用状况]
+        end_anchors: [第七节 增信情况]
+        subject_policy: issuer
+        scope_policy: [entity]
+        allowed_fact_keys: [credit_limit, utilized_credit, overdue_debt]
+        required: false
+        max_pages: 12
+      credit_enhancement:
+        title_anchors: [第七节 增信情况, 本期债券增信情况]
+        end_anchors: [第八节 税项]
+        subject_policy: issuer
+        scope_policy: [transaction]
+        allowed_fact_keys: [credit_enhancement_status, guarantor_name, guarantee_type, guarantee_scope, guarantee_period, guarantee_cap]
+        required: true
+        max_pages: 8
+      investor_protection:
+        title_anchors: [投资者保护机制, 投资者保护, 违约及争议解决, 持有人会议规则, 受托管理人]
+        allowed_fact_keys: [investor_protection, cross_default_clause, trustee]
+        required: false
+        max_pages: 60
+      service_institutions:
+        title_anchors: [第十四节 发行有关机构, 发行有关中介机构]
+        subject_policy: issuer
+        scope_policy: [transaction]
+        allowed_fact_keys: [underwriter, trustee, rating_agency]
+        required: false
+        max_pages: 12
+      excluded_appendix:
+        title_anchors: [第十五节 发行人、主承销商、证券服务机构及相关人员声明, 第十五节 发行人、主承销商及相关证券服务机构声明]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 80
+  rating_report:
+    document_role: rating_report
+    sections:
+      rating_result:
+        title_anchors: [发行人及评级结果, 债项及评级结果, 评级结果与发行要素]
+        end_anchors: [财务概况]
+        subject_policy: issuer
+        scope_policy: [transaction]
+        # The rating report's current-issue amount is retained as a
+        # cross-source assertion under the same transaction field.  It never
+        # replaces the prospectus assertion; canonical conflict handling keeps
+        # both values when they differ.  `rating_issue_amount` remains for
+        # backward-compatible rule diagnostics.
+        allowed_fact_keys: [issuer_rating, bond_rating, rating_outlook, rating_agency, rating_date, bond_issue_amount, rating_issue_amount]
+        required: true
+        max_pages: 4
+      rating_financial_summary:
+        title_anchors: [财务概况]
+        end_anchors: [评级模型]
+        subject_policy: issuer
+        scope_policy: [consolidated]
+        allowed_fact_keys: [rating_revenue, rating_total_debt, rating_total_assets, rating_total_liabilities, rating_net_profit, rating_operating_cash_flow]
+        required: false
+        max_pages: 4
+      rating_methodology:
+        title_anchors: [评级模型, 评级方法]
+        end_anchors: [发行人概况]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 4
+      rating_issuer_profile:
+        title_anchors: [发行人概况, 公司概况]
+        end_anchors: [运营实力, 主营业务]
+        subject_policy: issuer
+        scope_policy: [entity]
+        allowed_fact_keys: [registered_capital, controller, related_parties]
+        required: false
+        max_pages: 5
+      external_environment:
+        title_anchors: [宏观经济与行业政策, 宏观经济与行业环境]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 8
+      rating_operations:
+        title_anchors: [运营实力, 主营业务及项目情况, 主营业务]
+        end_anchors: [资本实力与结构]
+        subject_policy: issuer
+        scope_policy: [entity]
+        allowed_fact_keys: [main_business, top_customer_share, top5_customer_share, top_supplier_share, top5_supplier_share]
+        required: false
+        max_pages: 10
+      rating_financial_analysis:
+        title_anchors: [资本实力与结构, 财务分析, 债务及偿债分析, 现金流及偿债分析]
+        end_anchors: [外部支持]
+        subject_policy: issuer
+        scope_policy: [consolidated]
+        allowed_fact_keys: [rating_revenue, rating_total_debt, rating_total_assets, rating_total_liabilities, rating_net_profit, rating_operating_cash_flow]
+        required: false
+        max_pages: 12
+      external_support:
+        title_anchors: [外部支持]
+        end_anchors: [附一：]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 3
+      ownership_appendix:
+        title_anchors: [附一：, 股权和组织结构]
+        end_anchors: [附二：]
+        subject_policy: issuer
+        scope_policy: [entity]
+        allowed_fact_keys: [controller]
+        required: false
+        max_pages: 3
+      rating_financial_appendix:
+        title_anchors: [附二：, 合并口径财务数据及指标]
+        end_anchors: [附三：]
+        subject_policy: issuer
+        scope_policy: [consolidated]
+        allowed_fact_keys: [rating_revenue, rating_total_debt, rating_total_assets, rating_total_liabilities, rating_net_profit, rating_operating_cash_flow]
+        required: false
+        max_pages: 3
+      excluded_formula:
+        title_anchors: [附三：, 指标公式]
+        end_anchors: [附四：]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 2
+      excluded_rating_symbols:
+        title_anchors: [附四：, 信用等级的符号及定义, 评级符号定义]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 2
+      excluded_contact:
+        title_anchors: [独立·客观·专业, 联系方式]
+        allowed_fact_keys: []
+        required: false
+        max_pages: 2

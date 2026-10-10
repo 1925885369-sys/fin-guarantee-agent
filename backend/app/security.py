@@ -19,7 +19,7 @@ def check_rate(client_ip: str, action: str, limit: int, window_seconds: int = 86
     count = row("SELECT COUNT(*) count FROM rate_events WHERE client_ip=? AND action=? AND created_at>=?",
                 (client_ip, action, cutoff))["count"]
     if count >= limit:
-        labels = {"project": "创建项目", "run": "运行分析", "upload": "上传文件"}
+        labels = {"project": "创建项目", "run": "运行分析", "upload": "上传文件", "material_qa": "材料问答"}
         raise HTTPException(429, f"公开演示的{labels.get(action, action)}频率已达上限")
     with connect() as conn:
         conn.execute("INSERT INTO rate_events (id,client_ip,action,created_at) VALUES (?,?,?,?)",
@@ -51,7 +51,16 @@ def cleanup_expired_projects() -> int:
         return 0
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.retention_hours)
     expired = [item["id"] for item in rows("SELECT id,created_at FROM projects WHERE id NOT LIKE 'demo-%'") if datetime.fromisoformat(item["created_at"]) < cutoff]
-    tables = ["run_nodes", "runs", "report_sections", "risks", "cross_checks", "facts", "citations", "sources", "documents"]
+    tables = [
+        "retrieval_chunks", "retrieval_indexes",
+        "project_profile_snapshots", "project_profile_roles",
+        "llm_attempts", "run_artifacts", "run_nodes", "policy_snapshots", "audit_events",
+        "evidence_edges", "report_claims", "report_sections", "review_tasks", "candidate_findings",
+        "report_table_snapshots", "document_table_history", "document_tables", "table_cell_reviews",
+        "risks", "cross_checks", "financial_tie_outs", "financial_metrics", "canonical_facts",
+        "fact_assertions", "facts", "gold_annotations", "project_entities", "runs", "citations",
+        "sources", "documents",
+    ]
     upload_root = (settings.resolved_data_dir / "uploads").resolve()
     with connect() as conn:
         for project_id in expired:
@@ -63,4 +72,9 @@ def cleanup_expired_projects() -> int:
                 shutil.rmtree(directory)
         rate_cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         conn.execute("DELETE FROM rate_events WHERE created_at<?", (rate_cutoff,))
+    if expired:
+        from .retrieval import delete_project_index
+
+        for project_id in expired:
+            delete_project_index(project_id)
     return len(expired)

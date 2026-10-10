@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build --configLoader runner",
     "typecheck": "tsc -b --pretty false",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "npm run build && node scripts/run-e2e.mjs",
     "record:demo": "node scripts/record-demo.mjs"
   },
   "dependencies": {

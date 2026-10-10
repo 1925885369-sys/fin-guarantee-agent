@@ -1,0 +1,457 @@
+version: "3.2.0"
+global_rules:
+  missing_data: 缺失信息必须明确写“材料不足”或“无法判断”，不得以零值或模型推断替代。
+  conflict: 募集说明书、评级报告、审计和合同存在冲突时必须并列展示全部来源，不得自动选值或据此形成确定结论。
+  evidence: 每个事实、数字、风险和条件必须引用允许来源中的 PDF 页码、Word 段落或 Excel 区域；只能使用确定性草稿和允许主张中已有的内容。
+  calculations: 不得由模型计算金额、比例、覆盖率、评级差异、偿债指标或现金流预测，只能引用系统确定性结果。
+  decisions: 不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议，也不得输出建议承保或建议不承保的倾向。
+  terminology: 统一使用发行人、债券、保证人、反担保、偿债来源、募集资金专户、兑付、受托管理人、持有人会议等债券担保术语；不得混用贷款业务术语。
+chapters:
+  scope:
+    llm: false
+    role: ""
+    goal: 由固定模板生成：明确审查对象与范围、核心材料齐备状态和报告使用边界。
+    required_inputs: [project, inventory]
+    required_sections: [审查范围, 材料状态, 使用边界]
+    preserve_blocks: []
+    rules: []
+    forbidden: []
+  bond_overview:
+    llm: false
+    role: 债券担保尽调执笔人
+    goal: 汇总募集说明书所载债券发行条款和拟议担保交易结构，作为后续章节的入口。
+    required_inputs: [project, bond_facts, sources]
+    required_sections: [发行条款, 增信结构, 审查边界]
+    preserve_blocks: [拟议保证声明, 募集说明书披露归属, 材料不足声明]
+    rules:
+      - 债券发行条款（规模、期限、票面利率、付息频率、还本方式）只能引用募集说明书披露值，并注明“据募集说明书披露”。
+      - 保证人、保证范围须标注“拟议”，强调须以签署版保证合同核验，不得表述为保证责任已生效。
+    forbidden:
+      - 不得把募集说明书的拟议安排描述为已确认事实。
+      - 不得输出承保或担保定价结论。
+    input_contract:
+      fact_keys: [bond_name, bond_issue_amount, registered_issue_amount, bond_term_years, coupon_rate, interest_frequency, principal_repayment, guarantor_name, guarantee_scope, guarantee_period, guarantee_cap]
+      metric_keys: []
+      rule_keys: [bond_term_consistency, rating_consistency, guarantee_scope]
+      source_kinds: [募集说明书, 信用评级报告, 担保合同]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [据募集说明书披露, 拟议]
+      required_missing_markers: [材料不足]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: prospectus
+  governance:
+    llm: true
+    generation_mode: generate
+    role: 发行主体审查员
+    goal: 梳理发行人主体、股权、实际控制人和治理材料所载信息，识别待核验的治理与关联方事项。
+    required_inputs: [facts, sources, cross_checks]
+    required_sections: [主体及控制关系, 治理核验边界]
+    preserve_blocks: [材料不足声明, 待核验声明, 事实冲突]
+    rules:
+      - 股权、实控人和治理信息只能描述募集说明书所载内容，不得表述为已经工商或征信外部核验。
+      - 关联方往来只引用规则结果，区分有合同支持、无合同支持和材料不足。
+    forbidden:
+      - 不得推断股权比例、实控人关系或公司治理有效性。
+    # governance 从确定性模板改为模型直接撰写（修订稿 §2：默认目标 500–1500 字符）。
+    # 不写 paragraph_order：修订稿要求"移除系统另行强制的正文顺序"，结构交给
+    # required_sections 与项目 Prompt。
+    narrative_contract:
+      tone: professional_due_diligence
+      min_paragraphs: 3
+      max_paragraphs: 5
+      preferred_min_chars: 500
+      preferred_max_chars: 1500
+      list_mode: limited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+    input_contract:
+      fact_keys: [controller, controller_share, related_parties, related_unsupported_amount]
+      metric_keys: []
+      rule_keys: [related_party]
+      source_kinds: [募集说明书, 企业信息, 治理材料, 关联方]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [据募集说明书披露]
+      required_missing_markers: [材料不足, 待核验]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: prospectus
+  operations:
+    llm: false
+    role: 经营分析员
+    goal: 基于募集说明书和访谈材料分析主营业务、上下游集中度与经营持续性。
+    required_inputs: [facts, sources, cross_checks]
+    required_sections: [经营与集中度事实, 审查边界]
+    preserve_blocks: [集中度核验状态, 材料不足声明]
+    rules:
+      - 客户和供应商集中度只能引用确定性指标与规则结果。
+      - 经营持续性、在手订单和产能只能依据材料中明确出现的事实；缺失时生成待核验任务而非补写结论。
+    forbidden:
+      - 不得虚构订单、产能、市场份额或客户稳定性。
+    input_contract:
+      fact_keys: [main_business, top_customer_share, top5_customer_share, top_supplier_share, top5_supplier_share, order_backlog, capacity_utilization]
+      metric_keys: []
+      rule_keys: [customer_concentration, supplier_concentration, revenue_cash_quality]
+      source_kinds: [募集说明书, 合同订单, 访谈纪要]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [据募集说明书披露]
+      required_missing_markers: [材料不足, 待核验]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: prospectus
+  proceeds:
+    llm: false
+    role: 募集资金用途核验员
+    goal: 核验募集资金金额、用途和专户安排的合规性及闭环证据。
+    required_inputs: [facts, checks, sources]
+    required_sections: [募集资金用途, 专户及核验边界]
+    preserve_blocks: [用途核验状态, 专户声明, 材料不足声明]
+    rules:
+      - 募集资金金额与用途只能引用披露值；专户信息未提供时写“材料不足，待补充专户协议”。
+      - 用途与偿债安排须区分“募集资金专户”与“偿债账户”，不得混用。
+    forbidden:
+      - 不得推断募集资金实际流向或虚构用途闭环。
+    input_contract:
+      fact_keys: [proceeds_amount, proceeds_purpose, repayment_account, supporting_contract_amount]
+      metric_keys: []
+      rule_keys: [proceeds_coverage]
+      source_kinds: [募集说明书, 募集资金用途, 银行流水, 合同订单]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [募集说明书披露]
+      required_missing_markers: [材料不足, 材料未披露]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: prospectus
+  financial:
+    llm: true
+    generation_mode: generate
+    role: 财务分析员
+    goal: 基于项目冻结主体档案、募集说明书和评级报告的三个完整年度事实，归纳财务结构、盈利质量和应收质量。
+    required_inputs: [facts, metrics, cross_checks]
+    required_sections: [财务概览, 财务结构与核验, 审查边界]
+    preserve_blocks: [材料不足声明, 勾稽状态, 规则状态]
+    rules:
+      - 所有金额、比率、增速和周转指标只能引用确定性事实或指标。
+      - 只使用上下文列明的三个完整年度及统一报表口径；不得混用季度、半年度、合并和母公司口径。
+      - 主体档案、募集说明书、评级报告和系统计算必须分别归属，不得把评级观点写成事实。
+      - 未取得审计报告原件时，明确标注“披露信息待核验”，不得表述为审计确认。
+      - 本章的数据表由系统生成并原样附在正文中；正文只写分析，按“重要变化—对偿债来源的影响范围—具体核验动作”组织。
+      - 正文不得逐行复述表内数字；需要指代变化时引用已给出的指标或事实，不另行罗列科目金额。
+    forbidden:
+      - 不得自创财务科目、公式或盈利趋势结论。
+      - 不得改动、重排或重算系统数据表中的任何数值、年度与表注。
+      - 不得为变化编造原因；缺乏底稿支持的原因只能写成待核验事项。
+      - 不得把冻结主体档案的事实汇总表述为已完成的独立核验。
+      - 不得自行输出表格；表格一律由系统生成。
+    input_contract:
+      fact_keys: [revenue, cost_of_goods_sold, net_profit, operating_cash_flow, cash_received_from_sales, accounts_receivable, other_receivables, total_overdue_receivables, inventory, cash, restricted_cash, total_assets, total_liabilities, equity, current_assets, current_liabilities, finance_expense, interest_expense]
+      metric_keys: [revenue_growth, net_margin, cash_profit_ratio, debt_ratio, current_ratio, available_cash, cash_short_debt_ratio, interest_bearing_debt_capitalization, receivables_revenue_ratio, operating_cashflow_debt_ratio]
+      rule_keys: [financial_tie_out, leverage_liquidity, receivable_quality, revenue_cash_quality, interest_coverage]
+      source_kinds: [募集说明书, 审计报告, 财务报表, 信用评级报告]
+      max_evidence_items: 16
+      max_evidence_chars: 22000
+    output_contract:
+      required_phrases: [披露信息待核验]
+      required_missing_markers: [材料不足, 披露信息待核验]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      max_citations: 3
+      attribution_mode: multi_source_financial
+    narrative_contract:
+      tone: professional_due_diligence
+      paragraph_order: [财务概览, 三年趋势与结构, 对偿债来源的影响, 审查边界与待核验事项]
+      min_paragraphs: 3
+      max_paragraphs: 5
+      preferred_min_chars: 550
+      preferred_max_chars: 1800
+      list_mode: limited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+  cashflow:
+    llm: true
+    generation_mode: generate
+    role: 偿债来源分析员
+    goal: 分析经营现金流、第一偿债来源和偿债现金流预测的可靠性。
+    required_inputs: [facts, metrics, sources]
+    required_sections: [第一偿债来源, 历史现金流与预测, 兑付安排与审查边界]
+    preserve_blocks: [预测归因声明, 勾稽声明, 材料不足声明]
+    rules:
+      - 第一偿债来源优先引用材料明确的偿债安排；经营现金流只能作为支撑分析，不能代替偿债安排。
+      - 历史现金流只使用三个完整年度；模型不得自行计算现金转化或偿债覆盖指标。
+      - 偿债现金流预测值只引用确定性值，并注明“预测值须与银行流水、订单回款和偿债专户逐期勾稽”。
+    forbidden:
+      - 不得把经营性现金流预测直接等同于可偿付现金。
+    input_contract:
+      fact_keys: [cash_received_from_sales, operating_cash_flow, investing_cash_flow, financing_cash_flow, operating_cashflow_forecast, repayment_source, repayment_account, proceeds_amount]
+      metric_keys: [cash_profit_ratio, operating_cashflow_debt_ratio, dscr]
+      rule_keys: [cashflow_debt_service, bullet_maturity, revenue_cash_quality]
+      source_kinds: [募集说明书, 信用评级报告, 审计报告, 财务报表, 银行流水, 偿债安排]
+      max_evidence_items: 14
+      max_evidence_chars: 20000
+    output_contract:
+      required_phrases: [募集说明书披露]
+      required_missing_markers: [材料不足, 待核验]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议, 可偿付现金]
+      max_citations: 3
+      attribution_mode: repayment
+    narrative_contract:
+      tone: professional_due_diligence
+      paragraph_order: [第一偿债来源, 历史现金流与预测, 对本期债券兑付的影响, 逐期勾稽边界]
+      min_paragraphs: 3
+      max_paragraphs: 5
+      preferred_min_chars: 480
+      preferred_max_chars: 1600
+      list_mode: limited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+  debt:
+    llm: true
+    generation_mode: generate
+    role: 债务结构分析员
+    goal: 分析发行人债务结构、到期集中度和本期债券偿付压力。
+    required_inputs: [facts, checks, metrics]
+    required_sections: [债务概览, 本期债券兑付影响, 审查边界]
+    preserve_blocks: [到期集中度核验状态, 材料不足声明]
+    rules:
+      - 有息债务、到期债务和利息支出只能引用确定性值。
+      - 三年债务结构必须按同一报表口径展示；禁止用募集说明书总规模替代发行人存量债务。
+      - 本期债券一次还本的偿付计划须单独说明，且只引用材料中出现的安排。
+    forbidden:
+      - 不得推断续融资可行性或授信获批概率。
+    input_contract:
+      fact_keys: [short_term_debt, debt_due_12m, long_term_debt, bonds_payable, interest_bearing_debt, interest_expense, bond_issue_amount, principal_repayment]
+      metric_keys: [dscr, debt_ratio, current_ratio, available_cash, cash_short_debt_ratio, interest_bearing_debt_capitalization, operating_cashflow_debt_ratio]
+      rule_keys: [debt_maturity, bullet_maturity, leverage_liquidity]
+      source_kinds: [募集说明书, 信用评级报告, 审计报告, 财务报表, 债务明细, 偿债安排]
+      max_evidence_items: 14
+      max_evidence_chars: 20000
+    output_contract:
+      required_phrases: [募集说明书披露]
+      required_missing_markers: [材料不足, 待核验]
+      forbidden_patterns: [建议承保, 建议拒绝, 授信获批]
+      max_citations: 3
+      attribution_mode: prospectus
+    narrative_contract:
+      tone: professional_due_diligence
+      paragraph_order: [债务概览, 到期压力, 对本期债券兑付的影响, 台账与材料边界]
+      min_paragraphs: 3
+      max_paragraphs: 5
+      preferred_min_chars: 480
+      preferred_max_chars: 1600
+      list_mode: limited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+  rating:
+    llm: true
+    generation_mode: generate
+    role: 评级报告复核员
+    goal: 复核主体评级、债项评级、展望和评级关注因素，但明确评级意见的边界。
+    required_inputs: [rating_facts, sources]
+    required_sections: [评级结论, 评级关注因素, 使用边界]
+    preserve_blocks: [评级边界声明, 材料不足声明]
+    rules:
+      - 评级结果和关注因素只引用评级报告原文。
+      - 评级报告中的调整后财务数据必须标识为评级口径，不得覆盖主体档案或募集说明书数值。
+      - 必须保留“评级机构意见不等同于担保机构独立判断”的边界声明。
+    forbidden:
+      - 不得复述或强化评级下调理由作为担保判断依据。
+      - 不得输出债券评级或投资建议。
+    input_contract:
+      fact_keys: [issuer_rating, bond_rating, rating_outlook, rating_agency, rating_date, rating_downgrade_trigger, rating_revenue, rating_total_debt, rating_issue_amount]
+      metric_keys: []
+      rule_keys: [rating_consistency, financial_tie_out]
+      source_kinds: [信用评级报告]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [评级机构认为, 不等同于担保机构独立判断]
+      required_missing_markers: [材料不足, 材料未披露]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议, 担保机构认为]
+      max_citations: 2
+      attribution_mode: rating
+    narrative_contract:
+      tone: professional_due_diligence
+      paragraph_order: [评级结论, 评级关注因素, 评级口径与担保判断边界]
+      min_paragraphs: 3
+      max_paragraphs: 4
+      preferred_min_chars: 380
+      preferred_max_chars: 1300
+      list_mode: prohibited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+  investor_protection:
+    llm: false
+    role: 投资者保护条款审查员
+    goal: 核验资信维持、交叉违约、持有人会议等投资者保护机制及其救济安排。
+    required_inputs: [sources]
+    required_sections: [已披露条款, 审查边界]
+    preserve_blocks: [条款归属声明, 材料不足声明]
+    rules:
+      - 投资者保护条款只能引用募集说明书或受托管理协议原文。
+      - 未提供的条款写“材料未披露”，不得推断具体表决门槛或救济安排。
+    forbidden:
+      - 不得虚构投资者保护条款或违约处置流程。
+    input_contract:
+      fact_keys: [investor_protection, cross_default_clause]
+      metric_keys: []
+      rule_keys: [investor_protection]
+      source_kinds: [募集说明书, 受托管理, 承销协议]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [募集说明书披露]
+      required_missing_markers: [材料不足, 材料未披露]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: prospectus
+  guarantee:
+    llm: true
+    generation_mode: generate
+    role: 保证责任审查员
+    goal: 核验拟议保证人、保证范围、保证期间和责任上限，并标注合同状态。
+    required_inputs: [guarantee_facts, sources]
+    required_sections: [拟议保证结构, 范围与期间, 合同状态与核验边界]
+    preserve_blocks: [拟议保证声明, 未生效声明, 材料不足声明]
+    rules:
+      - 保证要素只引用募集说明书披露值，并统一标注“拟议”。
+      - 仅当 guarantee_applicable=true 时撰写；明确无增信时本章由确定性模板输出“不适用”。
+      - 未取得签署版保证合同和授权文件时，必须保留“不得表述为保证责任已生效”的声明。
+    forbidden:
+      - 不得把拟议保证表述为已生效责任，不得推断保证人代偿能力。
+    input_contract:
+      fact_keys: [guarantor_name, guarantee_scope, guarantee_period, guarantee_cap, bond_issue_amount]
+      metric_keys: [guarantee_to_equity]
+      rule_keys: [guarantee_scope]
+      source_kinds: [募集说明书, 担保合同, 法律意见]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [拟议, 未取得签署版保证合同]
+      required_missing_markers: [材料不足, 未生效]
+      forbidden_patterns: [建议承保, 建议拒绝, 保证责任已经生效]
+      max_citations: 2
+      attribution_mode: guarantee
+    narrative_contract:
+      tone: professional_due_diligence
+      paragraph_order: [拟议保证结构, 保证范围与期间, 合同状态及核验边界]
+      min_paragraphs: 3
+      max_paragraphs: 4
+      preferred_min_chars: 380
+      preferred_max_chars: 1300
+      list_mode: prohibited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+  counter_guarantee:
+    llm: true
+    generation_mode: generate
+    role: 反担保权利审查员
+    goal: 评估反担保措施的覆盖程度、权利状态和可执行性，标注待验证事项。
+    required_inputs: [counter_guarantee_facts, sources]
+    required_sections: [反担保事实, 权利状态与覆盖口径, 可执行性边界]
+    preserve_blocks: [权利状态声明, 未登记声明, 材料不足声明]
+    rules:
+      - 反担保价值、顺位和权利状态只能引用披露值。
+      - 仅当 guarantee_applicable=true 时撰写；明确无增信时本章由确定性模板输出“不适用”。
+      - 未取得合同、权证、估值和登记文件时，写“无法判断可执行性或变现能力”，不得表述为已具备可执行覆盖。
+    forbidden:
+      - 不得自行设定折扣率或虚构反担保措施。
+    input_contract:
+      fact_keys: [counter_guarantee_value, counter_guarantee_priority, counter_guarantee_rights, collateral_rights_issue]
+      metric_keys: [collateral_coverage]
+      rule_keys: [counter_guarantee]
+      source_kinds: [募集说明书, 反担保, 抵押物, 担保合同]
+      max_evidence_items: 14
+      max_evidence_chars: 20000
+    output_contract:
+      required_phrases: [募集说明书披露]
+      required_missing_markers: [材料不足, 无法判断可执行性]
+      forbidden_patterns: [建议承保, 建议拒绝]
+      max_citations: 2
+      attribution_mode: counter_guarantee
+    narrative_contract:
+      tone: professional_due_diligence
+      paragraph_order: [反担保事实, 权利状态与覆盖口径, 可执行性边界及待核验事项]
+      min_paragraphs: 3
+      max_paragraphs: 4
+      preferred_min_chars: 380
+      preferred_max_chars: 1300
+      list_mode: prohibited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
+  legal:
+    llm: false
+    role: 法律合规审查员
+    goal: 核验重大诉讼、关联交易、法律意见和或有负债，标注证据缺口。
+    required_inputs: [sources]
+    required_sections: [现有披露, 审查边界]
+    preserve_blocks: [法律意见状态, 材料不足声明]
+    rules:
+      - 诉讼、行政处罚和或有负债如无独立证明，一律标记“材料不足”。
+      - 关联方异常往来只引用规则结果并说明所需补充证据。
+    forbidden:
+      - 不得推断未披露诉讼的存在或结果。
+    input_contract:
+      fact_keys: [legal_opinion_status, related_unsupported_amount, contingent_liabilities, overdue_debt]
+      metric_keys: [contingent_ratio]
+      rule_keys: [legal_issuance, related_party]
+      source_kinds: [募集说明书, 法律意见, 关联方, 发行决议]
+      max_evidence_items: 12
+      max_evidence_chars: 18000
+    output_contract:
+      required_phrases: [材料不足]
+      required_missing_markers: [材料不足, 待核验]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: legal
+  risk_matrix:
+    llm: false
+    role: ""
+    goal: 由确定性模板生成：按严重度汇总已进入正式清单的风险及其核验动作，形成债券风险矩阵。
+    required_inputs: [risks, candidates]
+    required_sections: [风险呈示说明, 已识别风险]
+    preserve_blocks: []
+    rules: []
+    forbidden: []
+  tasks:
+    llm: false
+    role: ""
+    goal: 由确定性模板生成：按材料缺口、事实冲突、规则核验和已确认风险归集待核验事项与行动包。
+    required_inputs: [review_tasks]
+    required_sections: [行动包说明, 开放事项]
+    preserve_blocks: []
+    rules: []
+    forbidden: []
+  monitoring:
+    llm: false
+    role: 保后跟踪专员
+    goal: 明确保后持续跟踪的范围，以及重大事项触发后的材料更新、事实复核与受影响章节重生成边界。
+    required_inputs: [risks, bond_facts, sources]
+    required_sections: [跟踪范围, 触发后的处理边界]
+    preserve_blocks: [跟踪范围声明, 材料不足声明]
+    rules:
+      - 跟踪指标（专户余额、债务到期、评级展望、核心客户、关联往来、担保责任、反担保登记）只列材料中已识别的项目。
+      - 触发重大事项的处置按受托管理协议和保证合同约定执行，不给出具体处置决定。
+    forbidden:
+      - 不得虚构监控指标或给出投资决策建议。
+    input_contract:
+      fact_keys: [debt_due_12m, rating_outlook, repayment_account, guarantee_scope, counter_guarantee_rights]
+      metric_keys: [debt_ratio, collateral_coverage]
+      rule_keys: [debt_maturity, counter_guarantee, rating_consistency]
+      source_kinds: [募集说明书, 信用评级报告, 偿债安排, 担保合同, 反担保]
+      max_evidence_items: 14
+      max_evidence_chars: 20000
+    output_contract:
+      required_phrases: [待核验]
+      required_missing_markers: [材料不足, 材料未披露]
+      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      attribution_mode: monitoring
+  evidence:
+    llm: false
+    role: ""
+    goal: 由确定性模板生成：汇总材料清单、证据定位索引与材料缺口，支撑报告事实可追溯。
+    required_inputs: [inventory, sources]
+    required_sections: [证据使用说明, 材料缺口]
+    preserve_blocks: []
+    rules: []
+    forbidden: []

@@ -1,0 +1,761 @@
+{
+  "suite": "bond",
+  "mode": "agent",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v1",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v1",
+    "prompt_sha256": "af68f3a217f85e3a4bc911d29f795f949bc703570b36a4be963a1a74ef878eca",
+    "chapter_prompt_sha256": "fc26267c0adaa31f94597ea0991eddef00bca7e7269a6ed34bd4fe85b7450a8e",
+    "field_registry_sha256": "06bffcd3dfd929c1b33d72fa268fc9c83b2bdd7ca98f35de8e37b422a62bf853",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 3.0,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 1.0,
+    "risk_recall": 1.0,
+    "risk_precision": 0.9333,
+    "risk_f1": 0.9655,
+    "candidate_recall": 1.0,
+    "candidate_precision": 0.0,
+    "candidate_f1": 0.0,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": 1.0,
+    "section_citation_coverage": 1.0,
+    "report_fact_support_rate": 1.0,
+    "conflict_recall": 1.0,
+    "latency_ms": 163995.0,
+    "model_cost_cny": 0.4485,
+    "unsupported_claims": 0.0,
+    "unsupported_numeric_claims": 0.0,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": 0.0,
+    "node_retries": 0.0,
+    "degraded_nodes": 0.0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.448522,
+    "error_counts": {},
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 0.9333,
+        "max": 0.9333,
+        "mean": 0.9333,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 0.9655,
+        "max": 0.9655,
+        "mean": 0.9655,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "candidate_f1": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "candidate_citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "report_fact_support_rate": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "conflict_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 163995.0,
+        "max": 163995.0,
+        "mean": 163995.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.4485,
+        "max": 0.4485,
+        "mean": 0.4485,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "unsupported_numeric_claims": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "invalid_citations": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "node_retries": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "degraded_nodes": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-rongyi": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 1,
+      "evaluation_key": "408b8c94d4da5982d683070054cfa15c2e5792b93b7d202bbc7bb9c00ab09490",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 45,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 132,
+      "risk_recall": 1.0,
+      "risk_precision": 0.9333,
+      "risk_f1": 0.9655,
+      "candidate_recall": 1.0,
+      "candidate_precision": 0.0,
+      "candidate_f1": 0.0,
+      "candidate_citation_precision": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": 1.0,
+      "report_fact_support_rate": 1.0,
+      "unsupported_claims": 0,
+      "unsupported_numeric_claims": 0,
+      "invalid_citations": 0,
+      "conflict_recall": 1.0,
+      "subject_scope_error_count": 0,
+      "model_attempts": 34,
+      "model_attempt_error_counts": {
+        "report_validation": 7
+      },
+      "last_model_error": "命中禁止表达：已具备可执行覆盖",
+      "model_attempt_summaries": [
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1019,
+          "output_tokens": 1091,
+          "cost": 0.010766,
+          "latency_ms": 6107,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 843,
+          "output_tokens": 210,
+          "cost": 0.003366,
+          "latency_ms": 2796,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1132,
+          "output_tokens": 1194,
+          "cost": 0.011816,
+          "latency_ms": 6448,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1047,
+          "output_tokens": 174,
+          "cost": 0.003486,
+          "latency_ms": 2389,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 990,
+          "output_tokens": 269,
+          "cost": 0.004132,
+          "latency_ms": 2970,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1069,
+          "output_tokens": 1726,
+          "cost": 0.015946000000000002,
+          "latency_ms": 8635,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1431,
+          "output_tokens": 4404,
+          "cost": 0.038094,
+          "latency_ms": 19762,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1119,
+          "output_tokens": 632,
+          "cost": 0.007294,
+          "latency_ms": 4029,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 990,
+          "output_tokens": 251,
+          "cost": 0.003988,
+          "latency_ms": 1954,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1065,
+          "output_tokens": 662,
+          "cost": 0.007426,
+          "latency_ms": 3998,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1001,
+          "output_tokens": 262,
+          "cost": 0.004098,
+          "latency_ms": 2224,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1036,
+          "output_tokens": 5,
+          "cost": 0.002112,
+          "latency_ms": 960,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1036,
+          "output_tokens": 5,
+          "cost": 0.002112,
+          "latency_ms": 1035,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 473,
+          "output_tokens": 5,
+          "cost": 0.0009860000000000001,
+          "latency_ms": 1253,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 948,
+          "output_tokens": 832,
+          "cost": 0.008551999999999999,
+          "latency_ms": 4826,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1123,
+          "output_tokens": 2425,
+          "cost": 0.021646000000000002,
+          "latency_ms": 11018,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 992,
+          "output_tokens": 659,
+          "cost": 0.007256,
+          "latency_ms": 4153,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1009,
+          "output_tokens": 684,
+          "cost": 0.00749,
+          "latency_ms": 4784,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1071,
+          "output_tokens": 881,
+          "cost": 0.00919,
+          "latency_ms": 5329,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 513,
+          "output_tokens": 251,
+          "cost": 0.003034,
+          "latency_ms": 2454,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "candidate",
+          "task_type": "candidate",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 6641,
+          "output_tokens": 1277,
+          "cost": 0.023497999999999998,
+          "latency_ms": 10003,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 11941,
+          "output_tokens": 701,
+          "cost": 0.029490000000000002,
+          "latency_ms": 5716,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 3940,
+          "output_tokens": 189,
+          "cost": 0.009392,
+          "latency_ms": 2074,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 5237,
+          "output_tokens": 277,
+          "cost": 0.01269,
+          "latency_ms": 2507,
+          "error_type": "report_validation",
+          "error_message": "冲突断言未并列说明；章节包含确定性草稿和证据之外的新数字"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 10239,
+          "output_tokens": 280,
+          "cost": 0.022718,
+          "latency_ms": 3226,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 11584,
+          "output_tokens": 491,
+          "cost": 0.027096000000000002,
+          "latency_ms": 4167,
+          "error_type": "report_validation",
+          "error_message": "命中禁止表达：审计确认"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 12728,
+          "output_tokens": 141,
+          "cost": 0.026584,
+          "latency_ms": 1875,
+          "error_type": "report_validation",
+          "error_message": "材料缺口未明确标记；冲突断言未并列说明"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 7809,
+          "output_tokens": 345,
+          "cost": 0.018378,
+          "latency_ms": 3257,
+          "error_type": "report_validation",
+          "error_message": "章节包含确定性草稿和证据之外的新数字"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 4736,
+          "output_tokens": 178,
+          "cost": 0.010896,
+          "latency_ms": 1805,
+          "error_type": "report_validation",
+          "error_message": "材料缺口未明确标记；冲突断言未并列说明"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 9933,
+          "output_tokens": 325,
+          "cost": 0.022466,
+          "latency_ms": 3302,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 7978,
+          "output_tokens": 276,
+          "cost": 0.018164,
+          "latency_ms": 2824,
+          "error_type": "report_validation",
+          "error_message": "材料缺口未明确标记；冲突断言未并列说明；章节包含确定性草稿和证据之外的新主体"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 5006,
+          "output_tokens": 407,
+          "cost": 0.013268,
+          "latency_ms": 2927,
+          "error_type": "report_validation",
+          "error_message": "命中禁止表达：已具备可执行覆盖"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 3982,
+          "output_tokens": 216,
+          "cost": 0.009692000000000001,
+          "latency_ms": 2201,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 12184,
+          "output_tokens": 879,
+          "cost": 0.0314,
+          "latency_ms": 7821,
+          "error_type": "",
+          "error_message": ""
+        }
+      ],
+      "node_retries": 0,
+      "degraded_nodes": 0,
+      "latency_ms": 163995,
+      "model_cost_cny": 0.448522,
+      "predicted_warning_keys": [
+        "bond_term_consistency",
+        "bullet_maturity",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "customer_concentration",
+        "debt_maturity",
+        "financial_tie_out",
+        "interest_coverage",
+        "leverage_liquidity",
+        "material_completeness",
+        "proceeds_coverage",
+        "receivable_quality",
+        "related_party",
+        "revenue_cash_quality",
+        "supplier_concentration"
+      ],
+      "missed_warning_keys": [],
+      "unexpected_warning_keys": [
+        "revenue_cash_quality"
+      ],
+      "missing_expected_facts": [],
+      "candidate_taxonomies": [
+        "governance"
+      ],
+      "candidate_findings": [
+        {
+          "taxonomy": "governance",
+          "title": "治理机制披露概括，缺乏具体审批权限和制衡细节",
+          "support_source_ids": [
+            "d52dd968-274f-4e6b-ab71-01458e17961d",
+            "09a18f4b-205b-4e4f-8e52-4cf7be8e5049"
+          ],
+          "counter_source_ids": []
+        }
+      ],
+      "conflicted_facts": [
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026"
+        },
+        {
+          "fact_key": "bond_name",
+          "period": ""
+        },
+        {
+          "fact_key": "bond_name",
+          "period": ""
+        },
+        {
+          "fact_key": "bond_rating",
+          "period": ""
+        },
+        {
+          "fact_key": "guarantor_name",
+          "period": ""
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025"
+        },
+        {
+          "fact_key": "investor_scope",
+          "period": ""
+        },
+        {
+          "fact_key": "investor_scope",
+          "period": "2026"
+        },
+        {
+          "fact_key": "main_business",
+          "period": ""
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025"
+        },
+        {
+          "fact_key": "principal_repayment",
+          "period": "2026"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023"
+        },
+        {
+          "fact_key": "trustee",
+          "period": ""
+        }
+      ],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

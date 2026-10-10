@@ -1,0 +1,24 @@
+profile: bond-v1
+version: 1.0.0
+name: 债券发行融资担保保前审查政策
+description: 面向虚构作品集案例的债券担保交易审查规则，不代表任何机构正式制度。
+rules:
+  - {key: material_completeness, title: 债券担保材料完整性, severity: high, thresholds: {minimum_core: 2}}
+  - {key: bond_term_consistency, title: 募集说明书与评级报告发行条款核验, severity: high, thresholds: {tolerance_pct: 0}}
+  - {key: rating_consistency, title: 主体与债项评级及增信逻辑核验, severity: high, thresholds: {allowed_gap: 1}}
+  - {key: proceeds_coverage, title: 募集资金用途与专户闭环核验, severity: high, thresholds: {minimum_pct: 100}}
+  - {key: financial_tie_out, title: 评级财务口径与审计数据勾稽, severity: high, thresholds: {tolerance_pct: 5}}
+  - {key: cashflow_debt_service, title: 经营现金流偿债能力, severity: high, thresholds: {minimum_dscr: 1.2}}
+  - {key: bullet_maturity, title: 到期一次性偿本集中压力, severity: high, thresholds: {minimum_coverage_pct: 100}}
+  - {key: debt_maturity, title: 一年内到期债务集中度, severity: high, thresholds: {due_12m_pct: 50}}
+  - {key: leverage_liquidity, title: 杠杆与流动性, severity: high, thresholds: {debt_ratio_pct: 70, current_ratio: 1.2}}
+  - {key: interest_coverage, title: 利息保障倍数, severity: high, thresholds: {minimum: 1.5}}
+  - {key: revenue_cash_quality, title: 收入与经营流入质量, severity: medium, thresholds: {min_pct: 80, max_pct: 120}}
+  - {key: receivable_quality, title: 应收账款与逾期质量, severity: medium, thresholds: {overdue_pct: 20}}
+  - {key: customer_concentration, title: 客户集中度, severity: medium, thresholds: {top1_pct: 30, top5_pct: 60}}
+  - {key: supplier_concentration, title: 供应商集中度, severity: medium, thresholds: {top1_pct: 30, top5_pct: 60}}
+  - {key: related_party, title: 关联方资金往来, severity: high, thresholds: {other_receivables_equity_pct: 20}}
+  - {key: guarantee_scope, title: 保证责任范围覆盖, severity: high, thresholds: {minimum_pct: 100}}
+  - {key: counter_guarantee, title: 反担保净覆盖与权利状态, severity: high, thresholds: {minimum_pct: 100, max_age_months: 12}}
+  - {key: investor_protection, title: 投资者保护与违约条款, severity: medium, thresholds: {required_count: 3}}
+  - {key: legal_issuance, title: 法律意见与发行决议, severity: high, thresholds: {required_count: 2}}

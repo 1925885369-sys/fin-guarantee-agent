@@ -1,0 +1,598 @@
+{
+  "suite": "bond",
+  "mode": "deterministic",
+  "model": "deepseek-v4-flash",
+  "model_configured": false,
+  "metadata": {
+    "evaluation_version": "bond-professional-v1",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v1",
+    "prompt_sha256": "21645d43f6e82152f38140bb7a028c4bfa3e738228f3c565fdb9030fa04897d7",
+    "chapter_prompt_sha256": "707f0cfcbfb759f48adfa62dace978e4159b08b250ab104465defcc27dd51bf6",
+    "field_registry_sha256": "1c8c84192a0b7d791a70e30a92f7be9f9dd736a77d712c3023aa0194cfffafda",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": null,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 0.9874,
+    "risk_recall": 0.9577,
+    "risk_precision": 1.0,
+    "risk_f1": 0.9779,
+    "candidate_recall": 1.0,
+    "candidate_precision": 0.6667,
+    "candidate_f1": 0.6667,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": 1.0,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": 1.0,
+    "latency_ms": 323.8333,
+    "model_cost_cny": 0.0,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": 0.0,
+    "invalid_citations": null,
+    "subject_scope_error_count": null,
+    "node_retries": null,
+    "degraded_nodes": null,
+    "runs": 6,
+    "completed": 6,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.0,
+    "error_counts": {},
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 6,
+        "min": 0.9245,
+        "max": 1.0,
+        "mean": 0.9874,
+        "stddev": 0.0281
+      },
+      "risk_recall": {
+        "count": 6,
+        "min": 0.8889,
+        "max": 1.0,
+        "mean": 0.9577,
+        "stddev": 0.0443
+      },
+      "risk_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 6,
+        "min": 0.9412,
+        "max": 1.0,
+        "mean": 0.9779,
+        "stddev": 0.0233
+      },
+      "candidate_recall": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 6,
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.6667,
+        "stddev": 0.4714
+      },
+      "candidate_f1": {
+        "count": 6,
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.6667,
+        "stddev": 0.4714
+      },
+      "candidate_citation_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 6,
+        "min": 290.0,
+        "max": 438.0,
+        "mean": 323.8333,
+        "stddev": 52.1581
+      },
+      "model_cost_cny": {
+        "count": 6,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 6,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "invalid_citations": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "subject_scope_error_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "node_retries": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "degraded_nodes": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-ancheng": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-conflict": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 0.9286,
+          "max": 0.9286,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-huachen": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 0.9245,
+          "max": 0.9245,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 0.8889,
+          "max": 0.8889,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-jinghe": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-qualitative": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-rongyi": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 0.9286,
+          "max": 0.9286,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 1,
+      "evaluation_key": "86bf42018d7066c5ad18b8ac69eb738c568a8e5a314c65b75b646901258b5962",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.9245,
+      "matched_fact_count": 49,
+      "expected_fact_count": 53,
+      "extracted_fact_count": 145,
+      "risk_recall": 0.8889,
+      "risk_precision": 1.0,
+      "risk_f1": 0.9412,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 0.0,
+      "candidate_f1": 0.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 438,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "bullet_maturity",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "customer_concentration",
+        "debt_maturity",
+        "receivable_quality",
+        "related_party",
+        "supplier_concentration"
+      ],
+      "missing_expected_facts": [
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "debt_due_12m",
+          "period": "2025",
+          "value": 20500,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "other_receivables",
+          "period": "2025",
+          "value": 1200,
+          "unit": "万元"
+        }
+      ],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 1,
+      "evaluation_key": "a085bfa3c1763d69357e9576317e10957cbaec19724a4a0b192c0c99b9d25a8d",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 42,
+      "expected_fact_count": 42,
+      "extracted_fact_count": 54,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 309,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [],
+      "missing_expected_facts": [],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 1,
+      "evaluation_key": "ff8675ee0057648e6ea55f5bd2e2832005882b0e2b2e39595f2c866bf4582df2",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 43,
+      "expected_fact_count": 43,
+      "extracted_fact_count": 54,
+      "risk_recall": 0.9286,
+      "risk_precision": 1.0,
+      "risk_f1": 0.963,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 0.0,
+      "candidate_f1": 0.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 290,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "bond_term_consistency",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "customer_concentration",
+        "debt_maturity",
+        "financial_tie_out",
+        "interest_coverage",
+        "leverage_liquidity",
+        "proceeds_coverage",
+        "receivable_quality",
+        "related_party",
+        "revenue_cash_quality",
+        "supplier_concentration"
+      ],
+      "missing_expected_facts": [],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 1,
+      "evaluation_key": "eb6b418af69d84514847c27c668c386c39af2a7b3999cba7fc929b71b8e1a306",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 42,
+      "expected_fact_count": 42,
+      "extracted_fact_count": 53,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 291,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "bullet_maturity",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "guarantee_scope",
+        "related_party"
+      ],
+      "missing_expected_facts": [],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 1,
+      "evaluation_key": "ba2d767c7355cec0d189ec4c922d5aec23f3c8bbd088405a58206c4f70817c70",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 44,
+      "expected_fact_count": 44,
+      "extracted_fact_count": 56,
+      "risk_recall": 0.9286,
+      "risk_precision": 1.0,
+      "risk_f1": 0.963,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 295,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "bond_term_consistency",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "customer_concentration",
+        "debt_maturity",
+        "financial_tie_out",
+        "interest_coverage",
+        "leverage_liquidity",
+        "proceeds_coverage",
+        "receivable_quality",
+        "related_party",
+        "revenue_cash_quality",
+        "supplier_concentration"
+      ],
+      "missing_expected_facts": [],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 1,
+      "evaluation_key": "820e2d87caa75b75feed3d2524faff76cce7e654b629c4120c258981c1e04dc0",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 42,
+      "expected_fact_count": 42,
+      "extracted_fact_count": 53,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 320,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "counter_guarantee"
+      ],
+      "missing_expected_facts": [],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

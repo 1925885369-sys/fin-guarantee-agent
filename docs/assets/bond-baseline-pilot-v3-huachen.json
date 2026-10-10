@@ -1,0 +1,598 @@
+{
+  "suite": "bond",
+  "mode": "baseline",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v3",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v3",
+    "prompt_sha256": "b26dd6f4d78e311f80872e2553f6e7fa847ceaeb6dcdb0c1d5a1adae528c1280",
+    "chapter_prompt_sha256": "1012f6cc9ba501f8baf86e11c673e264ad08e7ee23fefa522f07d3249657dcb8",
+    "field_registry_sha256": "06bffcd3dfd929c1b33d72fa268fc9c83b2bdd7ca98f35de8e37b422a62bf853",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 0.2,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 0.0,
+    "risk_recall": 0.0,
+    "risk_precision": 0.0,
+    "risk_f1": 0.0,
+    "candidate_recall": null,
+    "candidate_precision": null,
+    "candidate_f1": null,
+    "candidate_citation_precision": null,
+    "citation_precision": 1.0,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": null,
+    "latency_ms": 21655.0,
+    "model_cost_cny": 0.0502,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": null,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": null,
+    "node_retries": null,
+    "degraded_nodes": null,
+    "duplicate_candidate_count": null,
+    "chapter_fallback_rate": null,
+    "latency_anomaly_count": 0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.050248,
+    "error_counts": {},
+    "positive_case_candidate_recall": null,
+    "negative_case_false_positive_rate": null,
+    "candidate_micro_precision": null,
+    "candidate_micro_recall": null,
+    "candidate_micro_f1": null,
+    "candidate_true_positive_count": null,
+    "candidate_false_positive_count": null,
+    "candidate_false_negative_count": null,
+    "duplicate_candidate_total": null,
+    "chapter_fallback_count": 0,
+    "chapter_llm_section_count": 0,
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_f1": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_citation_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 21655.0,
+        "max": 21655.0,
+        "mean": 21655.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.0502,
+        "max": 0.0502,
+        "mean": 0.0502,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "invalid_citations": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "node_retries": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "degraded_nodes": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "duplicate_candidate_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "chapter_fallback_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_anomaly_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-huachen": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 1,
+      "evaluation_key": "09a46703891b5b45aacd1e26b3c30c02fc8deec322fc68723bd260fb57a52f79",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "baseline_source_char_count": 5088,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 10209,
+      "baseline_model_fact_count": null,
+      "baseline_empty_reason": "diagnostic_unavailable",
+      "model_input_tokens": 5124,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15319,
+      "model_response_keys": [
+        "confidence",
+        "fact_key",
+        "period",
+        "raw_value",
+        "source_ids",
+        "text_value",
+        "unit",
+        "value"
+      ],
+      "model_response_field_counts": {
+        "source_ids": 2
+      },
+      "model_response_value_types": {
+        "fact_key": "str",
+        "period": "NoneType",
+        "value": "NoneType",
+        "unit": "NoneType",
+        "text_value": "str",
+        "raw_value": "str",
+        "source_ids": "list",
+        "confidence": "float"
+      },
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 39360.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 4680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 59040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41328.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 17712.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 23124.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 43680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 5590.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 65520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 45864.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 19656.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 25662.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 6500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 72000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 50400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 21600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 28200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.8,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21655,
+      "model_cost_cny": 0.050248,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

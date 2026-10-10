@@ -1,0 +1,472 @@
+{
+  "mode": "agent",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "professional-v2",
+    "temperature": 0.2,
+    "prompt_version": "professional-v2",
+    "prompt_sha256": "a48147912143905c83ddd1c716e258008c79380d7d178ebdb94dffb221e85158",
+    "field_registry_sha256": "42d3e773eab99f13f535561c94cda8b560b1e9341968e0ee0885f99e935f9340",
+    "policy_profile": "default-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844"
+  },
+  "budget_cny": 3.0,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 0.6667,
+    "risk_recall": 1.0,
+    "risk_precision": 1.0,
+    "risk_f1": 1.0,
+    "candidate_recall": 1.0,
+    "candidate_precision": 0.5,
+    "candidate_f1": 0.6667,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": null,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": 1.0,
+    "latency_ms": 45047.0,
+    "model_cost_cny": 0.0612,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": null,
+    "invalid_citations": null,
+    "subject_scope_error_count": 0.0,
+    "node_retries": 0.0,
+    "degraded_nodes": 0.0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.061152,
+    "error_counts": {},
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 0.6667,
+        "max": 0.6667,
+        "mean": 0.6667,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 1,
+        "min": 0.5,
+        "max": 0.5,
+        "mean": 0.5,
+        "stddev": 0.0
+      },
+      "candidate_f1": {
+        "count": 1,
+        "min": 0.6667,
+        "max": 0.6667,
+        "mean": 0.6667,
+        "stddev": 0.0
+      },
+      "candidate_citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 45047.0,
+        "max": 45047.0,
+        "mean": 45047.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.0612,
+        "max": 0.0612,
+        "mean": 0.0612,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "invalid_citations": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "subject_scope_error_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "node_retries": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "degraded_nodes": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      }
+    },
+    "per_case_stability": {
+      "demo-jinghe": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 0.6667,
+          "max": 0.6667,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-jinghe",
+      "iteration": 1,
+      "evaluation_key": "6ad78a61f30bdad934b4cdb5eb5d3c1e142ae3210aacf5e96170addf272ac4ce",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v2",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 0.6667,
+      "matched_fact_count": 12,
+      "expected_fact_count": 18,
+      "extracted_fact_count": 28,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "candidate_recall": 1.0,
+      "candidate_precision": 0.5,
+      "candidate_f1": 0.6667,
+      "candidate_citation_precision": 1.0,
+      "citation_precision": null,
+      "section_citation_coverage": null,
+      "report_fact_support_rate": null,
+      "unsupported_claims": null,
+      "unsupported_numeric_claims": null,
+      "invalid_citations": null,
+      "conflict_recall": 1.0,
+      "subject_scope_error_count": 0,
+      "model_attempts": 14,
+      "model_attempt_error_counts": {
+        "report_validation": 1
+      },
+      "last_model_error": "章节润色包含非法引用、新数字或审批结论，已回退模板",
+      "model_attempt_summaries": [
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 717,
+          "output_tokens": 5,
+          "cost": 0.001474,
+          "latency_ms": 1505,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 571,
+          "output_tokens": 248,
+          "cost": 0.0031260000000000003,
+          "latency_ms": 1689,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 729,
+          "output_tokens": 850,
+          "cost": 0.008258,
+          "latency_ms": 4298,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 662,
+          "output_tokens": 350,
+          "cost": 0.004124,
+          "latency_ms": 2775,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "candidate",
+          "task_type": "candidate",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 813,
+          "output_tokens": 559,
+          "cost": 0.006098,
+          "latency_ms": 5078,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 325,
+          "output_tokens": 161,
+          "cost": 0.001938,
+          "latency_ms": 2510,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 432,
+          "output_tokens": 227,
+          "cost": 0.00268,
+          "latency_ms": 1894,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 325,
+          "output_tokens": 198,
+          "cost": 0.002234,
+          "latency_ms": 1941,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 651,
+          "output_tokens": 545,
+          "cost": 0.005662,
+          "latency_ms": 3363,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 350,
+          "output_tokens": 176,
+          "cost": 0.002108,
+          "latency_ms": 1722,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 716,
+          "output_tokens": 489,
+          "cost": 0.005344,
+          "latency_ms": 3429,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 644,
+          "output_tokens": 488,
+          "cost": 0.0051920000000000004,
+          "latency_ms": 3771,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 496,
+          "output_tokens": 328,
+          "cost": 0.0036160000000000003,
+          "latency_ms": 2449,
+          "error_type": "report_validation",
+          "error_message": "章节润色包含非法引用、新数字或审批结论，已回退模板"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1193,
+          "output_tokens": 864,
+          "cost": 0.009298,
+          "latency_ms": 4712,
+          "error_type": "",
+          "error_message": ""
+        }
+      ],
+      "node_retries": 0,
+      "degraded_nodes": 0,
+      "latency_ms": 45047,
+      "model_cost_cny": 0.061152,
+      "predicted_warning_keys": [
+        "material_completeness"
+      ],
+      "missed_warning_keys": [],
+      "unexpected_warning_keys": [],
+      "missing_expected_facts": [
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 2100,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 900,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "debt_due_12m",
+          "period": "2026",
+          "value": 140,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "tax_revenue",
+          "period": "2025",
+          "value": 2750,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_inflow",
+          "period": "2025",
+          "value": 2850,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "supporting_contract_amount",
+          "period": "2026",
+          "value": 450,
+          "unit": "万元"
+        }
+      ],
+      "candidate_taxonomies": [
+        "governance",
+        "key_person"
+      ],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

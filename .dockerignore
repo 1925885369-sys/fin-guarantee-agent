@@ -1,0 +1,40 @@
+# 依赖与构建产物（容器内可重建）
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# 运行时数据：默认不打进镜像，用卷挂载保留完整数据
+.data/
+*.db
+
+# 敏感配置：用环境变量注入，不打进镜像
+.env
+
+# 其他可重建/临时内容
+.llm-smoke/
+.git/
+.data-*/
+.models/
+.env.*
+.release/
+.aws/
+.ssh/
+.claude/
+.codex/
+.workbuddy/
+*.sqlite*
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+*.tar.gz
+*.pdf
+*.docx
+*.xlsx
+尽调报告word/

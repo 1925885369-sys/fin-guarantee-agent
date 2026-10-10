@@ -1,0 +1,143 @@
+研担债券担保尽调 Agent - 本地启动指南
+=======================================
+
+项目目录：
+C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+
+
+一、首次启动
+------------
+
+1. 打开 PowerShell，进入项目目录：
+
+cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+
+2. 安装 Python 依赖：
+
+python -m pip install -r requirements.txt
+
+3. 安装前端依赖并构建前端：
+
+cd frontend
+npm.cmd install
+npm.cmd run build
+cd ..
+
+
+二、配置模型 API
+----------------
+
+如果需要新建项目、上传自己的募集说明书和评级报告并运行 Agent，
+请在启动服务前，在同一个 PowerShell 窗口中执行：
+
+$secureKey = Read-Host "请输入模型 API Key" -AsSecureString
+$env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
+$env:LLM_BASE_URL = "https://api.deepseek.com"
+$env:LLM_MODEL = "deepseek-v4-flash"
+
+检查 API Key 是否已配置：
+
+python -c "import os; print('Key configured:', bool(os.getenv('LLM_API_KEY')))"
+
+输出 Key configured: True 表示配置已生效。
+
+注意：
+1. API 配置只在当前 PowerShell 窗口中有效。
+2. 关闭窗口后，下次启动需要重新配置。
+3. 不要把真实 API Key 写入项目文件或提交到 Git。
+4. LLM_MODEL 必须填写模型服务商实际支持的模型名称。
+
+
+三、启动系统
+------------
+
+确认当前目录为项目根目录，然后执行：
+
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+
+看到以下内容表示启动成功：
+
+Uvicorn running on http://127.0.0.1:8000
+
+浏览器访问：
+
+http://127.0.0.1:8000
+
+API 健康检查：
+
+http://127.0.0.1:8000/api/health
+
+
+四、以后再次启动
+----------------
+
+1. 打开 PowerShell，进入项目目录：
+
+cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+
+2. 如果要运行自己上传的材料，先按照“二、配置模型 API”设置 API。
+
+3. 启动系统：
+
+.\run.ps1
+
+4. 浏览器访问：
+
+http://127.0.0.1:8000
+
+
+五、修改前端后的启动方式
+------------------------
+
+如果修改了 frontend\src\App.tsx 或 frontend\src\styles.css，必须重新构建：
+
+cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent\frontend
+npm.cmd run build
+cd ..
+.\run.ps1
+
+
+六、只查看内置演示案例
+----------------------
+
+只查看内置虚构案例时可以不配置 API，直接执行：
+
+cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+.\run.ps1
+
+然后访问：
+
+http://127.0.0.1:8000
+
+
+七、停止系统
+------------
+
+在正在运行服务的 PowerShell 窗口中按：
+
+Ctrl+C
+
+不要直接关闭仍在执行 Agent 任务的终端窗口。
+
+
+八、常见问题
+------------
+
+1. 浏览器无法打开
+   检查 PowerShell 中是否仍显示 Uvicorn 正在运行。
+
+2. modelConfigured: false
+   API Key 没有配置到启动后端的同一个 PowerShell 窗口，或配置后没有重启服务。
+
+3. 页面仍是修改前的样式
+   重新执行 npm.cmd run build，然后重启后端。
+
+4. 端口被占用
+   在旧服务的 PowerShell 窗口按 Ctrl+C，再重新执行 .\run.ps1。
+
+5. API 返回 401 或 403
+   检查 API Key、模型权限和账户余额。
+
+6. API 返回 model_not_found 或 404
+   检查 LLM_BASE_URL 和 LLM_MODEL 是否与服务商实际配置一致。
+

@@ -13,6 +13,13 @@ $secureKey = Read-Host "请输入模型 API Key" -AsSecureString
 $env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
 $env:LLM_BASE_URL = "https://api.deepseek.com"
 $env:LLM_MODEL = "deepseek-v4-flash"
+$env:MAX_RUN_MODEL_COST_CNY = "2"
+$env:MAX_RUN_MODEL_CALLS = "40"
+$env:LLM_BATCH_MAX_CHARS = "24000"
+$env:LLM_EXTRACT_BATCH_MAX_SOURCES = "3"
+$env:LLM_MAX_OUTPUT_TOKENS = "5000"
+$env:LLM_REPORT_MAX_OUTPUT_TOKENS = "10000"
+$env:LLM_DISABLE_THINKING = "true"
 
 python -c "import os; print('Key configured:', bool(os.getenv('LLM_API_KEY')))"
 python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8001
@@ -28,6 +35,20 @@ http://127.0.0.1:8001/api/health
 ```
 
 健康接口应显示 `modelConfigured: true`，并返回预期模型名称。健康接口只检查配置是否存在；仍需运行一次自定义项目分析才能验证密钥权限、模型名称和结构化输出均可用。
+
+## 可选 OCR / 多模态接口
+
+文本型 PDF 继续使用本地解析，不会发送图片。只有低文本质量 PDF 且以下配置完整时，系统才逐页调用兼容多模态接口：
+
+```powershell
+$env:OCR_ENABLED = "true"
+$env:OCR_BASE_URL = "https://your-compatible-provider.example/v1"
+$env:OCR_MODEL = "your-vision-model"
+$env:OCR_API_KEY = $env:LLM_API_KEY
+$env:OCR_MAX_PAGES = "30"
+```
+
+OCR 服务可以与文本模型不同。未配置时扫描件会标记为“需要 OCR”，不会静默返回空事实；健康接口通过 `ocrConfigured` 和 `ocrModel` 显示实际状态。图片内容仍按不可信数据处理，提示词只允许转录，不执行文档中的指令。
 
 ## 使用项目启动脚本
 

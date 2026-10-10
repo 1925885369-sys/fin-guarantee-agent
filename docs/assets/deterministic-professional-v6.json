@@ -1,0 +1,557 @@
+{
+  "mode": "deterministic",
+  "model": "deepseek-v4-flash",
+  "model_configured": false,
+  "metadata": {
+    "evaluation_version": "professional-v6",
+    "temperature": 0.2,
+    "prompt_version": "professional-v6",
+    "prompt_sha256": "45b7261363e665ac23d8839c7351f85e648d77d05576332e428bae519b32d7dc",
+    "field_registry_sha256": "42d3e773eab99f13f535561c94cda8b560b1e9341968e0ee0885f99e935f9340",
+    "policy_profile": "default-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844"
+  },
+  "budget_cny": null,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 1.0,
+    "risk_recall": 1.0,
+    "risk_precision": 1.0,
+    "risk_f1": 1.0,
+    "candidate_recall": 1.0,
+    "candidate_precision": 1.0,
+    "candidate_f1": 1.0,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": 1.0,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": 1.0,
+    "latency_ms": 214.1667,
+    "model_cost_cny": 0.0,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": 0.0,
+    "invalid_citations": null,
+    "subject_scope_error_count": null,
+    "node_retries": null,
+    "degraded_nodes": null,
+    "runs": 6,
+    "completed": 6,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.0,
+    "error_counts": {},
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_f1": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_citation_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 6,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 6,
+        "min": 170.0,
+        "max": 257.0,
+        "mean": 214.1667,
+        "stddev": 33.0727
+      },
+      "model_cost_cny": {
+        "count": 6,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 6,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "invalid_citations": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "subject_scope_error_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "node_retries": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "degraded_nodes": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      }
+    },
+    "per_case_stability": {
+      "demo-ancheng": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-huachen": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-jinghe": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-qihang": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-rongyi": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-xingqiao": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-qihang",
+      "iteration": 1,
+      "evaluation_key": "812a44adf2f599c8894ea7dbff0ac724c751efa20214308356017daf77aed4f1",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v6",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 32,
+      "expected_fact_count": 32,
+      "extracted_fact_count": 45,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 242,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "ar_growth",
+        "cash_profit",
+        "customer_concentration",
+        "debt_maturity",
+        "dscr",
+        "leverage",
+        "revenue_bank"
+      ],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-xingqiao",
+      "iteration": 1,
+      "evaluation_key": "dbbdcd45620619d5c769292f1508f57bf89a5f83aad9707e7e8dc8301c1e4297",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v6",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 27,
+      "expected_fact_count": 27,
+      "extracted_fact_count": 38,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 223,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "cash_profit",
+        "customer_concentration",
+        "material_completeness",
+        "purpose_coverage",
+        "related_occupancy",
+        "revenue_tax"
+      ],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-ancheng",
+      "iteration": 1,
+      "evaluation_key": "2362e98d767de8fc60f1fdcff0cb76e524c1c1ebfa7f480cc26b6d0802f24c1f",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v6",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 35,
+      "expected_fact_count": 35,
+      "extracted_fact_count": 40,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 222,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-rongyi",
+      "iteration": 1,
+      "evaluation_key": "00f104c0404326110dd94697204fb4d786e9dce30e020ec5f431c41ce1343234",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v6",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 19,
+      "expected_fact_count": 19,
+      "extracted_fact_count": 21,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 170,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "cash_profit",
+        "collateral",
+        "customer_concentration",
+        "debt_maturity",
+        "dscr",
+        "fact_conflict",
+        "purpose_coverage",
+        "supplier_concentration"
+      ],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-jinghe",
+      "iteration": 1,
+      "evaluation_key": "d0e2632aeb5cea4d2bce2a67b8c68445047c04535f6f7baae59a00345e1933de",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v6",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 18,
+      "expected_fact_count": 18,
+      "extracted_fact_count": 21,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 171,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "material_completeness"
+      ],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-huachen",
+      "iteration": 1,
+      "evaluation_key": "26350e9a41fc5711cff2c478aff0e74439e6f8f9ddec8b274ed6a1f587e2b75e",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "professional-v6",
+      "policy_sha256": "e0fb9182eeaa0aec76774715c9460e082e3f03a6f1a44babe106564c91d16844",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 45,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 55,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": null,
+      "candidate_recall": 1.0,
+      "candidate_precision": 1.0,
+      "candidate_f1": 1.0,
+      "candidate_citation_precision": 1.0,
+      "unsupported_numeric_claims": 0,
+      "latency_ms": 257,
+      "model_cost_cny": 0.0,
+      "predicted_warning_keys": [
+        "ar_growth",
+        "cash_profit",
+        "collateral",
+        "customer_concentration",
+        "debt_maturity",
+        "dscr",
+        "leverage",
+        "overdue_receivables",
+        "purpose_coverage",
+        "related_occupancy"
+      ],
+      "conflict_recall": 1.0,
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

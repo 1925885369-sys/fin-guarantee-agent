@@ -1,0 +1,49 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    environment:
+      APP_DATA_DIR: /workspace/.data
+      PYTHONPATH: /workspace
+    volumes:
+      - .:/workspace
+      - ./.data:/workspace/.data
+      - ./.models:/workspace/.models:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  frontend:
+    image: node:24-alpine
+    working_dir: /workspace/frontend
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+    volumes:
+      - ./frontend:/workspace/frontend
+      - frontend_node_modules:/workspace/frontend/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - >-
+        if [ ! -x node_modules/.bin/vite ]; then npm ci; fi
+        && npm run dev -- --host 0.0.0.0
+
+volumes:
+  frontend_node_modules:

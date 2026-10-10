@@ -1,0 +1,428 @@
+{
+  "suite": "bond",
+  "mode": "baseline",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v3.2",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v3.2",
+    "prompt_sha256": "ae6901a0f09f170322e41f715e2e0b80d8ec63361f4d56250b1a5526c6412c70",
+    "chapter_prompt_sha256": "1012f6cc9ba501f8baf86e11c673e264ad08e7ee23fefa522f07d3249657dcb8",
+    "field_registry_sha256": "f4087538fa267f8147c03ddd0466525e22d4f83d12a63a460fbf19597bba9220",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 0.3,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 1.0,
+    "risk_recall": 0.9,
+    "risk_precision": 0.5,
+    "risk_f1": 0.6429,
+    "candidate_recall": null,
+    "candidate_precision": null,
+    "candidate_f1": null,
+    "candidate_citation_precision": null,
+    "citation_precision": 1.0,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": null,
+    "latency_ms": 13836.0,
+    "model_cost_cny": 0.0362,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": null,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": null,
+    "node_retries": null,
+    "degraded_nodes": null,
+    "duplicate_candidate_count": null,
+    "chapter_fallback_rate": null,
+    "latency_anomaly_count": 0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.03616,
+    "error_counts": {},
+    "positive_case_candidate_recall": null,
+    "negative_case_false_positive_rate": null,
+    "candidate_micro_precision": null,
+    "candidate_micro_recall": null,
+    "candidate_micro_f1": null,
+    "candidate_true_positive_count": null,
+    "candidate_false_positive_count": null,
+    "candidate_false_negative_count": null,
+    "duplicate_candidate_total": null,
+    "chapter_fallback_count": 0,
+    "chapter_llm_section_count": 0,
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 0.9,
+        "max": 0.9,
+        "mean": 0.9,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 0.5,
+        "max": 0.5,
+        "mean": 0.5,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 0.6429,
+        "max": 0.6429,
+        "mean": 0.6429,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_f1": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_citation_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 13836.0,
+        "max": 13836.0,
+        "mean": 13836.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.0362,
+        "max": 0.0362,
+        "mean": 0.0362,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "invalid_citations": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "node_retries": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "degraded_nodes": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "duplicate_candidate_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "chapter_fallback_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_anomaly_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-huachen": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 0.9,
+          "max": 0.9,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 1,
+      "evaluation_key": "e786c4462aa1638100df8b1c14557540e8a2b5a3e7d1fa09be652856fb1c7a0e",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 45,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 68,
+      "valid_fact_count": 68,
+      "raw_fact_count": 68,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "baseline_source_char_count": 5088,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 54,
+      "baseline_prompt_chars": 10767,
+      "baseline_model_fact_count": 68,
+      "baseline_status": "valid",
+      "baseline_fact_keys": [
+        "bond_name",
+        "registered_issue_amount",
+        "bond_issue_amount",
+        "bond_term_years",
+        "coupon_rate",
+        "interest_frequency",
+        "principal_repayment",
+        "bond_exchange",
+        "underwriter",
+        "trustee",
+        "investor_scope",
+        "issuer_rating",
+        "bond_rating",
+        "rating_outlook",
+        "rating_agency",
+        "rating_downgrade_trigger",
+        "rating_revenue",
+        "rating_total_debt",
+        "rating_issue_amount",
+        "proceeds_amount",
+        "proceeds_purpose",
+        "repayment_account",
+        "guarantor_name",
+        "guarantee_type",
+        "guarantee_scope",
+        "guarantee_cap",
+        "counter_guarantee_value",
+        "counter_guarantee_priority",
+        "counter_guarantee_rights",
+        "revenue",
+        "revenue",
+        "revenue",
+        "net_profit",
+        "net_profit",
+        "net_profit",
+        "operating_cash_flow",
+        "operating_cash_flow",
+        "operating_cash_flow",
+        "total_assets",
+        "total_assets",
+        "total_assets",
+        "total_liabilities",
+        "total_liabilities",
+        "total_liabilities",
+        "equity",
+        "equity",
+        "equity",
+        "current_assets",
+        "current_assets",
+        "current_assets",
+        "current_liabilities",
+        "current_liabilities",
+        "current_liabilities",
+        "interest_bearing_debt",
+        "interest_bearing_debt",
+        "interest_bearing_debt",
+        "interest_expense",
+        "interest_expense",
+        "interest_expense",
+        "accounts_receivable",
+        "accounts_receivable",
+        "accounts_receivable",
+        "total_overdue_receivables",
+        "total_overdue_receivables",
+        "total_overdue_receivables",
+        "inventory",
+        "inventory",
+        "inventory"
+      ],
+      "baseline_empty_reason": "",
+      "model_input_tokens": 5448,
+      "model_output_tokens": 3158,
+      "model_finish_reason": "stop",
+      "model_response_chars": 8400,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 68,
+        "warning_keys": 18,
+        "citation_ids": 16
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [],
+      "risk_recall": 0.9,
+      "risk_precision": 0.5,
+      "risk_f1": 0.6429,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 13836,
+      "model_cost_cny": 0.03616,
+      "predicted_warning_keys": [
+        "bond_term_consistency",
+        "bullet_maturity",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "customer_concentration",
+        "debt_maturity",
+        "financial_tie_out",
+        "guarantee_scope",
+        "interest_coverage",
+        "investor_protection",
+        "legal_issuance",
+        "leverage_liquidity",
+        "proceeds_coverage",
+        "rating_consistency",
+        "receivable_quality",
+        "related_party",
+        "revenue_cash_quality",
+        "supplier_concentration"
+      ],
+      "returned_warning_keys": [
+        "bond_term_consistency",
+        "bullet_maturity",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "customer_concentration",
+        "debt_maturity",
+        "financial_tie_out",
+        "guarantee_scope",
+        "interest_coverage",
+        "investor_protection",
+        "legal_issuance",
+        "leverage_liquidity",
+        "proceeds_coverage",
+        "rating_consistency",
+        "receivable_quality",
+        "related_party",
+        "revenue_cash_quality",
+        "supplier_concentration"
+      ],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

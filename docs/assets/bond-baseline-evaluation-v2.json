@@ -1,0 +1,5945 @@
+{
+  "suite": "bond",
+  "mode": "baseline",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v2",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v2",
+    "prompt_sha256": "b26dd6f4d78e311f80872e2553f6e7fa847ceaeb6dcdb0c1d5a1adae528c1280",
+    "chapter_prompt_sha256": "1012f6cc9ba501f8baf86e11c673e264ad08e7ee23fefa522f07d3249657dcb8",
+    "field_registry_sha256": "06bffcd3dfd929c1b33d72fa268fc9c83b2bdd7ca98f35de8e37b422a62bf853",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 2.2,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 0.0,
+    "risk_recall": 0.0,
+    "risk_precision": 0.0,
+    "risk_f1": 0.0,
+    "candidate_recall": null,
+    "candidate_precision": null,
+    "candidate_f1": null,
+    "candidate_citation_precision": null,
+    "citation_precision": 0.1111,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": null,
+    "latency_ms": 22127.2222,
+    "model_cost_cny": 0.0507,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": null,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": null,
+    "node_retries": null,
+    "degraded_nodes": null,
+    "duplicate_candidate_count": null,
+    "chapter_fallback_rate": null,
+    "latency_anomaly_count": 0,
+    "runs": 18,
+    "completed": 18,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.912738,
+    "error_counts": {},
+    "positive_case_candidate_recall": null,
+    "negative_case_false_positive_rate": null,
+    "candidate_micro_precision": null,
+    "candidate_micro_recall": null,
+    "candidate_micro_f1": null,
+    "candidate_true_positive_count": null,
+    "candidate_false_positive_count": null,
+    "candidate_false_negative_count": null,
+    "duplicate_candidate_total": null,
+    "chapter_fallback_count": 0,
+    "chapter_llm_section_count": 0,
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_f1": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_citation_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "citation_precision": {
+        "count": 18,
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.1111,
+        "stddev": 0.3143
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_ms": {
+        "count": 18,
+        "min": 21199.0,
+        "max": 23394.0,
+        "mean": 22127.2222,
+        "stddev": 531.8223
+      },
+      "model_cost_cny": {
+        "count": 18,
+        "min": 0.0503,
+        "max": 0.0512,
+        "mean": 0.0507,
+        "stddev": 0.0003
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "invalid_citations": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "node_retries": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "degraded_nodes": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "duplicate_candidate_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "chapter_fallback_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_anomaly_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-ancheng": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-conflict": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-huachen": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-jinghe": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-qualitative": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-rongyi": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 1,
+      "evaluation_key": "a96deae6c5d2813d7971af7c69930c5826e509fbc4b0191255fcab16467a3728",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 39360.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 4680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 59040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41328.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 17712.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 23124.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 43680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 5590.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 65520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 45864.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 19656.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 25662.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 6500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 72000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 50400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 21600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 28200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.8,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21933,
+      "model_cost_cny": 0.051186,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 1,
+      "evaluation_key": "248d315ddd453f3ea214b1ebf66c39b2a26c89a2bcc60333f96dff5d21321531",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 29520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 3744.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 53300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 28700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 14760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4510.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 3542.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 32760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 4472.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 59150.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 31850.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5005.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 3931.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 5200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 65000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 35000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 5500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 4320.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.2,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 12000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21690,
+      "model_cost_cny": 0.050644,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 1,
+      "evaluation_key": "f84b875544e1cb3ad4633c4f1925b0796d91326e6bec95139b192ea9d5034d8a",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 34440.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1230.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 45920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 32800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 18860.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 22960.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 2132.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4133.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 38220.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1365.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 1548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 50960.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 36400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 20930.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 25480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 2366.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 4586.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 56000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 40000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 23000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 28000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 2.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 5.3,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 39000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 32000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 18000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22064,
+      "model_cost_cny": 0.05077,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 1,
+      "evaluation_key": "d1d1648cb5176a2ac2382aa69b055a48d6ac08f3ba531b3ad5e9f02402534aa6",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 19680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1872.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 34440.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 13940.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 10660.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 2362.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 21840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 2236.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 38220.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 15470.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 11830.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 2621.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 17000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 13000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2880.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 10000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.9,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 10000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22983,
+      "model_cost_cny": 0.050634,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 1,
+      "evaluation_key": "ae57974887e62218b80e24d8544391fae6406c9ca19d98537fce585eb2dccc1e",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 41000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1804.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 720.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 57400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41820.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 15580.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 22140.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 29520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 45500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2002.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 860.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 63700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 46410.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 17290.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 24570.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 32760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 50000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 1000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 70000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 51000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 19000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 27000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 5.1,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 43000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 41000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 24000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 23394,
+      "model_cost_cny": 0.050742,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 1,
+      "evaluation_key": "f98da20628e2a7e2e6c9680cb9f576376a3a7fc85fd462b77569dea257595f40",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 14760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1728.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 11480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 6560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 7380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 2870.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 1771.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 2064.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 12740.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 7280.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 8190.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 3185.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 1966.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 2400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 14000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 9000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 3500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2160.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.7,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 9000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 8000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22600,
+      "model_cost_cny": 0.05027,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 2,
+      "evaluation_key": "95b5139eb07fd765c54bb0639f7d3753f5badafb3c6f75ede3cdd89c06e5f798",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 39360.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 4680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 59040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41328.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 17712.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 23124.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 43680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 5590.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 65520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 45864.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 19656.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 25662.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 6500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 72000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 50400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 21600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 28200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.8,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21727,
+      "model_cost_cny": 0.051186,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 2,
+      "evaluation_key": "97b81099d75ca9ca944947e494aa5d30fc2e23956f2ca51f35c5ef60d84f8407",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 29520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 3744.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 53300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 28700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 14760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4510.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 3542.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 32760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 4472.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 59150.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 31850.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5005.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 3931.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 5200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 65000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 35000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 5500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 4320.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.2,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 12000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22491,
+      "model_cost_cny": 0.050644,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 2,
+      "evaluation_key": "30b42f5cb7231f5e8b125c03bcb85b082afefee1afb33b7a42b49c234751bf28",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 34440.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1230.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 45920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 32800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 18860.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 22960.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 2132.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4133.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 38220.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1365.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 1548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 50960.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 36400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 20930.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 25480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 2366.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 4586.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 56000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 40000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 23000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 28000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 2.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 5.3,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 39000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 32000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 18000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22034,
+      "model_cost_cny": 0.05077,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 2,
+      "evaluation_key": "8cb231525ce6621932d979b11601c219d521142f6236a30e3ad3fff20febafd4",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 19680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1872.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 34440.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 13940.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 10660.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 2362.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 21840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 2236.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 38220.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 15470.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 11830.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 2621.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 17000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 13000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2880.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 10000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.9,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 10000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21260,
+      "model_cost_cny": 0.050634,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 2,
+      "evaluation_key": "fb2394496977f5cdd5a52a27566a8fcfed088b994e16ac16116b9675f475a8ff",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 41000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1804.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 720.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 57400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41820.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 15580.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 22140.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 29520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 45500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2002.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 860.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 63700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 46410.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 17290.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 24570.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 32760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 50000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 1000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 70000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 51000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 19000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 27000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 5.1,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 43000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 41000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 24000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21740,
+      "model_cost_cny": 0.050742,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 2,
+      "evaluation_key": "2aa4324765d28a4963f1fe0813fc9128be8bc7a8067a8d3162efd1b671f6b5b7",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 14760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1728.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 11480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 6560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 7380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 2870.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 1771.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 2064.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 12740.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 7280.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 8190.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 3185.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 1966.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 2400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 14000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 9000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 3500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2160.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.7,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 9000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 8000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21199,
+      "model_cost_cny": 0.05027,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 3,
+      "evaluation_key": "afb13e457f776b2fc403f526a5ffb77719f63fa78f439f40f5e507e07e2b4bab",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 39360.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 4680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 59040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41328.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 17712.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 23124.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 43680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 5590.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 65520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 45864.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 19656.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 25662.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 6500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 72000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 50400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 21600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 28200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.8,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22286,
+      "model_cost_cny": 0.051186,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 3,
+      "evaluation_key": "a449a8ed52ae4e912d1e2b41c4eb9104b26bb7f54c074e51a2b4d46566105ea4",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 29520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 3744.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 53300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 28700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 14760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4510.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 3542.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 32760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 4472.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 59150.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 31850.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5005.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 3931.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 5200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 65000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 35000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 5500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 4320.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.2,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 12000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22267,
+      "model_cost_cny": 0.050644,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 3,
+      "evaluation_key": "48626b38ab14c4a082bf4a864f91efe50972b6610c5957ef1dc66f7c32def2dd",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 34440.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1230.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 45920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 32800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 18860.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 22960.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 2132.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2296.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4133.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 38220.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1365.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 1548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 50960.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 36400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 20930.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 25480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 2366.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2548.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 4586.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 56000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 40000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 23000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 28000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5040.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 2.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 5.3,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 39000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 32000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 18000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22240,
+      "model_cost_cny": 0.05077,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 3,
+      "evaluation_key": "35e327ff6dd406a82b2381895afd68a6e77c07220d92ee5edea9949b13fb87ce",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 19680.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1872.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 34440.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 13940.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 10660.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 13120.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 2362.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 21840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 2236.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 38220.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 15470.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 11830.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 14560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 2621.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 17000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 13000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2880.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 10000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.9,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 10000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22421,
+      "model_cost_cny": 0.050634,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 3,
+      "evaluation_key": "2381aff688eb4cc51ed7ded53d044f10d7a88777a61c4d8b7ae6b794aee89014",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 41000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1804.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 720.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 57400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 41820.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 15580.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 22140.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 20500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 29520.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 45500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 2002.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 860.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 63700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 46410.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 17290.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 24570.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 22750.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 32760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 50000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 2200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 1000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 70000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 51000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 19000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 27000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 20000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 5.1,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 43000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 41000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 24000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21829,
+      "model_cost_cny": 0.050742,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 3,
+      "evaluation_key": "5be2ce089565b42febadb447848a597d0889fd394b5d31f8b3d6e10727a556c3",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v2",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.0,
+      "matched_fact_count": 0,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 0,
+      "valid_fact_count": 0,
+      "raw_fact_count": 0,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "empty_baseline_output": true,
+      "missing_expected_facts": [
+        {
+          "fact_key": "revenue",
+          "period": "2023",
+          "value": 14760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2023",
+          "value": 1728.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 11480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 6560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 7380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 2870.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 1771.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2024",
+          "value": 2064.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 12740.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 7280.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 8190.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 3185.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 1966.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "net_profit",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025",
+          "value": 2400.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 14000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 9000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 3500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2160.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_issue_amount",
+          "period": "2026",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "bond_term_years",
+          "period": "2026",
+          "value": 3.0,
+          "unit": "年"
+        },
+        {
+          "fact_key": "coupon_rate",
+          "period": "2026",
+          "value": 4.7,
+          "unit": "%"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 9000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_issue_amount",
+          "period": "2026",
+          "value": 8000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 0.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 22132,
+      "model_cost_cny": 0.05027,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

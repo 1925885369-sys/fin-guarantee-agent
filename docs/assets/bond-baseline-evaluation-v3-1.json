@@ -1,0 +1,3016 @@
+{
+  "suite": "bond",
+  "mode": "baseline",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v3.1",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v3.1",
+    "prompt_sha256": "ae6901a0f09f170322e41f715e2e0b80d8ec63361f4d56250b1a5526c6412c70",
+    "chapter_prompt_sha256": "1012f6cc9ba501f8baf86e11c673e264ad08e7ee23fefa522f07d3249657dcb8",
+    "field_registry_sha256": "06bffcd3dfd929c1b33d72fa268fc9c83b2bdd7ca98f35de8e37b422a62bf853",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 2.2,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 0.7062,
+    "risk_recall": 0.0,
+    "risk_precision": 0.0,
+    "risk_f1": 0.0,
+    "candidate_recall": null,
+    "candidate_precision": null,
+    "candidate_f1": null,
+    "candidate_citation_precision": null,
+    "citation_precision": 1.0,
+    "section_citation_coverage": null,
+    "report_fact_support_rate": null,
+    "conflict_recall": null,
+    "latency_ms": 19985.2778,
+    "model_cost_cny": 0.0488,
+    "unsupported_claims": null,
+    "unsupported_numeric_claims": null,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": null,
+    "node_retries": null,
+    "degraded_nodes": null,
+    "duplicate_candidate_count": null,
+    "chapter_fallback_rate": null,
+    "latency_anomaly_count": 0,
+    "runs": 18,
+    "completed": 18,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.877832,
+    "error_counts": {},
+    "positive_case_candidate_recall": null,
+    "negative_case_false_positive_rate": null,
+    "candidate_micro_precision": null,
+    "candidate_micro_recall": null,
+    "candidate_micro_f1": null,
+    "candidate_true_positive_count": null,
+    "candidate_false_positive_count": null,
+    "candidate_false_negative_count": null,
+    "duplicate_candidate_total": null,
+    "chapter_fallback_count": 0,
+    "chapter_llm_section_count": 0,
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 18,
+        "min": 0.3778,
+        "max": 1.0,
+        "mean": 0.7062,
+        "stddev": 0.1949
+      },
+      "risk_recall": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_f1": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "candidate_citation_precision": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "citation_precision": {
+        "count": 18,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "report_fact_support_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "conflict_recall": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_ms": {
+        "count": 18,
+        "min": 16985.0,
+        "max": 21278.0,
+        "mean": 19985.2778,
+        "stddev": 1213.9246
+      },
+      "model_cost_cny": {
+        "count": 18,
+        "min": 0.0423,
+        "max": 0.0503,
+        "mean": 0.0488,
+        "stddev": 0.0027
+      },
+      "unsupported_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "unsupported_numeric_claims": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "invalid_citations": {
+        "count": 18,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "node_retries": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "degraded_nodes": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "duplicate_candidate_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "chapter_fallback_rate": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      },
+      "latency_anomaly_count": {
+        "count": 0,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "stddev": null
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-ancheng": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.4,
+          "max": 0.7556,
+          "range": 0.3556
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-conflict": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.7778,
+          "max": 1.0,
+          "range": 0.2222
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-huachen": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.7111,
+          "max": 0.7111,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-jinghe": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.7111,
+          "max": 0.9556,
+          "range": 0.2445
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-qualitative": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.3778,
+          "max": 0.4,
+          "range": 0.0222
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      },
+      "demo-bond-rongyi": {
+        "field_extraction_accuracy": {
+          "runs": 3,
+          "min": 0.7111,
+          "max": 0.9556,
+          "range": 0.2445
+        },
+        "risk_recall": {
+          "runs": 3,
+          "min": 0.0,
+          "max": 0.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        },
+        "report_fact_support_rate": {
+          "runs": 0,
+          "min": null,
+          "max": null,
+          "range": null
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 1,
+      "evaluation_key": "7d781fd9b01189313d9d263879dcb097b3a45fa22a0abed08ac01057ffb80829",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7111,
+      "matched_fact_count": 32,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "baseline_source_char_count": 5088,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 10285,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 5175,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15022,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 80
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21278,
+      "model_cost_cny": 0.05035,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 1,
+      "evaluation_key": "e2e61c14cc34e35045cab1a12b49c41ad07ca87eb28718c1a0c8472877f06b1a",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.4,
+      "matched_fact_count": 18,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 59,
+      "valid_fact_count": 59,
+      "raw_fact_count": 59,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4722,
+      "baseline_source_kind_counts": {
+        "募集说明书": 9,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9828,
+      "baseline_model_fact_count": 59,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4904,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15200,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 59,
+        "warning_keys": 0,
+        "citation_ids": 59
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 53300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 28700.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4510.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 3542.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 59150.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 31850.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5005.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 3931.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 65000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 35000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 5500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 4320.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20565,
+      "model_cost_cny": 0.049808,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 1,
+      "evaluation_key": "0fc1b49ee95a609f44546cb58c8b4748696e03717cb5851ba13e96aecab89014",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7111,
+      "matched_fact_count": 32,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4807,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9900,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4967,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 14791,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 76
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 25480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 2366.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 4586.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 56000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 40000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 23000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 28000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5040.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20425,
+      "model_cost_cny": 0.049934,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 1,
+      "evaluation_key": "bb74eda535c69a5800459ea7475a1ce13bf077aee62eee5e53cec11e086a0037",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7111,
+      "matched_fact_count": 32,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4691,
+      "baseline_source_kind_counts": {
+        "募集说明书": 9,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9779,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4899,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 14876,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 80
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1312.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 2362.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 2621.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2880.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20227,
+      "model_cost_cny": 0.049798,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 1,
+      "evaluation_key": "147f091718a02a4bf6de8519d07fea65d0c06059562e1422014316d7dbbe21fc",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.9778,
+      "matched_fact_count": 44,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 59,
+      "valid_fact_count": 59,
+      "raw_fact_count": 59,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4808,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9932,
+      "baseline_model_fact_count": 59,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4953,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15759,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 59,
+        "warning_keys": 0,
+        "citation_ids": 80
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 21127,
+      "model_cost_cny": 0.049906,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 1,
+      "evaluation_key": "8dd1bb5f408e4a67656d9b2e30b05c9c994b2d204fe2d01c3b6dbb877f2783c9",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.4,
+      "matched_fact_count": 18,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 45,
+      "valid_fact_count": 45,
+      "raw_fact_count": 45,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4373,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 40,
+      "baseline_prompt_chars": 9526,
+      "baseline_model_fact_count": 45,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4722,
+      "model_output_tokens": 4173,
+      "model_finish_reason": "stop",
+      "model_response_chars": 13010,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 45,
+        "warning_keys": 0,
+        "citation_ids": 15
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 11480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 6560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 2870.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 1771.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 12740.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 7280.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 3185.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 1966.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 14000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 3500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2160.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 17681,
+      "model_cost_cny": 0.042828,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 2,
+      "evaluation_key": "0da970336c6e95547e7ff3dcc686740812eee38f874592824ed9b52b2b25d972",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7111,
+      "matched_fact_count": 32,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "baseline_source_char_count": 5088,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 10285,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 5175,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15090,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 80
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2023",
+          "value": 25420.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 28210.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 48000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_total_debt",
+          "period": "2025",
+          "value": 31000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20859,
+      "model_cost_cny": 0.05035,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 2,
+      "evaluation_key": "9f61376c4397c10bb1be62b68a728c7dca6af92edf165db4fba29898224a4ab5",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.6889,
+      "matched_fact_count": 31,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4722,
+      "baseline_source_kind_counts": {
+        "募集说明书": 9,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9828,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4904,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 14903,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 78
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 1476.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 4510.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 3542.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 5005.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 3931.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 5500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 4320.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20034,
+      "model_cost_cny": 0.049808,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 2,
+      "evaluation_key": "0e92a84a1adc88aa34690b6d71c1d1f190bb37f5a01d76c743a5d898d75e9d42",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7111,
+      "matched_fact_count": 32,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4807,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9900,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4967,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 14791,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 76
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 25480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 2366.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 4586.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 56000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 40000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 23000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 28000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 2800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5040.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20668,
+      "model_cost_cny": 0.049934,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 2,
+      "evaluation_key": "f231a82d1ebb1d816c78c7aafbd99941ba94ee9a7f33fd9e8e583953f094acc9",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7556,
+      "matched_fact_count": 34,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 56,
+      "valid_fact_count": 56,
+      "raw_fact_count": 56,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4691,
+      "baseline_source_kind_counts": {
+        "募集说明书": 9,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9779,
+      "baseline_model_fact_count": 56,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4899,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15130,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 56,
+        "warning_keys": 0,
+        "citation_ids": 83
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1456.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 42000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 25000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 17000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 16000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 13000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2880.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20516,
+      "model_cost_cny": 0.049798,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 2,
+      "evaluation_key": "bd48002f6cbf08d0d75f503bddda62cfb6803325ed8d853974dfb0d89984cd1f",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7778,
+      "matched_fact_count": 35,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 57,
+      "valid_fact_count": 57,
+      "raw_fact_count": 57,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4808,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9932,
+      "baseline_model_fact_count": 57,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4953,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15547,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 57,
+        "warning_keys": 0,
+        "citation_ids": 82
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 3444.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 3822.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2025",
+          "value": 36000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 4200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 6000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20037,
+      "model_cost_cny": 0.049906,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 2,
+      "evaluation_key": "cb946534bac22d42ca26dd2b23fdaca57eff58c0ce7ae8eb9e4155021f7a9bba",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.3778,
+      "matched_fact_count": 17,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 44,
+      "valid_fact_count": 44,
+      "raw_fact_count": 44,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4373,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 40,
+      "baseline_prompt_chars": 9526,
+      "baseline_model_fact_count": 44,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4722,
+      "model_output_tokens": 4105,
+      "model_finish_reason": "stop",
+      "model_response_chars": 12794,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 44,
+        "warning_keys": 0,
+        "citation_ids": 15
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 11480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 6560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 2870.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 1771.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 12740.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 7280.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 3185.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 1966.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 14000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 3500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2160.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 18000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 16985,
+      "model_cost_cny": 0.042284,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-huachen",
+      "iteration": 3,
+      "evaluation_key": "022d988848e797c283e282301ba8245a5b02a146f57ae0654a2e9eabf148f878",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7111,
+      "matched_fact_count": 32,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 54,
+      "valid_fact_count": 54,
+      "raw_fact_count": 54,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 16,
+      "baseline_source_char_count": 5088,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 10285,
+      "baseline_model_fact_count": 54,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 5175,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15092,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 54,
+        "warning_keys": 0,
+        "citation_ids": 83
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 3116.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 9840.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 2460.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 4723.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 3458.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 10920.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 2730.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 5242.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 28200.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 3800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 12000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 3000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 5760.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20429,
+      "model_cost_cny": 0.05035,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-ancheng",
+      "iteration": 3,
+      "evaluation_key": "d88ca0c02b7ae4bcb025d058f72597e3d520713089bbcfa07a0714bc58257b71",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.7556,
+      "matched_fact_count": 34,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 57,
+      "valid_fact_count": 57,
+      "raw_fact_count": 57,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4722,
+      "baseline_source_kind_counts": {
+        "募集说明书": 9,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9828,
+      "baseline_model_fact_count": 57,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4904,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 14974,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 57,
+        "warning_keys": 0,
+        "citation_ids": 57
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_bearing_debt",
+          "period": "2024",
+          "value": 16380.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 1638.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 65000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 35000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1800.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 5500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 4320.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20352,
+      "model_cost_cny": 0.049808,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-rongyi",
+      "iteration": 3,
+      "evaluation_key": "f4bcdfb167a2b4e2899466b776bdc937902050ff3cdc207ca47b827e00dc0e67",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.9556,
+      "matched_fact_count": 43,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 56,
+      "valid_fact_count": 56,
+      "raw_fact_count": 56,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4807,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9900,
+      "baseline_model_fact_count": 56,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4967,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15002,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 56,
+        "warning_keys": 0,
+        "citation_ids": 76
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 2366.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 2600.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 19962,
+      "model_cost_cny": 0.049934,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 3,
+      "evaluation_key": "694c8492f76a142a38ccc798c724440660386b5be0908d3fd423a7577932f74e",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.9556,
+      "matched_fact_count": 43,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 56,
+      "valid_fact_count": 56,
+      "raw_fact_count": 56,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4691,
+      "baseline_source_kind_counts": {
+        "募集说明书": 9,
+        "信用评级报告": 6
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9779,
+      "baseline_model_fact_count": 56,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4899,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15024,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 56,
+        "warning_keys": 0,
+        "citation_ids": 78
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 1600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "rating_revenue",
+          "period": "2025",
+          "value": 24000.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20781,
+      "model_cost_cny": 0.049798,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-conflict",
+      "iteration": 3,
+      "evaluation_key": "ad7128fc051a75d025cea1d2d66b742fa6b4cc9f74818690fe88c12d7fa0c2cd",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 45,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 59,
+      "valid_fact_count": 59,
+      "raw_fact_count": 59,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4808,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 42,
+      "baseline_prompt_chars": 9932,
+      "baseline_model_fact_count": 59,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4953,
+      "model_output_tokens": 5000,
+      "model_finish_reason": "length",
+      "model_response_chars": 15766,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 59,
+        "warning_keys": 0,
+        "citation_ids": 80
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 20289,
+      "model_cost_cny": 0.049906,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    },
+    {
+      "case": "demo-bond-qualitative",
+      "iteration": 3,
+      "evaluation_key": "1a0fa9704fe78a11d5888a3361c0c84a3bd0e3c919b0437a39c75616afc0aac0",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v3.1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 0.4,
+      "matched_fact_count": 18,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 46,
+      "valid_fact_count": 46,
+      "raw_fact_count": 46,
+      "filtered_invalid_source_fact_count": 0,
+      "baseline_source_count": 15,
+      "baseline_source_char_count": 4373,
+      "baseline_source_kind_counts": {
+        "募集说明书": 10,
+        "信用评级报告": 5
+      },
+      "baseline_field_registry_count": 40,
+      "baseline_prompt_chars": 9526,
+      "baseline_model_fact_count": 46,
+      "baseline_empty_reason": "",
+      "model_input_tokens": 4722,
+      "model_output_tokens": 4236,
+      "model_finish_reason": "stop",
+      "model_response_chars": 13211,
+      "model_response_keys": [
+        "citation_ids",
+        "facts",
+        "warning_keys"
+      ],
+      "model_response_field_counts": {
+        "facts": 46,
+        "warning_keys": 0,
+        "citation_ids": 15
+      },
+      "model_response_value_types": {
+        "facts": "list",
+        "warning_keys": "list",
+        "citation_ids": "list"
+      },
+      "empty_baseline_output": false,
+      "missing_expected_facts": [
+        {
+          "fact_key": "total_assets",
+          "period": "2023",
+          "value": 24600.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2023",
+          "value": 12300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2023",
+          "value": 11480.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2023",
+          "value": 6560.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2023",
+          "value": 738.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2023",
+          "value": 2870.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2023",
+          "value": 246.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2023",
+          "value": 1771.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2024",
+          "value": 27300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2024",
+          "value": 13650.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2024",
+          "value": 12740.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2024",
+          "value": 7280.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2024",
+          "value": 819.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2024",
+          "value": 3185.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2024",
+          "value": 273.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2024",
+          "value": 1966.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2025",
+          "value": 30000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_liabilities",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "equity",
+          "period": "2025",
+          "value": 15000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_assets",
+          "period": "2025",
+          "value": 14000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "current_liabilities",
+          "period": "2025",
+          "value": 8000.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "interest_expense",
+          "period": "2025",
+          "value": 900.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "accounts_receivable",
+          "period": "2025",
+          "value": 3500.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "total_overdue_receivables",
+          "period": "2025",
+          "value": 300.0,
+          "unit": "万元"
+        },
+        {
+          "fact_key": "inventory",
+          "period": "2025",
+          "value": 2160.0,
+          "unit": "万元"
+        }
+      ],
+      "risk_recall": 0.0,
+      "risk_precision": 0.0,
+      "risk_f1": 0.0,
+      "candidate_recall": "not_applicable",
+      "candidate_precision": "not_applicable",
+      "candidate_f1": "not_applicable",
+      "candidate_citation_precision": "not_applicable",
+      "citation_precision": 1.0,
+      "section_citation_coverage": "not_applicable",
+      "report_fact_support_rate": "not_applicable",
+      "unsupported_claims": "not_applicable",
+      "unsupported_numeric_claims": "not_applicable",
+      "invalid_citations": 0,
+      "latency_ms": 17520,
+      "model_cost_cny": 0.043332,
+      "predicted_warning_keys": [],
+      "returned_warning_keys": [],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}

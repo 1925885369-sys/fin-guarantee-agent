@@ -1,0 +1,760 @@
+{
+  "suite": "bond",
+  "mode": "agent",
+  "model": "deepseek-v4-flash",
+  "model_configured": true,
+  "metadata": {
+    "evaluation_version": "bond-professional-v1",
+    "temperature": 0.2,
+    "prompt_version": "bond-professional-v1",
+    "prompt_sha256": "af68f3a217f85e3a4bc911d29f795f949bc703570b36a4be963a1a74ef878eca",
+    "chapter_prompt_sha256": "fc26267c0adaa31f94597ea0991eddef00bca7e7269a6ed34bd4fe85b7450a8e",
+    "field_registry_sha256": "06bffcd3dfd929c1b33d72fa268fc9c83b2bdd7ca98f35de8e37b422a62bf853",
+    "policy_profile": "bond-v1",
+    "policy_version": "1.0.0",
+    "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632"
+  },
+  "budget_cny": 3.0,
+  "stopped_reason": "",
+  "summary": {
+    "field_extraction_accuracy": 1.0,
+    "risk_recall": 1.0,
+    "risk_precision": 1.0,
+    "risk_f1": 1.0,
+    "candidate_recall": 1.0,
+    "candidate_precision": 0.5,
+    "candidate_f1": 0.6667,
+    "candidate_citation_precision": 1.0,
+    "citation_precision": 1.0,
+    "section_citation_coverage": 1.0,
+    "report_fact_support_rate": 1.0,
+    "conflict_recall": 1.0,
+    "latency_ms": 160335.0,
+    "model_cost_cny": 0.4431,
+    "unsupported_claims": 0.0,
+    "unsupported_numeric_claims": 0.0,
+    "invalid_citations": 0.0,
+    "subject_scope_error_count": 0.0,
+    "node_retries": 0.0,
+    "degraded_nodes": 0.0,
+    "runs": 1,
+    "completed": 1,
+    "success_rate": 1.0,
+    "total_cost_cny": 0.443086,
+    "error_counts": {},
+    "statistics": {
+      "field_extraction_accuracy": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "risk_f1": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "candidate_precision": {
+        "count": 1,
+        "min": 0.5,
+        "max": 0.5,
+        "mean": 0.5,
+        "stddev": 0.0
+      },
+      "candidate_f1": {
+        "count": 1,
+        "min": 0.6667,
+        "max": 0.6667,
+        "mean": 0.6667,
+        "stddev": 0.0
+      },
+      "candidate_citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "citation_precision": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "section_citation_coverage": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "report_fact_support_rate": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "conflict_recall": {
+        "count": 1,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "stddev": 0.0
+      },
+      "latency_ms": {
+        "count": 1,
+        "min": 160335.0,
+        "max": 160335.0,
+        "mean": 160335.0,
+        "stddev": 0.0
+      },
+      "model_cost_cny": {
+        "count": 1,
+        "min": 0.4431,
+        "max": 0.4431,
+        "mean": 0.4431,
+        "stddev": 0.0
+      },
+      "unsupported_claims": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "unsupported_numeric_claims": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "invalid_citations": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "subject_scope_error_count": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "node_retries": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      },
+      "degraded_nodes": {
+        "count": 1,
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "stddev": 0.0
+      }
+    },
+    "per_case_stability": {
+      "demo-bond-jinghe": {
+        "field_extraction_accuracy": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "risk_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "candidate_recall": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        },
+        "report_fact_support_rate": {
+          "runs": 1,
+          "min": 1.0,
+          "max": 1.0,
+          "range": 0.0
+        }
+      }
+    }
+  },
+  "details": [
+    {
+      "case": "demo-bond-jinghe",
+      "iteration": 1,
+      "evaluation_key": "39e67603b17b2b75f3906b7aba33286f519f18b0b25f9eb0803cf41cca3ffd8b",
+      "model": "deepseek-v4-flash",
+      "prompt_version": "bond-professional-v1",
+      "policy_sha256": "864bed6c144f7d6b731a2734a6775dba9898df8ad28d1806b4ee92f120557632",
+      "status": "completed",
+      "field_extraction_accuracy": 1.0,
+      "matched_fact_count": 45,
+      "expected_fact_count": 45,
+      "extracted_fact_count": 142,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "risk_f1": 1.0,
+      "candidate_recall": 1.0,
+      "candidate_precision": 0.5,
+      "candidate_f1": 0.6667,
+      "candidate_citation_precision": 1.0,
+      "citation_precision": 1.0,
+      "section_citation_coverage": 1.0,
+      "report_fact_support_rate": 1.0,
+      "unsupported_claims": 0,
+      "unsupported_numeric_claims": 0,
+      "invalid_citations": 0,
+      "conflict_recall": 1.0,
+      "subject_scope_error_count": 0,
+      "model_attempts": 34,
+      "model_attempt_error_counts": {
+        "report_validation": 11
+      },
+      "last_model_error": "章节包含确定性草稿和证据之外的新数字",
+      "model_attempt_summaries": [
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1019,
+          "output_tokens": 774,
+          "cost": 0.00823,
+          "latency_ms": 4520,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 844,
+          "output_tokens": 171,
+          "cost": 0.003056,
+          "latency_ms": 2028,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1135,
+          "output_tokens": 1248,
+          "cost": 0.012254,
+          "latency_ms": 5986,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1049,
+          "output_tokens": 182,
+          "cost": 0.003554,
+          "latency_ms": 1759,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 994,
+          "output_tokens": 275,
+          "cost": 0.004188000000000001,
+          "latency_ms": 1647,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1072,
+          "output_tokens": 1736,
+          "cost": 0.016031999999999998,
+          "latency_ms": 7909,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1427,
+          "output_tokens": 4392,
+          "cost": 0.03799,
+          "latency_ms": 18352,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1122,
+          "output_tokens": 447,
+          "cost": 0.0058200000000000005,
+          "latency_ms": 2879,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 995,
+          "output_tokens": 257,
+          "cost": 0.004046,
+          "latency_ms": 1982,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1048,
+          "output_tokens": 901,
+          "cost": 0.009304,
+          "latency_ms": 4735,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1001,
+          "output_tokens": 332,
+          "cost": 0.004658,
+          "latency_ms": 2220,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1042,
+          "output_tokens": 5,
+          "cost": 0.002124,
+          "latency_ms": 591,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1042,
+          "output_tokens": 5,
+          "cost": 0.002124,
+          "latency_ms": 715,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 473,
+          "output_tokens": 5,
+          "cost": 0.0009860000000000001,
+          "latency_ms": 990,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 953,
+          "output_tokens": 871,
+          "cost": 0.008874,
+          "latency_ms": 4158,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1140,
+          "output_tokens": 1880,
+          "cost": 0.01732,
+          "latency_ms": 8528,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 997,
+          "output_tokens": 866,
+          "cost": 0.008922,
+          "latency_ms": 4652,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1015,
+          "output_tokens": 714,
+          "cost": 0.007742000000000001,
+          "latency_ms": 4008,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 1064,
+          "output_tokens": 1312,
+          "cost": 0.012624,
+          "latency_ms": 6640,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "extract",
+          "task_type": "extract",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 511,
+          "output_tokens": 257,
+          "cost": 0.003078,
+          "latency_ms": 2026,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "candidate",
+          "task_type": "candidate",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 6715,
+          "output_tokens": 1165,
+          "cost": 0.02275,
+          "latency_ms": 9392,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 12068,
+          "output_tokens": 377,
+          "cost": 0.027152000000000003,
+          "latency_ms": 3035,
+          "error_type": "report_validation",
+          "error_message": "冲突断言未并列说明；章节包含确定性草稿和证据之外的新主体"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 4151,
+          "output_tokens": 196,
+          "cost": 0.00987,
+          "latency_ms": 2325,
+          "error_type": "report_validation",
+          "error_message": "材料缺口未明确标记"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 4785,
+          "output_tokens": 282,
+          "cost": 0.011826,
+          "latency_ms": 2369,
+          "error_type": "report_validation",
+          "error_message": "冲突断言未并列说明；章节包含确定性草稿和证据之外的新数字"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 10140,
+          "output_tokens": 228,
+          "cost": 0.022104,
+          "latency_ms": 2338,
+          "error_type": "report_validation",
+          "error_message": "章节包含确定性草稿和证据之外的新数字"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 11239,
+          "output_tokens": 414,
+          "cost": 0.02579,
+          "latency_ms": 3575,
+          "error_type": "report_validation",
+          "error_message": "命中禁止表达：审计确认；冲突断言未并列说明；章节包含确定性草稿和证据之外的新数字"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 12722,
+          "output_tokens": 177,
+          "cost": 0.026860000000000002,
+          "latency_ms": 2375,
+          "error_type": "report_validation",
+          "error_message": "命中禁止表达：可偿付现金；冲突断言未并列说明"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 9812,
+          "output_tokens": 325,
+          "cost": 0.022224,
+          "latency_ms": 2715,
+          "error_type": "report_validation",
+          "error_message": "冲突断言未并列说明；章节包含确定性草稿和证据之外的新数字"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 4764,
+          "output_tokens": 153,
+          "cost": 0.010752,
+          "latency_ms": 1962,
+          "error_type": "report_validation",
+          "error_message": "材料缺口未明确标记；冲突断言未并列说明"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 9814,
+          "output_tokens": 356,
+          "cost": 0.022476,
+          "latency_ms": 3025,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 7840,
+          "output_tokens": 239,
+          "cost": 0.017592,
+          "latency_ms": 2242,
+          "error_type": "report_validation",
+          "error_message": "命中禁止表达：保证责任已经生效；冲突断言未并列说明；章节包含确定性草稿和证据之外的新主体"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 4923,
+          "output_tokens": 272,
+          "cost": 0.012022000000000001,
+          "latency_ms": 2529,
+          "error_type": "report_validation",
+          "error_message": "命中禁止表达：已具备可执行覆盖"
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "completed",
+          "input_tokens": 3990,
+          "output_tokens": 183,
+          "cost": 0.009444,
+          "latency_ms": 2130,
+          "error_type": "",
+          "error_message": ""
+        },
+        {
+          "node_key": "draft",
+          "task_type": "report",
+          "attempt": 1,
+          "status": "rejected",
+          "input_tokens": 12049,
+          "output_tokens": 650,
+          "cost": 0.029298,
+          "latency_ms": 20516,
+          "error_type": "report_validation",
+          "error_message": "章节包含确定性草稿和证据之外的新数字"
+        }
+      ],
+      "node_retries": 0,
+      "degraded_nodes": 0,
+      "latency_ms": 160335,
+      "model_cost_cny": 0.443086,
+      "predicted_warning_keys": [
+        "bullet_maturity",
+        "cashflow_debt_service",
+        "counter_guarantee",
+        "guarantee_scope",
+        "material_completeness",
+        "related_party"
+      ],
+      "missed_warning_keys": [],
+      "unexpected_warning_keys": [],
+      "missing_expected_facts": [],
+      "candidate_taxonomies": [
+        "collateral_enforceability",
+        "governance"
+      ],
+      "candidate_findings": [
+        {
+          "taxonomy": "governance",
+          "title": "关键审批权限集中",
+          "support_source_ids": [
+            "a193f0fd-1307-4a6c-b1d9-c491d8e5e48b"
+          ],
+          "counter_source_ids": []
+        },
+        {
+          "taxonomy": "governance",
+          "title": "关键审批权限集中",
+          "support_source_ids": [
+            "266614e2-bbb2-45df-bf69-f05972f876e0"
+          ],
+          "counter_source_ids": []
+        },
+        {
+          "taxonomy": "governance",
+          "title": "实际控制人控制合同审批、印章及网银复核，财务负责人不能独立否决付款",
+          "support_source_ids": [
+            "a193f0fd-1307-4a6c-b1d9-c491d8e5e48b",
+            "266614e2-bbb2-45df-bf69-f05972f876e0"
+          ],
+          "counter_source_ids": []
+        },
+        {
+          "taxonomy": "collateral_enforceability",
+          "title": "反担保质押通知未送达相关债务人，可能影响质押效力",
+          "support_source_ids": [
+            "078aafeb-d332-4f36-9ffb-81ff5dae71bd",
+            "d495791f-cbdc-4173-9615-d9c098db74d7"
+          ],
+          "counter_source_ids": []
+        }
+      ],
+      "conflicted_facts": [
+        {
+          "fact_key": "bond_name",
+          "period": ""
+        },
+        {
+          "fact_key": "bond_rating",
+          "period": ""
+        },
+        {
+          "fact_key": "controller",
+          "period": ""
+        },
+        {
+          "fact_key": "guarantor_name",
+          "period": ""
+        },
+        {
+          "fact_key": "investor_scope",
+          "period": "2026"
+        },
+        {
+          "fact_key": "main_business",
+          "period": ""
+        },
+        {
+          "fact_key": "operating_cash_flow",
+          "period": "2025"
+        },
+        {
+          "fact_key": "principal_repayment",
+          "period": "2026"
+        },
+        {
+          "fact_key": "total_assets",
+          "period": "2023"
+        },
+        {
+          "fact_key": "trustee",
+          "period": ""
+        }
+      ],
+      "error_type": null,
+      "error_message": ""
+    }
+  ]
+}
