@@ -1,7 +1,7 @@
 import { Calculator, FileSearch, Landmark } from "lucide-react";
 import type { EntityProfileFact, EntityProfileSource } from "../contracts";
 import { financialFact, latestAnnualPeriods } from "../profileSummary";
-import { displayFactValue, ProfilePanelHeading } from "./profilePresentation";
+import { displayFactValue, MISSING_VALUE, ProfilePanelHeading } from "./profilePresentation";
 
 const FACT_GROUPS = [
   { label: "资产负债表", rows: [
@@ -46,6 +46,22 @@ const CORE_METRICS: MetricDefinition[] = [
 
 const unusableStatuses = new Set(["stale", "conflicted", "insufficient"]);
 
+/** 过期、冲突、材料不足的事实不参与展示与计算——宁可留空，也不用不可靠的数字。 */
+export function financialFactValue(fact: EntityProfileFact | undefined) {
+  return fact && !unusableStatuses.has(fact.status) && fact.value != null ? fact.value : null;
+}
+
+/** 按指标键取某一年的确定性指标值（缺项或分母为零返回 null，不做估算）。 */
+export function metricByKey(key: string, facts: EntityProfileFact[], year: string) {
+  const metric = CORE_METRICS.find((item) => item.key === key);
+  if (!metric) return null;
+  return metricValue(metric, facts, year);
+}
+
+export function formatMetricValue(value: number | null, unit: string) {
+  return formatMetric(value, unit);
+}
+
 function sourceForFact(fact: EntityProfileFact | undefined, sources: EntityProfileSource[]) {
   if (!fact) return undefined;
   const sourceId = (fact.source_ids || [])[0] || fact.source_id;
@@ -53,7 +69,7 @@ function sourceForFact(fact: EntityProfileFact | undefined, sources: EntityProfi
 }
 
 function factValue(fact: EntityProfileFact | undefined) {
-  return fact && !unusableStatuses.has(fact.status) && fact.value != null ? fact.value : null;
+  return financialFactValue(fact);
 }
 
 function metricValue(metric: MetricDefinition, facts: EntityProfileFact[], year: string) {
@@ -69,9 +85,9 @@ function formatMetric(value: number | null, unit: string) {
 }
 
 function statusLabel(fact: EntityProfileFact | undefined) {
-  if (!fact) return "材料不足";
+  if (!fact) return MISSING_VALUE;
   if (fact.status === "confirmed" || fact.status === "single_source") return "";
-  return fact.status === "stale" ? "资料已过期" : fact.status === "conflicted" ? "存在冲突" : "材料不足";
+  return fact.status === "stale" ? "资料已过期" : fact.status === "conflicted" ? "存在冲突" : MISSING_VALUE;
 }
 
 export function ProfileFinancialMatrix({
@@ -86,10 +102,10 @@ export function ProfileFinancialMatrix({
   onOpenSource?: (sourceId: string) => void;
 }) {
   const years = latestAnnualPeriods(facts);
-  if (!years.length) return <section className="ep-panel"><ProfilePanelHeading title={title} description="仅展示三个完整会计年度" action={<Landmark size={18} />} /><div className="ep-financial-empty"><Landmark size={20} /><span><strong>三年财务数据尚未形成结构化事实</strong><small>缺失字段保持“材料不足”，不会以零值代替。</small></span></div></section>;
+  if (!years.length) return <section className="ep-panel"><ProfilePanelHeading title={title} description="仅展示三个完整会计年度" action={<Landmark size={18} />} /><div className="ep-financial-empty"><Landmark size={20} /><span><strong>三年财务数据尚未形成结构化事实</strong><small>缺失字段显示“待补充”，不会以零值代替。</small></span></div></section>;
 
   return <section className="ep-panel ep-financial-matrix">
-    <ProfilePanelHeading title={title} description="三个完整年度 · 合并口径优先 · 单位以各字段标注为准" action={<Landmark size={18} />} />
+    <ProfilePanelHeading title={title} description={years.map((year) => `${year}年`).join(" · ")} help="只展示三个完整会计年度；同一字段优先取合并口径，单位以各字段自身标注为准；过期、冲突与材料不足的事实不参与指标计算。" action={<Landmark size={18} />} />
     <div className="ep-financial-table" role="table" aria-label={title}>
       <div className="ep-financial-row ep-financial-head" role="row"><span role="columnheader">科目</span>{years.map((year) => <strong role="columnheader" key={year}>{year}年</strong>)}</div>
       {FACT_GROUPS.map((group) => <div className="ep-financial-group" key={group.label}>
@@ -102,7 +118,7 @@ export function ProfileFinancialMatrix({
             const sourceLabel = source ? `${source.filename}${source.page ? ` P${source.page}` : ""}` : fact?.source_label || "";
             const stateLabel = statusLabel(fact);
             return <span className={!fact || fact.status === "insufficient" ? "missing" : ""} role="cell" key={year}>
-              {fact ? displayFactValue(fact.value, fact.text_value, fact.unit) : "材料不足"}
+              {fact ? displayFactValue(fact.value, fact.text_value, fact.unit) : MISSING_VALUE}
               {(stateLabel || (!onOpenSource && sourceLabel)) && <small>{[stateLabel, !onOpenSource ? sourceLabel : ""].filter(Boolean).join(" · ")}</small>}
               {source && onOpenSource && <button className="ep-source-link" onClick={() => onOpenSource(source.id)} title={source.quote}><FileSearch size={12} />{source.page ? `查看 P${source.page}` : source.locator}</button>}
             </span>;
@@ -110,7 +126,7 @@ export function ProfileFinancialMatrix({
         </div>)}
       </div>)}
     </div>
-    <div className="ep-financial-mobile" aria-label={`${title}移动端视图`}>{years.map((year) => <article key={year}><h4>{year}年 · 合并口径</h4>{FACT_GROUPS.map((group) => <div className="ep-mobile-financial-group" key={group.label}><b>{group.label}</b>{group.rows.map(([key, label]) => { const fact = financialFact(facts, key, year); return <div key={key}><span>{label}</span><strong>{fact ? displayFactValue(fact.value, fact.text_value, fact.unit) : "材料不足"}</strong></div>; })}</div>)}<div className="ep-mobile-financial-group ep-mobile-metrics"><b>系统确定性指标</b>{CORE_METRICS.map((metric) => <div key={metric.key}><span>{metric.label}</span><strong>{formatMetric(metricValue(metric, facts, year), metric.unit)}</strong></div>)}</div></article>)}</div>
+    <div className="ep-financial-mobile" aria-label={`${title}移动端视图`}>{years.map((year) => <article key={year}><h4>{year}年 · 合并口径</h4>{FACT_GROUPS.map((group) => <div className="ep-mobile-financial-group" key={group.label}><b>{group.label}</b>{group.rows.map(([key, label]) => { const fact = financialFact(facts, key, year); return <div key={key}><span>{label}</span><strong>{fact ? displayFactValue(fact.value, fact.text_value, fact.unit) : MISSING_VALUE}</strong></div>; })}</div>)}<div className="ep-mobile-financial-group ep-mobile-metrics"><b>系统确定性指标</b>{CORE_METRICS.map((metric) => <div key={metric.key}><span>{metric.label}</span><strong>{formatMetric(metricValue(metric, facts, year), metric.unit)}</strong></div>)}</div></article>)}</div>
     <div className="ep-derived-heading"><div><Calculator size={16} /><span><strong>系统确定性指标</strong><small>仅由上表同年度、同口径事实计算；缺项或分母为零时不估算。</small></span></div></div>
     <div className="ep-metric-matrix" role="table" aria-label="融资担保核心财务指标">
       <div className="ep-metric-row ep-metric-head" role="row"><span role="columnheader">指标</span>{years.map((year) => <strong role="columnheader" key={year}>{year}年</strong>)}</div>

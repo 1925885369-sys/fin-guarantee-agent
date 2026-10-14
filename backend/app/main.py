@@ -21,12 +21,12 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .chapter_guard import (
-    NO_MODEL_REASON, assess_chapter_length, build_chapter_context, count_report_chars,
-    validate_chapter_output, validation_diagnostics,
+    NO_MODEL_REASON, _materials_fingerprint, assess_chapter_length, build_chapter_context, count_report_chars,
 )
 from .chapter_prompts import (
-    BOND_CHAPTER_KEYS, BOND_CHAPTER_PART, BOND_CHAPTER_TITLES, chapter_default_prompt, chapter_uses_llm,
-    compile_structured_prompt, editable_config_from_factory, effective_chapter_config,
+    BOND_CHAPTER_KEYS, BOND_CHAPTER_PART, BOND_CHAPTER_TITLES, PROMPT_CONTRACT_VERSION,
+    chapter_default_prompt, chapter_prompt,
+    chapter_uses_llm, compile_structured_prompt, editable_config_from_factory, effective_chapter_config,
     load_chapter_config,
     legacy_prompt_config, migrate_legacy_prompt_overrides, prompt_config_payload, prompt_edit_state,
     recompile_structured_prompts,
@@ -44,7 +44,7 @@ from .entity_profiles import (
 )
 from .profile_imports import commit_import_job, create_import_job, get_import_job
 from .profile_evidence import materialize_snapshot_evidence
-from .llm import LlmCallContext, StructuredLlmError, answer_material_question, combine_usage, is_configured, rewrite_section
+from .llm import LlmCallContext, StructuredLlmError, answer_material_question, is_configured, rewrite_section
 from .metrics import decode_metrics
 from .parsers import SUPPORTED, classify_document, parse_document
 from .p0 import (
@@ -57,7 +57,8 @@ from .professional import audit_event, canonical_fact_rows, fact_groups, resolve
 from .report_blocks import section_blocks
 from .report_outline import section_labels
 from .report_delivery import (
-    delivery_blockers, reconcile_historical_sections, review_notice, write_report_section,
+    content_sha256, delivery_blockers, latest_attempt, record_chapter_attempt,
+    reconcile_historical_sections, review_notice, set_section_attempt, write_report_section,
 )
 from .review import decode_candidates, decode_tasks, decide_candidate, review_summary, unresolved_items, update_task
 from .review_lifecycle import mark_report_reviewed, report_state
@@ -66,11 +67,15 @@ from .bond_portfolio_cases import generate_bond_portfolio_materials, seed_bond_p
 from .real_reference import ensure_project_classification, is_real_reference, seed_real_reference_projects
 from .schemas import (
     CandidateDecision, DocumentUpdate, EntityProfileCreate, EntityProfileUpdate, ReportTableRefresh,
-    FactGroupResolve, FactUpdate, MaterialQARequest, ProfileImportCommit, ProjectCreate, PromptEditableConfig, ReportPromptPreview, ReportPromptUpdate, ReviewTaskUpdate, RunCreate, SectionUpdate, TableCellReview,
+    FactGroupResolve, FactUpdate, MaterialQARequest, ProfileImportCommit, ProjectCreate, ProjectUpdate, PromptEditableConfig, ReportPromptPreview, ReportPromptUpdate, ReviewTaskUpdate, RunCreate, SectionRegenerateRequest, SectionUpdate, TableCellReview,
 )
 from .security import check_rate, cleanup_expired_projects, validate_magic
 from .retrieval import index_diagnostics, retrieval_status, retrieve_chunks
-from .workflow import TERMINAL, _attribution_block_missing, _numbers_supported, _preserve_chapter_boundaries, _report_boundary_safe, apply_review_decisions, invalidate_project_analysis, repair_chapter_length, retry_run, start_run
+from .workflow import (
+    TERMINAL, _numbers_supported, apply_review_decisions, chapter_diagnostics,
+    invalidate_project_analysis, is_model_content_status, retry_run, run_chapter_model_attempt,
+    start_run,
+)
 
 
 async def _cleanup_loop() -> None:
@@ -226,47 +231,32 @@ def _require_prompt_editable(project_id: str, request: Request) -> dict:
     return permissions
 
 
-def _fetch_effective_prompt_override(project_id: str, chapter_key: str) -> tuple[Optional[dict], str]:
-    """返回生效的 Prompt 覆盖行（项目覆盖 > 全局默认）及其来源。"""
-    project_override = row(
-        "SELECT prompt,structured_json,migration_mode FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?",
-        (project_id, chapter_key),
-    )
-    if project_override and str(project_override.get("prompt") or "").strip():
-        return project_override, "project"
-    global_override = row(
-        "SELECT prompt,structured_json,migration_mode FROM global_report_prompts WHERE chapter_key=?",
-        (chapter_key,),
-    )
-    if global_override and str(global_override.get("prompt") or "").strip():
-        return global_override, "global"
-    return None, "system"
+def _prompt_outdated(project_id: str, chapter_key: str, stored_sha256: str) -> bool:
+    """正文生成时的 Prompt 哈希是否与**当前有效 Prompt** 不同（计划 §四 line 41）。
 
+    计划原文：「``prompt_outdated`` 改为比较当前有效 Prompt 哈希与生成时哈希；
+    **保存 Prompt 不自动再生**」。所以这里只**报告差异**，绝不触发再生——改 Prompt 的人
+    自己决定要不要重跑那几章（`update_report_prompt` 只写覆盖与审计，不碰 `report_sections`，
+    因此保存后本函数自然转为 True，而正文保持原样）。
 
-def _prompt_outdated(project_id: str, chapter_key: str) -> bool:
-    """章节 Prompt 覆盖是否**早于当前编译器版本**。
+    与旧实现的区别：旧口径比的是"库里的覆盖文本 vs 当前编译器对同一 ``structured_json`` 的
+    重编译结果"，回答的是"**覆盖文本该不该重编译**"——那是编辑器侧的事，由
+    ``recompile_structured_prompts`` 在启动时自行处理，与本函数无关。字段名与计划要求指向的
+    是"**这份报告是不是用旧 Prompt 生成的**"（交付侧的事）。同一函数名下两种语义会互相误导，
+    故按计划改为后者。
 
-    ``recompile_structured_prompts`` 的判定口径：结构化覆盖存库的 ``prompt`` 文本是
-    由 ``structured_json`` 经**当前编译器**生成的派生值。若库里文本与当前编译器对同一
-    ``structured_json`` 的重编译结果不一致，说明该覆盖生成于旧编译器，需要重新编译（过期）。
-    人工撰写的 legacy/preserved 覆盖不参与重编译，恒判为不过期。
+    生成时哈希取 ``report_sections.prompt_sha256``（由 ``build_chapter_context`` 与正文
+    同事务冻结）；**历史行该列为空 → 无法判断，返回 False**，不制造"全部过期"的假警报。
+    哈希口径与再生接口的 409 并发检查同源（同一个 `chapter_prompt` + sha256）。
     """
-    override, _source = _fetch_effective_prompt_override(project_id, chapter_key)
-    if not override:
-        return False
-    if str(override.get("migration_mode") or "") != "structured":
+    if not stored_sha256:
         return False
     try:
-        config = json_load(override.get("structured_json") or "{}")
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(config, dict) or not config:
-        return False
-    try:
-        recompiled = compile_structured_prompt(chapter_key, config)
+        current = hashlib.sha256(chapter_prompt(chapter_key, project_id).encode("utf-8")).hexdigest()
     except Exception:
+        # 取不到当前 Prompt（章节不存在/配置损坏）时不宣称过期：宁可漏报，不误报。
         return False
-    return recompiled != str(override.get("prompt") or "")
+    return current != stored_sha256
 
 
 def _normalize_bond_mode(project: dict) -> dict:
@@ -465,6 +455,87 @@ def restore_project(project_id: str, x_project_token: Optional[str] = Header(def
         conn.execute("UPDATE projects SET archived_at=NULL,updated_at=? WHERE id=?", (now, project_id))
     audit_event(project_id, "project_restore", "project", project_id, {"archived_at": project["archived_at"]}, {"archived_at": None}, "human")
     return {"id": project_id, "archived": False, "archived_at": None, "changed": True}
+
+
+# 项目基础信息（发行人／标的名称／发行规模）被修改时的失效原因码。这三个字段是
+# 分析口径的一部分，改了就必须重跑；沿用 report_stale_reasons 既有的字符串约定。
+PROJECT_INFO_STALE_REASON = "project_info_changed"
+
+
+def _project_info_fields(project: dict) -> dict:
+    """项目基础信息三字段的审计口径（不含 access_token 等敏感列）。"""
+    return {
+        "company_name": str(project.get("company_name") or ""),
+        "bond_name": str(project.get("bond_name") or ""),
+        "amount": project.get("amount"),
+    }
+
+
+@app.patch("/api/projects/{project_id}")
+def patch_project(project_id: str, payload: ProjectUpdate,
+                  x_project_token: Optional[str] = Header(default=None)) -> dict:
+    """修改项目基础信息：发行人名称 / 标的名称 / 发行规模。
+
+    只动这三个字段——材料、报告、风险与运行历史一律保留，但把分析口径标记为待更新
+    （``analysis_stale`` + ``report_stale`` + 撤销已复核修订），旧成果因此不能再被标记为
+    最新最终报告：`report_state` 的 ``final_ready`` 要求二者皆非 stale，且
+    ``report_reviewed_revision == report_revision``。
+
+    「检查活动任务 + 写库」整段放在 ``BEGIN IMMEDIATE`` 事务里，与 ``start_run`` 争夺同一把
+    写锁，避免修改基础信息与尽调任务启动交错。无实际变化时不写库、不审计、不置失效。
+    """
+    project = _authorize(project_id, x_project_token)
+    if project.get("data_class", "user_project") != "user_project":
+        raise HTTPException(403, "仅用户创建的项目可以修改基础信息")
+    if project.get("project_type") != "bond_guarantee":
+        raise HTTPException(403, "仅债券担保项目可以修改基础信息")
+    _ensure_project_writable(project)
+
+    submitted = payload.model_dump(exclude_unset=True)
+    now = now_iso()
+    changed = False
+    before: dict = {}
+    after: dict = {}
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not current:
+            raise HTTPException(404, "项目不存在")
+        active = conn.execute(
+            "SELECT id FROM runs WHERE project_id=? AND status IN ('queued','running') LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if active:
+            raise HTTPException(409, f"项目正在分析，完成或取消任务后再修改基础信息：{active['id']}")
+        if current["archived_at"]:
+            raise HTTPException(409, "项目已归档，请先恢复项目后再修改")
+
+        before = _project_info_fields(dict(current))
+        after = dict(before)
+        for field in ("company_name", "bond_name"):
+            value = submitted.get(field)
+            if value is not None:
+                after[field] = value
+        if submitted.get("amount") is not None:
+            after["amount"] = float(submitted["amount"])
+        changed = after != before
+        if changed:
+            reasons = json_load(current["report_stale_reasons"] or "[]")
+            if PROJECT_INFO_STALE_REASON not in reasons:
+                reasons.append(PROJECT_INFO_STALE_REASON)
+            conn.execute(
+                "UPDATE projects SET company_name=?,bond_name=?,amount=?,updated_at=?,"
+                "analysis_stale=1,report_stale=1,report_stale_reasons=?,"
+                "report_reviewed_revision=0,report_reviewed_at=NULL WHERE id=?",
+                (after["company_name"], after["bond_name"], after["amount"], now,
+                 json_dump(reasons), project_id),
+            )
+    if changed:
+        # 审计写在事务之外：audit_event 自建连接，放事务里会自己再抢一次写锁。
+        audit_event(project_id, "project_update", "project", project_id, before, after, "human")
+    detail = get_project(project_id, x_project_token)
+    detail["changed"] = changed
+    return detail
 
 
 @app.post("/api/projects", status_code=201)
@@ -752,7 +823,9 @@ def bond_summary(project_id: str, x_project_token: Optional[str] = Header(defaul
         return re.sub(r"^(?:rating|评级)\s*[:：]\s*", "", str(raw), flags=re.IGNORECASE) if raw is not None else None
     inv = material_inventory(project_id)
     report_level = "完整尽调" if inv["complete_due_diligence_ready"] else "材料不足"
-    issue_value = None if "bond_issue_amount" in conflicted_fields else (value("bond_issue_amount") or project["amount"])
+    material_issue_amount = value("bond_issue_amount")
+    material_bond_name = value("bond_name")
+    issue_value = None if "bond_issue_amount" in conflicted_fields else (material_issue_amount or project["amount"])
     tranches = rows(
         "SELECT tranche_key,tranche_name,term_years,issue_amount,repayment_method,maturity_date,coupon_rate,amount_scope,allocation_status,source_ids,extraction_method,confidence "
         "FROM bond_tranches WHERE project_id=? AND extraction_method!='legacy_reference_seed' ORDER BY term_years",
@@ -770,6 +843,11 @@ def bond_summary(project_id: str, x_project_token: Optional[str] = Header(defaul
         "projectId": project_id, "bondName": project.get("bond_name") or value("bond_name"),
         "issuer": project["company_name"], "issueAmount": issue_value,
         "currentIssueAmount": issue_value, "registeredAmount": value("registered_issue_amount"),
+        # 取值来源必须显式给出：这两个字段在材料没有披露时会回落到项目录入值，
+        # 前端只看「非空」就会把项目录入的数字标成「募集说明书」。与上面的 or 语义逐字对齐。
+        "bondNameSource": "project" if project.get("bond_name") else ("material" if material_bond_name else "none"),
+        "issueAmountSource": ("conflict" if "bond_issue_amount" in conflicted_fields
+                              else "material" if material_issue_amount else "project"),
         "termYears": single_term, "couponRate": value("coupon_rate"),
         "repayment": value("principal_repayment"), "issuerRating": rating_value("issuer_rating"),
         "bondRating": rating_value("bond_rating"), "outlook": value("rating_outlook"),
@@ -1350,6 +1428,9 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
 
             section["system_tables"] = table_snapshot_status(project_id, section["section_key"], subject=subject)
         section["report_revision"] = project_revision["report_revision"]
+        # 最新一次生成尝试的摘要（状态/阶段/修复类型/是否采用/未决数量/诊断）：前端据此
+        # 区分"现正文来自哪次成功"与"最新尝试是否失败"（修订稿 §四）。
+        section["latest_attempt"] = latest_attempt(project_id, section["section_key"])
         # 篇幅诊断：历史报告没有这些列时按 not_checked 返回，并在读取时补算字符数。
         policy = effective_chapter_config(section["section_key"], project_id).get("length_policy") or {}
         if not section.get("length_status") or section["length_status"] == "not_checked":
@@ -1367,11 +1448,14 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
         }
         section["length_status"] = section.get("length_status") or "not_checked"
         section["length_repair_attempted"] = bool(section.get("length_repair_attempted"))
-        # 生成模式与 Prompt 时效：前端据此提示"该章用哪套 Prompt 生成、是否需要重新编译/再生"。
+        # 生成模式与 Prompt 时效：前端据此提示"该章用哪套 Prompt 生成、是否需要再生"。
         # ``generation_mode`` 目前尚未写入章节契约，必须用 ``.get`` 容错（默认 rewrite）。
         section_key = section["section_key"]
         section["generation_mode"] = load_chapter_config(section_key).get("generation_mode", "rewrite")
-        section["prompt_outdated"] = _prompt_outdated(project_id, section_key)
+        # 计划 §四 line 41：比"当前有效 Prompt 哈希 vs **生成时**哈希"（生成时哈希随正文冻结
+        # 在 `prompt_sha256` 列）。为真只表示"Prompt 改过了、报告还是旧版"，**不自动再生**。
+        section["prompt_outdated"] = _prompt_outdated(
+            project_id, section_key, str(section.get("prompt_sha256") or ""))
         # 修复状态与失败诊断：fallback_reason / fallback_stage / validation_diagnostics 已是
         # report_sections 的列，这里归一为一个显式的 repair 块，缺失字段补空值。
         section["repair"] = {
@@ -1383,7 +1467,70 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
             "delivery_status": section.get("delivery_status") or "not_checked",
             "validation_diagnostics": section.get("validation_diagnostics") or {},
         }
+        # 统一冻结记录（三项遗留修复方案 §一）：记录规模与版本对接口可见；旧章节兼容
+        # table_records_json（legacy 迁移），两者都空标 legacy_unfrozen。
+        frozen_records = json_load(section.get("evidence_records_json") or "[]") or []
+        if frozen_records:
+            section["evidence_record_count"] = len(frozen_records)
+            section["support_record_version"] = "evidence-records-v1"
+        else:
+            legacy_records = json_load(section.get("table_records_json") or "[]") or []
+            section["evidence_record_count"] = len(legacy_records)
+            section["support_record_version"] = (
+                "legacy:table-records-v1" if legacy_records else "legacy_unfrozen"
+            )
+        section["needs_review_claims"] = row(
+            "SELECT COUNT(*) count FROM report_claims WHERE section_id=? AND support_status='needs_review'",
+            (section["id"],),
+        )["count"]
+        # Prompt 契约编译版本（三项遗留修复方案 §二）：接口返回当前契约版本；
+        # `prompt_outdated` 由 _prompt_outdated 另给（结构化覆盖早于当前编译器）。
+        section["prompt_contract_version"] = PROMPT_CONTRACT_VERSION
     return sections
+
+
+@app.get("/api/projects/{project_id}/report-history")
+def report_history(project_id: str, x_project_token: Optional[str] = Header(default=None)) -> list[dict]:
+    """已完成任务的历史报告摘要（倒序），按任务留存、每个完成任务最多一份。
+
+    默认不补造上线前旧任务的快照，因此全新项目首次打开会是空列表（前端显示
+    「暂无已留存报告」），这是预期行为。
+    """
+    from .report_snapshots import list_snapshots
+
+    _authorize(project_id, x_project_token)
+    return list_snapshots(project_id)
+
+
+@app.get("/api/projects/{project_id}/report-history/{snapshot_id}")
+def report_history_detail(project_id: str, snapshot_id: str,
+                          x_project_token: Optional[str] = Header(default=None)) -> dict:
+    """完整快照。沿用项目令牌鉴权，并校验快照确属本项目（跨项目一律 404）。"""
+    from .report_snapshots import get_snapshot
+
+    _authorize(project_id, x_project_token)
+    item = get_snapshot(project_id, snapshot_id)
+    if not item:
+        raise HTTPException(404, "历史报告不存在")
+    return item
+
+
+def _table_refresh_validation(project_id: str, chapter: str, content: str, draft: str,
+                              original: dict) -> dict:
+    """表格刷新后用**共同校验器**复核刷新稿（不调用模型）。返回 {status, reasons}。
+
+    尽力而为：上下文构建或校验异常一律降级为"未复核"（status=''），绝不让表格刷新失败。
+    """
+    try:
+        from .chapter_guard import validate_chapter_output
+
+        source_ids = json_load(original.get("allowed_source_ids") or "[]")
+        ctx = build_chapter_context(project_id, chapter, draft or content, list(source_ids))
+        result = validate_chapter_output(content, json_load(original.get("citation_ids") or "[]"), ctx)
+        reasons = [str(item) for item in (result.get("reasons") or [])][:5]
+        return {"status": result.get("status") or "", "reasons": reasons}
+    except Exception:
+        return {"status": "", "reasons": []}
 
 
 @app.post("/api/projects/{project_id}/report/tables/refresh")
@@ -1477,12 +1624,22 @@ def refresh_report_tables(
             next_input_hash = hashlib.sha256(
                 f"{original.get('input_hash') or ''}:{table_blocks_hash(blocks)}".encode("utf-8")
             ).hexdigest()
+            # 表格刷新同步更新证据记录并调用**共同校验器**（修订稿 §四）：不调用模型，只对
+            # 刷新后的正文重跑章节校验；失配即标注待复核——这正是"正文中的主张需重新核验"的判据。
+            refresh_validation = _table_refresh_validation(project_id, chapter, content, draft, original)
+            if refresh_validation.get("status") not in ("", "passed"):
+                delivery = "needs_review"
             updates.append((chapter, content, draft, disclosures, policy, length, disclosure, delivery,
-                            validated_hash, new_digest, next_input_hash, blocks, original))
+                            validated_hash, new_digest, next_input_hash, blocks, original, refresh_validation))
 
         now = now_iso()
         for (chapter, content, draft, disclosures, _policy, length, disclosure, delivery,
-             validated_hash, digest, input_hash, blocks, original) in updates:
+             validated_hash, digest, input_hash, blocks, original, refresh_validation) in updates:
+            diagnostics = {"system_tables_refreshed": True, "table_rule_version": TABLE_RULE_VERSION}
+            if refresh_validation.get("status") not in ("", "passed"):
+                diagnostics["table_refresh_validation"] = refresh_validation.get("status")
+                diagnostics["table_refresh_needs_review"] = True
+                diagnostics["table_refresh_reasons"] = refresh_validation.get("reasons") or []
             conn.execute(
                 "UPDATE report_sections SET content=?,deterministic_draft=?,content_sha256=?,"
                 "validated_content_sha256=?,input_hash=?,required_disclosures=?,review_status='draft',"
@@ -1490,7 +1647,7 @@ def refresh_report_tables(
                 "delivery_status=?,validation_diagnostics=?,raw_output_chars=?,visible_content_chars=?,"
                 "length_status=?,updated_at=? WHERE project_id=? AND section_key=?",
                 (content, draft, digest, validated_hash, input_hash, json_dump(disclosures), disclosure,
-                 delivery, json_dump({"system_tables_refreshed": True, "table_rule_version": TABLE_RULE_VERSION}),
+                 delivery, json_dump(diagnostics),
                  length["raw_output_chars"], length["visible_content_chars"], length["length_status"], now,
                  project_id, chapter),
             )
@@ -1502,7 +1659,8 @@ def refresh_report_tables(
                  table_blocks_hash(blocks), TABLE_RULE_VERSION, now),
             )
             refreshed.append({"chapter_key": chapter, "content_sha256": digest,
-                              "input_hash": input_hash, "table_hash": table_blocks_hash(blocks)})
+                              "input_hash": input_hash, "table_hash": table_blocks_hash(blocks),
+                              "validation": refresh_validation.get("status") or "passed"})
 
         conn.execute(
             "UPDATE projects SET review_revision=review_revision+1,report_revision=report_revision+1,"
@@ -1719,13 +1877,53 @@ def update_section(project_id: str, section_key: str, payload: SectionUpdate, x_
     return {"status": "updated"}
 
 
+def _regenerate_concurrency_conflict(project_id: str, section_key: str, expected_revision: int,
+                                     expected_content_sha256: str, expected_prompt_sha256: str,
+                                     expected_materials_version: str) -> str:
+    """写库前的并发校验（修订稿 §四）。返回空串表示无冲突，否则返回中文冲突原因。
+
+    比较报告版本、章节正文哈希、章节 Prompt 哈希与材料版本；任一与预期不一致即视为并发
+    修改，调用方据此返回 409，不覆盖并发修改、保留本次尝试诊断。
+    """
+    state = report_state(project_id)
+    if int(state.get("report_revision") or 0) != int(expected_revision or 0):
+        return "报告版本已变化"
+    current = row(
+        "SELECT content,content_sha256 FROM report_sections WHERE project_id=? AND section_key=?",
+        (project_id, section_key),
+    )
+    if not current:
+        return "章节已不存在"
+    current_sha = str(current.get("content_sha256") or content_sha256(current.get("content") or ""))
+    if expected_content_sha256 and current_sha != expected_content_sha256:
+        return "章节正文已被修改"
+    if expected_prompt_sha256:
+        fresh_prompt = hashlib.sha256(chapter_prompt(section_key, project_id).encode("utf-8")).hexdigest()
+        if fresh_prompt != expected_prompt_sha256:
+            return "章节 Prompt 已变化"
+    if expected_materials_version and _materials_fingerprint(project_id) != expected_materials_version:
+        return "材料版本已变化"
+    return ""
+
+
 @app.post("/api/projects/{project_id}/report/sections/{section_key}/regenerate")
-def regenerate_section(project_id: str, section_key: str, x_project_token: Optional[str] = Header(default=None)) -> dict:
+def regenerate_section(project_id: str, section_key: str, x_project_token: Optional[str] = Header(default=None),
+                       payload: SectionRegenerateRequest | None = None) -> dict:
     _ensure_project_writable(_authorize(project_id, x_project_token))
     section = row("SELECT * FROM report_sections WHERE project_id=? AND section_key=?", (project_id, section_key))
     if not section:
         raise HTTPException(404, "报告章节不存在")
     stored_citations = json_load(section.get("citation_ids") or "[]")
+    # 起始版本：新前端随请求体发送预期版本与正文哈希；旧调用省略请求体，由服务端捕获起始值。
+    start_revision = int(report_state(project_id).get("report_revision") or 0)
+    start_content_sha256 = str(section.get("content_sha256") or content_sha256(section.get("content") or ""))
+    expected_revision = (
+        payload.expected_revision if payload and payload.expected_revision is not None else start_revision
+    )
+    expected_content_sha256 = (
+        payload.expected_content_sha256 if payload and payload.expected_content_sha256
+        else start_content_sha256
+    )
     # Rebuild from the frozen deterministic draft. A previous model response may
     # contain rejected numbers or wording and must not become the next prompt's
     # factual boundary.
@@ -1752,61 +1950,70 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
     content = chapter_context.get("draft") or draft_seed
     citations = list(chapter_context.get("allowed_citation_ids") or [])
     fallback_reason = ""
+    fallback_stage = "none"
     usage = None
     repair_attempted = False
+    attempt_id = ""
+    expected = {
+        "expected_revision": expected_revision,
+        "expected_content_sha256": expected_content_sha256,
+        "expected_prompt_sha256": chapter_context.get("prompt_sha256", ""),
+        "expected_materials_version": chapter_context.get("materials_version", ""),
+    }
+    generation_status = "deterministic" if not chapter_uses_llm(section_key) else "model_passed"
     if not chapter_uses_llm(section_key):
         fallback_reason = NO_MODEL_REASON
         validation = {"status": "skipped", "reasons": [fallback_reason]}
     else:
-        try:
-            result, usage = rewrite_section(
-                section["title"], content, evidence,
-                chapter_key=section_key, chapter_context=chapter_context,
-                strict_citations=True,
-            )
-            attribution_restored = _attribution_block_missing(result.content, chapter_context)
-            result.content = _preserve_chapter_boundaries(result.content, chapter_context)
-            validation = validate_chapter_output(result.content, result.citation_ids, chapter_context)
-            validation["source_attribution_restored"] = attribution_restored
-            if not _report_boundary_safe(result.content):
-                # 与完整生成同一道边界检查：单章重生成此前漏了这一步，
-                # 「同意担保」这类禁止结论在重生成路径上不会被拒绝。
-                validation["reasons"].append("章节包含禁止的承保或审批结论")
-                validation["status"] = "rejected"
-                validation["length_only_failure"] = False
-            if validation.get("length_only_failure"):
-                # 安全校验全过、仅篇幅超上限 → 一次定向压缩，复用同一上下文与别名表。
-                # 与完整生成共用 `repair_chapter_length`，两侧口径不会分叉。
-                repair_attempted = True
-                result, validation, repair_usage = repair_chapter_length(
-                    section["title"], content, evidence,
-                    chapter_key=section_key, chapter_context=chapter_context,
-                    call_context=LlmCallContext(project_id, "", "draft", "report"),
-                    original_result=result, original_validation=validation,
-                )
-                usage = repair_usage if usage is None else combine_usage(usage, repair_usage)
-            if validation["status"] == "passed":
-                content = result.content
-                citations = list(result.citation_ids)
-            else:
-                fallback_reason = "；".join(validation["reasons"])
-        except RuntimeError as exc:
-            fallback_reason = str(exc)[:240]
-            validation = {"status": "fallback", "reasons": [fallback_reason]}
-        except Exception:
-            fallback_reason = "章节模型调用或结构校验失败"
-            validation = {"status": "fallback", "reasons": [fallback_reason]}
+        # 与完整生成共用同一"生成 → 章节校验 → 一次修复（安全优先）→ 全部重检"流程
+        # （修订稿 §3.3）：单章入口不再只校验不执行完整判定。安全被拒 / 调用失败都在
+        # `run_chapter_model_attempt` 内一次性处理，每章最多一次额外模型调用。
+        attempt = run_chapter_model_attempt(
+            section["title"], content, evidence,
+            chapter_key=section_key, chapter_context=chapter_context,
+            call_context=LlmCallContext(project_id, "", "draft", "report"),
+            expected=expected,
+        )
+        usage = attempt["usage"]
+        validation = attempt["validation"]
+        fallback_reason = attempt["fallback_reason"]
+        fallback_stage = attempt["fallback_stage"]
+        repair_attempted = attempt["repair_attempted"]
+        generation_status = attempt["generation_status"]
+        attempt_id = attempt.get("attempt_id") or ""
+        # model_needs_review：修复后仅剩未决项，正文仍是模型稿，同样要采用（计划 §四 line 38）。
+        if is_model_content_status(generation_status):
+            content = attempt["content"]
+            citations = list(attempt["citation_ids"])
+    if generation_status == "fallback":
+        # 模型未产出可用正文（安全被拒且一次修复仍未通过 / 模型调用失败）→ **不写入新正文**，
+        # 保留已有正文为旧版本，记录本次失败并返回失败响应（修订稿 §3.3）。形态与下方后置
+        # 支持失败分支一致，失败现场不会因本次再生而丢失。
+        failure = fallback_reason or "章节模型未能产出可用正文"
+        execute(
+            "UPDATE report_sections SET validation_status=?, fallback_reason=?, fallback_stage=?,"
+            " validation_diagnostics=? WHERE project_id=? AND section_key=?",
+            ("failed", failure, fallback_stage or "chapter_validation",
+             json.dumps(chapter_diagnostics(validation), ensure_ascii=False), project_id, section_key),
+        )
+        if attempt_id:
+            set_section_attempt(project_id, section_key, attempt_id, adopted=False)
+        audit_event(
+            project_id, "report_section_regenerate_failed", "report_section", section_key, section,
+            {"failure": failure, "fallback_stage": fallback_stage, "validation": validation,
+             "usage": usage.__dict__ if usage else None}, "human",
+        )
+        return {
+            "content": str(section.get("content") or ""), "citationIds": stored_citations,
+            "validation": {"status": "failed", "reasons": [failure]},
+            "fallbackReason": failure, "generationStatus": "failed",
+            "contentOrigin": str(section.get("content_origin") or ""),
+            "support": {},
+            "latestAttempt": latest_attempt(project_id, section_key),
+            "usage": usage.__dict__ if usage else None,
+        }
     if not citations:
         citations = list(allowed) or stored_citations
-    if not fallback_reason and validation["status"] == "passed":
-        fallback_reason = ""
-    # 生成状态与证据支持状态分开写：证据侧由随后的 validate_report_support 计算。
-    generation_status = (
-        "deterministic" if not chapter_uses_llm(section_key)
-        else "fallback" if fallback_reason and validation.get("status") != "skipped"
-        else "model_passed" if validation.get("status") == "passed"
-        else "skipped"
-    )
     # 单章再生也走**后置支持校验**，与完整生成同一判定（修订稿 §3.3：完整生成与单章再生
     # 共用"生成 → 章节及后置校验 → 一次修复 → 全量重检 → 写入"，禁止单章入口只校验不执行
     # 完整判定）。放在**写库之前**评估候选正文：有主张未获证据支持时**不覆盖已有正文**，
@@ -1834,6 +2041,9 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
             ("failed", failure, "report_support", json.dumps(pre_support, ensure_ascii=False),
              project_id, section_key),
         )
+        # 模型尝试本身通过、但后置支持不通过 → 正文未落库，本次尝试不算采用。
+        if attempt_id:
+            set_section_attempt(project_id, section_key, attempt_id, adopted=False)
         audit_event(
             project_id, "report_section_regenerate_failed", "report_section", section_key, section,
             {"failure": failure, "unsupported_claims": pre_support["unsupported_claims"],
@@ -1846,16 +2056,32 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
             "contentOrigin": str(section.get("content_origin") or ""),
             "support": {"unsupported_claims": pre_support["unsupported_claims"],
                         "support_rate": pre_support["support_rate"]},
+            "latestAttempt": latest_attempt(project_id, section_key),
             "usage": usage.__dict__ if usage else None,
         }
+    # 写库前的并发校验（修订稿 §四）：报告版本、正文哈希、Prompt/材料版本任一变化即返回 409，
+    # 保留本次诊断（尝试已落台账）、不覆盖并发修改。
+    conflict = _regenerate_concurrency_conflict(
+        project_id, section_key, expected_revision, expected_content_sha256,
+        expected.get("expected_prompt_sha256", ""), expected.get("expected_materials_version", ""),
+    )
+    if conflict:
+        if attempt_id:
+            set_section_attempt(project_id, section_key, attempt_id, adopted=False)
+        audit_event(
+            project_id, "report_section_regenerate_conflict", "report_section", section_key, section,
+            {"conflict": conflict, "expected_revision": expected_revision,
+             "expected_content_sha256": expected_content_sha256}, "human",
+        )
+        raise HTTPException(409, f"{conflict}，请刷新报告后重试")
     # 单章重新生成同样走统一写入入口：来源/状态/阶段/篇幅/哈希/冻结披露一次对齐。
     write_report_section(
         project_id=project_id, section_key=section_key, title=section["title"],
         content=content, citation_ids=citations,
         allowed_source_ids=sorted({item["source_id"] for item in chapter_context.get("evidence", [])}),
-        content_origin="model" if generation_status == "model_passed" else "deterministic",
+        content_origin="model" if is_model_content_status(generation_status) else "deterministic",
         generation_status=generation_status, fallback_reason=fallback_reason,
-        fallback_stage="chapter_validation" if fallback_reason else "none",
+        fallback_stage=fallback_stage,
         # 系统表格块必须与生成路径一致地冻结。漏了它会有两个后果：正文里的表格
         # 被当成模型事实主张去要证据（支持率掉成 warning），并且「表格逐字保留」
         # 的检查失效。实测：单章重生成后 rating 章的 support 变成 warning。
@@ -1865,13 +2091,20 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
         ) if block],
         deterministic_draft=chapter_context.get("draft") or draft_seed,
         table_records=chapter_context.get("table_records") or [],
+        # 统一冻结记录（fact/table/metric/rule）：单章再生成与完整生成同口径冻结。
+        evidence_records=chapter_context.get("evidence_records") or None,
+        table_blocks=chapter_context.get("table_blocks") or None,
         length_policy=chapter_context.get("length_policy") or {},
-        diagnostics=validation_diagnostics(validation),
+        diagnostics=chapter_diagnostics(validation),
         prompt_version=chapter_context.get("prompt_version", ""),
         prompt_sha256=chapter_context.get("prompt_sha256", ""),
         input_hash=chapter_context.get("input_hash", ""),
-        support_status="pending",
+        # 与完整生成同口径（计划 §四 line 38）：仅剩未决项的模型稿支持状态记 warning。
+        support_status="warning" if generation_status == "model_needs_review" else "pending",
     )
+    # 正文真正落库后，本次尝试才算采用（accepted=latest=本次）。
+    if attempt_id:
+        set_section_attempt(project_id, section_key, attempt_id, adopted=True)
     if repair_attempted:
         execute("UPDATE report_sections SET length_repair_attempted=1 WHERE project_id=? AND section_key=?",
                 (project_id, section_key))
@@ -1883,7 +2116,9 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
     )
     validate_report_support(project_id)
     return {"content": content, "citationIds": citations, "validation": validation,
-            "fallbackReason": fallback_reason, "usage": usage.__dict__ if usage else None}
+            "fallbackReason": fallback_reason,
+            "latestAttempt": latest_attempt(project_id, section_key),
+            "usage": usage.__dict__ if usage else None}
 
 
 @app.post("/api/projects/{project_id}/material-qa")

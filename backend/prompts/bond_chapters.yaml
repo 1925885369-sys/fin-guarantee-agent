@@ -54,15 +54,16 @@ chapters:
       - 关联方往来只引用规则结果，区分有合同支持、无合同支持和材料不足。
     forbidden:
       - 不得推断股权比例、实控人关系或公司治理有效性。
-    # governance 从确定性模板改为模型直接撰写（修订稿 §2：默认目标 500–1500 字符）。
+    # governance 从确定性模板改为模型直接撰写（第三点细化方案 §三.1：第一章新默认目标
+    # 2000–4000 字符；项目覆盖、已有全局篇幅配置与历史报告保留）。
     # 不写 paragraph_order：修订稿要求"移除系统另行强制的正文顺序"，结构交给
     # required_sections 与项目 Prompt。
     narrative_contract:
       tone: professional_due_diligence
       min_paragraphs: 3
       max_paragraphs: 5
-      preferred_min_chars: 500
-      preferred_max_chars: 1500
+      preferred_min_chars: 2000
+      preferred_max_chars: 4000
       list_mode: limited
       avoid_openings: [系统识别到, 规则状态为, 经模型分析]
       prohibited_terms: [warning, insufficient, rule_key, 字段]
@@ -149,7 +150,10 @@ chapters:
       - 不得自行输出表格；表格一律由系统生成。
     input_contract:
       fact_keys: [revenue, cost_of_goods_sold, net_profit, operating_cash_flow, cash_received_from_sales, accounts_receivable, other_receivables, total_overdue_receivables, inventory, cash, restricted_cash, total_assets, total_liabilities, equity, current_assets, current_liabilities, finance_expense, interest_expense]
-      metric_keys: [revenue_growth, net_margin, cash_profit_ratio, debt_ratio, current_ratio, available_cash, cash_short_debt_ratio, interest_bearing_debt_capitalization, receivables_revenue_ratio, operating_cashflow_debt_ratio]
+      # 计划 §三 新增指标白名单：周转率（次，期初期末平均余额）、结构占比、三年速动比率。
+      # `quick_ratio` 此前不在白名单里，正文写"三年均低于1倍"时只有 comparison_bound 可依；
+      # 补齐后三年速动比率成为**可引用的系统指标**。
+      metric_keys: [revenue_growth, net_margin, cash_profit_ratio, debt_ratio, current_ratio, quick_ratio, available_cash, cash_short_debt_ratio, interest_bearing_debt_capitalization, receivables_revenue_ratio, operating_cashflow_debt_ratio, ar_turnover, inventory_turnover, non_current_assets_ratio, non_current_liabilities_ratio]
       rule_keys: [financial_tie_out, leverage_liquidity, receivable_quality, revenue_cash_quality, interest_coverage]
       source_kinds: [募集说明书, 审计报告, 财务报表, 信用评级报告]
       max_evidence_items: 16
@@ -158,7 +162,10 @@ chapters:
       required_phrases: [披露信息待核验]
       required_missing_markers: [材料不足, 披露信息待核验]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
-      max_citations: 3
+      # 财务章试点（计划 §二）：引用上限 3 → 8。财务分析引用处多（合并资产负债表、
+      # 利润表、现金流量表、有息债务表各要点），3 条会把合法引用截断成"论据不全"。
+      # 超量引用只做去重与截断（`workflow._limit_chapter_citations`），**不作为事实失败理由**。
+      max_citations: 8
       attribution_mode: multi_source_financial
     narrative_contract:
       tone: professional_due_diligence

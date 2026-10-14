@@ -606,14 +606,18 @@ MONEY_UNITS = ("元", "万元", "亿元")
 
 
 def business_column_role(label: str, index: int) -> str:
-    """列的业务角色。第 0 列恒为科目列；其余按表头判定，默认按数值/金额列处理。
+    """列的业务角色。表头写明「序号/编号」的列恒为引用列；其余第 0 列默认科目列。
 
-    判不出来时保守地当数值列（保持既有换算行为），只有明确是序号/期间名词/说明列
-    才排除——宁可漏排除，也不把真正的金额列排除掉导致"该换算的没换算"。
+    序号列被当成科目列时，行标签会退化成 "1"、"2"（银行授信表实测），记录词表随即
+    被纯数字污染；因此引用列判定必须在 ``index == 0 → subject`` 之前。
+    其余列判不出来时保守地当数值列（保持既有换算行为），只有明确是序号/期间名词/
+    说明列才排除——宁可漏排除，也不把真正的金额列排除掉导致"该换算的没换算"。
     """
+    text = re.sub(r"\s+", "", label or "")
+    if re.search(r"序号|编号|^序$", text):
+        return "reference"
     if index == 0:
         return "subject"
-    text = re.sub(r"\s+", "", label or "")
     if not text or text == "列待核验":
         return "period_value"
     if YEAR_HEADER_RE.match(text):

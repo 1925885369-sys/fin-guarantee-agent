@@ -3,8 +3,9 @@ import type {
   AuditEvent, CandidateFinding, Citation, CrossCheck, EvidenceGraphSummary, Fact, FactGroup, MaterialQAResponse,
   FinancialMetric, FinancialTieOut, Health, Inventory, LatestRun, MetricTrace, PolicyInfo, Project,
   BondSummary, EntityProfileDetail, EntityProfileReadiness, EntityProfileSummary, ProjectCreatePayload,
-  ProjectEntity, ProjectProfileSnapshot, ProjectSummary, ReportQuality, ReportSection, ReviewSummary,
+  ProjectEntity, ProjectProfileSnapshot, ProjectSummary, ProjectUpdatePayload, ProjectUpdateResult, ReportQuality, ReportSection, ReviewApplyResult, ReviewSummary,
   ReviewTask, Risk, Run, RunNode, RunArtifact, ReportPrompt,
+  ReportSnapshot, ReportSnapshotSummary,
     TableMatrix, TableSummary, TableCellReviewRecord,
 } from "./types";
 
@@ -102,12 +103,15 @@ export const api = {
   createProject: (payload: ProjectCreatePayload) =>
     request<{ id: string; accessToken: string }>("/api/projects", { method: "POST", headers: headers(undefined, true), body: JSON.stringify(payload) }),
   project: (id: string, token?: string) => request<Project>(`/api/projects/${id}`, { headers: headers(token) }),
+  /** 修改项目基础信息（发行人／标的名称／发行规模）。返回更新后的详情，不含访问令牌。 */
+  updateProject: (id: string, payload: ProjectUpdatePayload, token?: string) =>
+    request<ProjectUpdateResult>(`/api/projects/${id}`, { method: "PATCH", headers: headers(token, true), body: JSON.stringify(payload) }),
   archiveProject: (id: string, token?: string) => request<{ id: string; archived: boolean; archived_at: string | null; changed: boolean }>(`/api/projects/${id}/archive`, { method: "POST", headers: headers(token) }),
   restoreProject: (id: string, token?: string) => request<{ id: string; archived: boolean; archived_at: string | null; changed: boolean }>(`/api/projects/${id}/restore`, { method: "POST", headers: headers(token) }),
   profileSnapshot: (id: string, token?: string) => request<ProjectProfileSnapshot>(`/api/projects/${id}/profile-snapshot`, { headers: headers(token) }),
   refreshProfileSnapshot: (id: string, token?: string) => request<ProjectProfileSnapshot>(`/api/projects/${id}/profile-snapshot/refresh`, { method: "POST", headers: headers(token) }),
   reviewSummary: (id: string, token?: string) => request<ReviewSummary>(`/api/projects/${id}/review-summary`, { headers: headers(token) }),
-  applyReview: (id: string, token?: string) => request<ReviewSummary & { affected_section_keys: string[]; applied: boolean; quality?: ReportQuality }>(`/api/projects/${id}/review/apply`, { method: "POST", headers: headers(token) }),
+  applyReview: (id: string, token?: string) => request<ReviewApplyResult>(`/api/projects/${id}/review/apply`, { method: "POST", headers: headers(token) }),
   markReportReviewed: (id: string, token?: string) => request<ReviewSummary>(`/api/projects/${id}/report/mark-reviewed`, { method: "POST", headers: headers(token) }),
   inventory: (id: string, token?: string) => request<Inventory>(`/api/projects/${id}/document-inventory`, { headers: headers(token) }),
   materialQA: (id: string, question: string, documentIds: string[] = [], token?: string) =>
@@ -138,6 +142,10 @@ export const api = {
   checks: (id: string, token?: string) => request<CrossCheck[]>(`/api/projects/${id}/cross-checks`, { headers: headers(token) }),
   risks: (id: string, token?: string) => request<Risk[]>(`/api/projects/${id}/risks`, { headers: headers(token) }),
   report: (id: string, token?: string) => request<ReportSection[]>(`/api/projects/${id}/report`, { headers: headers(token) }),
+  reportHistory: (id: string, token?: string) =>
+    request<ReportSnapshotSummary[]>(`/api/projects/${id}/report-history`, { headers: headers(token) }),
+  reportHistoryDetail: (id: string, snapshotId: string, token?: string) =>
+    request<ReportSnapshot>(`/api/projects/${id}/report-history/${encodeURIComponent(snapshotId)}`, { headers: headers(token) }),
   refreshReportTables: (id: string, chapters: string[], expectedRevision: number, sectionHashes: Record<string, string>, token?: string) => request<{ status: string; chapters: { chapter_key: string; content_sha256: string; table_hash: string }[]; report_revision: number; report_state: string }>(`/api/projects/${id}/report/tables/refresh`, {
     method: "POST", headers: headers(token, true),
     body: JSON.stringify({ chapters, expected_report_revision: expectedRevision, section_hashes: sectionHashes }),

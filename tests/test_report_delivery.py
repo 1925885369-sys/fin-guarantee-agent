@@ -61,8 +61,8 @@ def _fixture(*, with_source: bool = True) -> str:
 
 def _cleanup(project_id: str) -> None:
     with connect() as conn:
-        for table in ("report_claims", "audit_events", "report_sections", "citations",
-                      "sources", "documents"):
+        for table in ("chapter_generation_attempts", "report_claims", "audit_events", "report_sections",
+                      "citations", "sources", "documents"):
             conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
         conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
@@ -331,6 +331,140 @@ def test_reset_section_review_scopes_to_one_section_and_keeps_evidence_fields():
         _cleanup(project_id)
 
 
+def test_write_section_resets_review_and_revokes_final_review_mark():
+    """修订稿 §3.3：写入正文时**自动**恢复章节待复核并撤销旧最终复核标记（同一事务）。
+
+    此前 `reset_section_review` 只有函数、没有调用方；本用例守住"接线"不再丢失。
+    """
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，本章材料缺口待补充原件后核验。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="model",
+            generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="passed", review_status="reviewed",
+        )
+        with connect() as conn:
+            conn.execute(
+                "UPDATE projects SET report_revision=3,review_revision=3,"
+                "report_reviewed_revision=3,report_reviewed_at=? WHERE id=?",
+                (now_iso(), project_id),
+            )
+        assert _review_snapshot(project_id, SECTION)["project"]["report_reviewed_revision"] == 3
+
+        # 重新生成写入（默认 review_status='draft'）：章节回待复核、项目最终复核标记撤销
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，重新生成后的正文。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="model",
+            generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        snapshot = _review_snapshot(project_id, SECTION)
+        assert snapshot["section"]["review_status"] == "draft"
+        assert snapshot["project"]["report_reviewed_revision"] == 0
+        assert snapshot["project"]["report_reviewed_at"] is None
+    finally:
+        _cleanup(project_id)
+
+
+def test_human_review_decision_in_the_same_write_is_respected():
+    """人工编辑在同一请求里显式选择 reviewed：章节状态不被写入回退，但最终复核标记仍撤销。"""
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，本章材料缺口待补充原件后核验。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="model",
+            generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="passed",
+        )
+        with connect() as conn:
+            conn.execute(
+                "UPDATE projects SET report_revision=4,review_revision=4,"
+                "report_reviewed_revision=4,report_reviewed_at=? WHERE id=?",
+                (now_iso(), project_id),
+            )
+
+        # 人工编辑路径（update_section → write_report_section）：显式 review_status='reviewed'
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，人工修订后的正文。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="human",
+            generation_status="human_edit", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending", review_status="reviewed",
+        )
+        snapshot = _review_snapshot(project_id, SECTION)
+        assert snapshot["section"]["review_status"] == "reviewed"     # 尊重同请求里的复核结论
+        assert snapshot["project"]["report_reviewed_revision"] == 0   # 但最终复核标记必须撤销
+        assert snapshot["project"]["report_reviewed_at"] is None
+    finally:
+        _cleanup(project_id)
+
+
+def test_failed_chapters_block_final_delivery():
+    """修订稿 §3.3：模型生成失败（含一次修复）的章节须处理后才允许最终交付。"""
+    startup()
+    project_id = _fixture()
+    try:
+        from backend.app.database import execute
+
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，本章材料缺口待补充原件后核验。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="deterministic",
+            generation_status="fallback",
+            fallback_reason="章节数字与所写期间不匹配（已尝试一次修复仍未通过）",
+            fallback_stage="chapter_validation", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert any("模型生成失败" in item for item in blockers)
+
+        # 重新生成成功 → 该阻断消失（其余既有门槛不受影响，只按本条过滤断言）
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，本章材料缺口待补充原件后核验。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="model",
+            generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert not any("模型生成失败" in item for item in blockers)
+
+        # 单章再生失败（保留旧正文、标记 validation_status='failed'）同样阻断
+        execute(
+            "UPDATE report_sections SET validation_status='failed',fallback_reason=?,fallback_stage=? "
+            "WHERE project_id=? AND section_key=?",
+            ("模型正文有 2 条主张未获证据支持，已保留已有正文为旧版本（本次未采用）",
+             "report_support", project_id, SECTION),
+        )
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert any("模型生成失败" in item for item in blockers)
+
+        # 确定性章节单章重生成的占位原因（NO_MODEL_REASON，明文"不是模型回退"）不阻断
+        from backend.app.chapter_guard import NO_MODEL_REASON
+
+        execute(
+            "UPDATE report_sections SET validation_status='pending',generation_status='deterministic',"
+            "fallback_reason=?,fallback_stage='none' WHERE project_id=? AND section_key=?",
+            (NO_MODEL_REASON, project_id, SECTION),
+        )
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert not any("模型生成失败" in item for item in blockers)
+    finally:
+        _cleanup(project_id)
+
+
 def test_model_adoption_rate_counts_sections_not_events():
     """采用率按"章节"统计：6 章尝试模型、2 章后置回退 → 4/6；确定性章节不计入分母。"""
     startup()
@@ -363,5 +497,179 @@ def test_model_adoption_rate_counts_sections_not_events():
         assert quality["model_adopted_sections"] == 4
         assert quality["model_adoption_rate"] == round(4 / 6, 4)
         assert quality["support_fallbacks"] == 2
+    finally:
+        _cleanup(project_id)
+
+
+# ------------------------------------------ 尝试台账：accepted / latest --
+# 正文与诊断均为叙述性（无数字主张），以避开与其它并行模块无关的数值判定路径。
+
+_NARRATIVE = "据募集文档披露，本章为业务与治理的叙述性说明，未引入新增数据。"
+
+
+def test_attempt_pointers_distinguish_accepted_and_latest():
+    """成功尝试 → accepted=latest；失败尝试 → latest 前移、accepted 不动（§四）。"""
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content=_NARRATIVE, citation_ids=[], allowed_source_ids=["src-1"],
+            content_origin="model", generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        accepted = report_delivery.record_chapter_attempt(
+            project_id=project_id, section_key=SECTION, status="passed", stage="none",
+            repair_type="none", adopted=False,
+            frozen_input={"input_hash": "h1"}, expected={"expected_revision": 0},
+        )
+        report_delivery.set_section_attempt(project_id, SECTION, accepted, adopted=True)
+        section = row("SELECT accepted_attempt_id,latest_attempt_id FROM report_sections "
+                      "WHERE project_id=? AND section_key=?", (project_id, SECTION))
+        assert section["accepted_attempt_id"] == accepted == section["latest_attempt_id"]
+        latest = report_delivery.latest_attempt(project_id, SECTION)
+        assert latest["status"] == "passed" and latest["adopted"] is True
+
+        failed = report_delivery.record_chapter_attempt(
+            project_id=project_id, section_key=SECTION, status="failed", stage="chapter_validation",
+            repair_type="safety", adopted=False, diagnostics={"safety_repair_failed": True},
+        )
+        report_delivery.set_section_attempt(project_id, SECTION, failed, adopted=False)
+
+        section = row("SELECT accepted_attempt_id,latest_attempt_id FROM report_sections "
+                      "WHERE project_id=? AND section_key=?", (project_id, SECTION))
+        assert section["latest_attempt_id"] == failed           # 最新尝试前移
+        assert section["accepted_attempt_id"] == accepted        # 现正文仍来自上次成功
+        latest = report_delivery.latest_attempt(project_id, SECTION)
+        assert latest["status"] == "failed" and latest["adopted"] is False
+        assert latest["repair_type"] == "safety"
+    finally:
+        _cleanup(project_id)
+
+
+def test_latest_failed_attempt_blocks_delivery_until_superseded():
+    """最新尝试失败且未被后续成功覆盖 → 阻断；后续成功再次写入后解除。"""
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content=_NARRATIVE, citation_ids=[], allowed_source_ids=["src-1"],
+            content_origin="deterministic", generation_status="deterministic", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        failed = report_delivery.record_chapter_attempt(
+            project_id=project_id, section_key=SECTION, status="failed",
+            stage="chapter_validation", repair_type="safety", adopted=False,
+        )
+        report_delivery.set_section_attempt(project_id, SECTION, failed, adopted=False)
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert any("最新生成尝试失败" in item for item in blockers)
+
+        # 后续一次成功尝试覆盖 latest → 阻断解除
+        ok = report_delivery.record_chapter_attempt(
+            project_id=project_id, section_key=SECTION, status="passed", stage="none", adopted=False,
+        )
+        report_delivery.set_section_attempt(project_id, SECTION, ok, adopted=True)
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert not any("最新生成尝试失败" in item for item in blockers)
+    finally:
+        _cleanup(project_id)
+
+
+def test_needs_review_claims_block_delivery(monkeypatch):
+    """δ 冻结接口：quality['needs_review_claims']>0 → 阻断最终交付（§二.2 末条）。"""
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content=_NARRATIVE, citation_ids=[], allowed_source_ids=["src-1"],
+            content_origin="model", generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        from backend.app import p0
+
+        monkeypatch.setattr(p0, "validate_report_support", lambda _pid: {
+            "unsupported_claims": 0, "invalid_citations": 0, "disclosure_missing_sections": 0,
+            "needs_review_claims": 2, "status": "warning",
+        })
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert any("待核验事实" in item for item in blockers)
+    finally:
+        _cleanup(project_id)
+
+
+def test_report_exposes_latest_attempt_field():
+    """GET /report 的每个章节都带 latest_attempt 摘要字段（§四）。
+
+    不依赖演示项目恰好已有章节：隔离测试库里 `startup()` 只重建种子项目、不生成
+    章节，因此就地建一个最小项目并写入一次尝试，验证接口把台账接到每个章节上。
+    """
+    from backend.app import main
+
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content=_NARRATIVE, citation_ids=[], allowed_source_ids=["src-1"],
+            content_origin="model", generation_status="model_passed", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="pending",
+        )
+        attempt = report_delivery.record_chapter_attempt(
+            project_id=project_id, section_key=SECTION, status="passed", stage="none",
+            repair_type="none", adopted=False,
+        )
+        report_delivery.set_section_attempt(project_id, SECTION, attempt, adopted=True)
+
+        sections = main.report(project_id, x_project_token="token")
+        assert sections
+        assert all("latest_attempt" in section for section in sections)
+        assert all(
+            {"status", "stage", "repair_type", "adopted", "needs_review_count", "diagnostics"}
+            <= set(section["latest_attempt"])
+            for section in sections
+        )
+        target = next(section for section in sections if section["section_key"] == SECTION)
+        assert target["latest_attempt"]["status"] == "passed"
+        assert target["latest_attempt"]["adopted"] is True
+    finally:
+        _cleanup(project_id)
+
+
+def test_model_needs_review_draft_blocks_final_delivery():
+    """待核验稿**禁止最终交付**（计划 §一 line 7 / §四 line 38 / §五 line 50）。
+
+    这类章节的 `fallback_reason` 是**空的**——它不是回退，正文就是模型稿。所以交付门
+    不能只靠"回退原因"判：必须显式认 `generation_status='model_needs_review'`，
+    否则待核验稿会随报告直接交付出去。
+    """
+    startup()
+    project_id = _fixture()
+    try:
+        report_delivery.write_report_section(
+            project_id=project_id, section_key=SECTION, title="主营业务及经营稳定性",
+            content="据募集说明书披露，本章材料缺口待补充原件后核验。",
+            citation_ids=[], allowed_source_ids=["src-1"], content_origin="model",
+            generation_status="model_needs_review", required_disclosures=[],
+            length_policy={"effective_min_chars": 1, "effective_max_chars": 5000},
+            support_status="warning",
+        )
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert any("模型待核验稿" in item for item in blockers), blockers
+
+        # 人工复核通过（状态转为 model_passed）→ 该条阻断消失
+        with connect() as conn:
+            conn.execute(
+                "UPDATE report_sections SET generation_status='model_passed' "
+                "WHERE project_id=? AND section_key=?", (project_id, SECTION),
+            )
+        blockers = report_delivery.delivery_blockers(project_id)
+        assert not any("模型待核验稿" in item for item in blockers), blockers
     finally:
         _cleanup(project_id)

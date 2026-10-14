@@ -23,6 +23,8 @@ frontend/playwright-report/
 # 本地导出的报告，按需重新生成
 尽调报告word/
 .llm-smoke/
+# 阶段 6 隔离真实模型验收输出（本地生成，不入库）
+acceptance_output/
 docs/assets/*smoke*.json
 docs/assets/*after-fix*.json
 
@@ -34,12 +36,26 @@ docs/assets/*after-fix*.json
 .agents/
 .workbuddy/
 .release/
+replay/
+scripts/_debug_*.py
+scripts/_replay_*.py
+scripts/replay_*.py
+scripts/stage6_acceptance.py
+scripts/stage3_table_checks.py
 *.pem
 *.key
 *.p12
 *.pfx
 *.tar.gz
 PLAN*.md
+docs/报告内容评审_北投_20261011.md
+docs/第六轮回读与六项修复_20261011.md
+docs/财务章Prompt合理性诊断_北投_20261011.md
+docs/报告重写版_北投/
+三项遗留修复PLAN.md
+旧MD计划剩余项收口执行方案.md
+第三点细化方案PLAN.md
+财务章prompt及生成校验修复PLAN.md
 electric-nebula-babbage-spVyZpwI.md
 docs/assets/pilot-ji
 

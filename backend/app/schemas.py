@@ -37,6 +37,27 @@ class ProjectCreate(BaseModel):
         return value
 
 
+class ProjectUpdate(BaseModel):
+    """项目基础信息修改：三个字段都可选，只提交真正要改的字段。
+
+    ``str_strip_whitespace`` 让「发行人去除首尾空白后为 2–80 字」在长度校验之前生效，
+    否则 `"  "` 这种全空白输入会被当成合法值写进项目名。
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    company_name: Optional[str] = Field(default=None, min_length=2, max_length=80)
+    bond_name: Optional[str] = Field(default=None, max_length=160)
+    amount: Optional[float] = Field(default=None, gt=0)
+
+    @field_validator("amount")
+    @classmethod
+    def finite_amount(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("发行规模必须是有限数值")
+        return value
+
+
 class EntityProfileSourceInput(BaseModel):
     id: Optional[str] = None
     filename: str = Field(min_length=1, max_length=240)
@@ -175,6 +196,19 @@ class DocumentUpdate(BaseModel):
 class SectionUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=30000)
     review_status: Literal["draft", "reviewed"] = "draft"
+
+
+class SectionRegenerateRequest(BaseModel):
+    """单章再生请求体（第三点细化方案 §四）。
+
+    新前端必须发送预期报告版本与正文哈希用于并发校验；旧调用可整体省略请求体，此时由
+    服务端捕获起始版本（兼容策略，不强制破坏旧客户端）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: Optional[int] = Field(default=None, ge=0)
+    expected_content_sha256: Optional[str] = Field(default=None, max_length=128)
 
 
 class PromptNarrativeConfig(BaseModel):

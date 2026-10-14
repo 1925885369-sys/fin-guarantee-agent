@@ -318,13 +318,46 @@ def test_real_zhongyou_keeps_full_consolidated_and_standalone_statements(client)
     pytest.skip("中邮完整报表未抽取")
 
 
-def test_model_request_does_not_ask_model_to_echo_complete_tables(monkeypatch):
+def test_model_request_sends_a_digest_not_the_complete_table(monkeypatch):
+    """三项遗留修复方案 §二：请求不再携带完整渲染后的 Markdown 表格。
+
+    模型只拿结构化摘要（标题/记录/索引/快照哈希）与服务端职责规则；正文由服务端在
+    模型输出后拼接——这消除"必须逐字保留"与"不要复制"并存的 24k 级回声。
+    """
     table = "### 系统整理数据表\n\n| 科目 | 2025 年 |\n| --- | --- |\n| 资产 | 72,000 |"
+    records = [{
+        "record_id": "t1", "label": "资产", "period": "2025", "value": "72000", "unit": "万元",
+        "subject": "华辰精密制造有限公司", "scope": "合并口径",
+    }]
     monkeypatch.setattr(llm, "chapter_prompt", lambda *_: "system")
     _, request, *_ = llm._report_request("财务分析", "正文。\n\n" + table, [], None, "financial", {
-        "project_id": "p", "system_table_block": table, "system_table_role": "正文只写分析。", "prompt_config": {},
+        "project_id": "p", "system_table_block": table, "system_table_role": "正文只写分析。",
+        "table_records": records, "table_blocks": [{"title": "系统整理数据表"}],
+        "table_snapshot_hash": "snap-hash", "prompt_config": {},
+    })
+    assert "deterministic_draft" not in request          # 直接撰写：草稿留在服务端，不进请求
+    digest = request["system_tables"]
+    assert isinstance(digest, dict)                      # 表格以结构化摘要下发，不是 Markdown
+    rendered = json.dumps(request, ensure_ascii=False)
+    assert "| 科目 |" not in rendered and "| --- |" not in rendered
+    assert digest["tables"][0]["title"] == "系统整理数据表"
+    assert digest["table_snapshot_hash"] == "snap-hash"
+    assert digest["index"]["units"] == ["万元"]
+    assert "不要在返回的 content 中" in request["system_table_rules"]
+
+
+def test_rewrite_mode_request_strips_tables_from_the_draft(monkeypatch):
+    """rewrite 模式（历史/未迁移章节）仍把表格从草稿中剥离，表格只经摘要一次。"""
+    table = "### 系统整理数据表\n\n| 科目 | 2025 年 |\n| --- | --- |\n| 资产 | 72,000 |"
+    records = [{
+        "record_id": "t1", "label": "资产", "period": "2025", "value": "72000", "unit": "万元",
+    }]
+    monkeypatch.setattr(llm, "chapter_prompt", lambda *_: "system")
+    _, request, *_ = llm._report_request("财务分析", "正文。\n\n" + table, [], None, "financial", {
+        "project_id": "p", "system_table_block": table, "system_table_role": "正文只写分析。",
+        "table_records": records, "table_blocks": [{"title": "系统整理数据表"}],
+        "prompt_config": {"generation_mode": "rewrite"},
     })
     assert request["deterministic_draft"] == "正文。"
-    assert request["system_tables"] == table
-    assert "不要在返回的 content 中复制" in request["system_table_rules"]
-    assert json.dumps(request, ensure_ascii=False).count("72,000") == 1
+    assert isinstance(request["system_tables"], dict)
+    assert "| 科目 |" not in json.dumps(request, ensure_ascii=False)

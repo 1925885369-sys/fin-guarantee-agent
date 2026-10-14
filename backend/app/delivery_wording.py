@@ -45,8 +45,14 @@ _INTERNAL_UUID = re.compile(
 # 都必须先把它们剔除——否则「发行文件〔资料01〕第 29 页」会被读成两个数字，
 # 而证据里当然找不到，于是正常引用被判成「无证据声明」。
 # 页码部分与 ``chapter_guard.PAGE_REFERENCE_RE`` 同源，避免两套规则对不上。
-PAGE_REFERENCE_PATTERN = r"第\s*[\d,，、\s\-~至]+\s*页"
-REFERENCE_PATTERN = re.compile(rf"〔\s*资料\s*\d+\s*〕|{PAGE_REFERENCE_PATTERN}")
+# 证据引用别名（E01/E05，与 ``chapter_guard.CITATION_ALIAS_RE`` 同源）：不剔除时
+# "（E05、E06、E07）"里的 05/06/07 会被 ``\d+`` 读成数值 5/6/7（数字前是数字，
+# 字母 lookbehind 拦不住后半个字符）——北投 governance 实测据此误报。
+# 范围连接号必须含**全角破折号**（—–―－）：PDF 回流把"第77—81页"写成全角破折号，
+# 类里只有 ASCII `-` 时漏剔，77/81 会被读成裸数字（北投 financial 缺口句实测）。
+PAGE_REFERENCE_PATTERN = r"第\s*[\d,，、\s\-~～—–―－至]+\s*页"
+CITATION_ALIAS_PATTERN = r"\bE\d{2,}\b"
+REFERENCE_PATTERN = re.compile(rf"〔\s*资料\s*\d+\s*〕|{PAGE_REFERENCE_PATTERN}|{CITATION_ALIAS_PATTERN}")
 
 
 def strip_references(text: str) -> str:

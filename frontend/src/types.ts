@@ -99,6 +99,27 @@ export interface ReviewSummary {
   report_state: "missing" | "draft_stale" | "draft_current" | "final_ready";
 }
 
+/** 复核更新后的受影响章节（/review/apply 返回）：再生入口所需字段由后端计算下发。 */
+export interface AffectedSection {
+  section_key: string;
+  title: string;
+  /** 是否模型章节（确定性章节由系统重算，没有"手动再生"入口） */
+  llm: boolean;
+  /** 是否可手动再生（恒 ⊆ llm） */
+  regenerable: boolean;
+  regenerate_endpoint: string;
+}
+
+/** /review/apply 的返回：复核汇总 + 受影响章节与再生入口（复核更新后显示用）。 */
+export interface ReviewApplyResult extends ReviewSummary {
+  affected_section_keys: string[];
+  affected_sections?: AffectedSection[];
+  affected_model_section_keys?: string[];
+  regenerable_section_keys?: string[];
+  applied: boolean;
+  quality?: ReportQuality;
+}
+
 export interface ProjectCreatePayload {
   company_name: string;
   amount: number;
@@ -127,10 +148,22 @@ export interface ProjectSummary {
   bond_name: string;
   data_class: "fictional_demo" | "real_reference" | "user_project";
   evaluation_eligible: number | boolean;
+  /** 列表接口本就返回该列：用于提示「已绑定主体档案的项目，改名不会更换发行主体」。 */
+  issuer_profile_id?: string | null;
   created_at?: string;
   updated_at?: string;
   archived_at?: string | null;
 }
+
+/** 项目基础信息修改：三个字段都可选，只提交真正要改的那几个。 */
+export interface ProjectUpdatePayload {
+  company_name?: string;
+  bond_name?: string;
+  amount?: number;
+}
+
+/** PATCH 返回更新后的项目详情（不含访问令牌），changed 表示是否真的写入了变化。 */
+export type ProjectUpdateResult = Project & { changed: boolean };
 
 export interface Project extends ProjectSummary {
   created_at: string;
@@ -174,6 +207,14 @@ export interface ReportPrompt {
   /** 该章是否存在网页设置的“全局默认”(对所有未单独覆盖项目生效) */
   global_overridden?: boolean;
   global_updated_at?: string | null;
+  /** 项目级编辑权限（后端按环境/本机直连判定；真实参考项目仅本机直连、非公开环境可编辑） */
+  editable?: boolean;
+  /** 全局默认是否可编辑（当前恒 false；全局权限由后续方案负责） */
+  global_editable?: boolean;
+  /** 项目级只读原因（editable=false 时展示给用户） */
+  edit_reason?: string;
+  /** 是否真实参考项目（只读提示与展示口径用） */
+  real_reference?: boolean;
 }
 
 /** 篇幅目标：就是用户在章节 Prompt 里设置的区间，没有第二套系统上限。 */
@@ -271,6 +312,9 @@ export interface BondSummary {
   issuer: string;
   issueAmount: number | null;
   currentIssueAmount: number | null;
+  /** 这两个值在材料未披露时会回落到项目录入，来源必须以后端标记为准。 */
+  bondNameSource: "material" | "project" | "none";
+  issueAmountSource: "material" | "project" | "conflict";
   registeredAmount: number | null;
   termYears: number | null;
   couponRate: number | null;
@@ -635,8 +679,12 @@ export interface ReportSection {
   input_hash?: string;
   fallback_reason?: string;
   allowed_source_ids?: string[];
-  /** 生成状态：模型结果是否真正进入报告（与证据支持状态分开） */
-  generation_status?: "model_passed" | "fallback" | "deterministic" | "skipped" | "human_edit" | string;
+  /** 生成状态：模型结果是否真正进入报告（与证据支持状态分开）。
+   *  `model_needs_review`＝修复后**仅剩未决项**：正文是模型稿但**不计入合格采用率**。 */
+  generation_status?: "model_passed" | "model_needs_review" | "fallback" | "deterministic" | "skipped" | "human_edit" | string;
+  /** 正文生成时的 Prompt 哈希与**当前生效** Prompt 不同（报告用了旧 Prompt）。
+   *  仅作提示，**保存 Prompt 不会自动再生**。 */
+  prompt_outdated?: boolean;
   /** 最终正文的真实来源：模型 / 确定性模板 / 人工编辑 / 历史来源未核实 */
   content_origin?: "model" | "deterministic" | "human" | "unknown" | string;
   /** 回退发生阶段：章节校验 / 后置支持校验 / 无 */
@@ -663,6 +711,8 @@ export interface ReportSection {
     /** 篇幅压缩稿未通过校验、已退回原正文时为 true */
     length_repair_failed?: boolean;
     length_repair_reasons?: string[];
+    /** 文风写作提示（技术化起句/系统术语/列表形态）：**不阻断保存与交付**，仅供人工查看 */
+    style_notes?: string[];
   };
   /** 篇幅诊断：生成时记录；历史报告为 not_checked（字符数由后端读取时补算） */
   length_status?: "passed" | "short" | "long" | "hard_limit_exceeded" | "not_checked" | string;
@@ -728,6 +778,41 @@ export interface RunArtifact {
 export interface LatestRun {
   run: Run | null;
   nodes: RunNode[];
+}
+
+/** 历史报告快照摘要：不含 payload，供列表直接渲染。 */
+export interface ReportSnapshotSummary {
+  id: string;
+  run_id: string;
+  created_at: string;
+  title: string;
+  report_level: string;
+  validation_status: string;
+  support_rate: number;
+  report_revision: number;
+  review_revision: number;
+}
+
+/**
+ * 快照 payload：完成任务瞬间冻结的完整报告表示。
+ * `sections` 与 `GET /report` 同形，因此可直接复用同一套报告渲染组件。
+ */
+export interface ReportSnapshotPayload {
+  sections: ReportSection[];
+  groups: Array<{ label: string; chapters: Array<{ label: string; section: ReportSection }>; section?: ReportSection }>;
+  citations: Array<{ id: string; label: string; quote?: string; locator?: string; page?: number | null }>;
+  open_items: string[];
+  quality: Record<string, unknown>;
+  material_labels?: Record<string, string>;
+  frozen_at?: string;
+}
+
+export interface ReportSnapshot extends ReportSnapshotSummary {
+  project_id: string;
+  subject: string;
+  schema_version: string;
+  content_sha256: string;
+  payload: ReportSnapshotPayload;
 }
 
 export type WorkflowStatus = "pending" | "current" | "completed" | "blocked";

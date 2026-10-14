@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { StatusBadge } from "../../../components/common";
+import { HelpTip, StatusBadge } from "../../../components/common";
 import type { EntityProfileStatus, ProfileFactStatus, ProfileRequirementStatus } from "../contracts";
 
 const factLabels: Record<ProfileFactStatus, string> = {
@@ -44,13 +44,30 @@ export function RequirementStatusBadge({ status }: { status: ProfileRequirementS
   return <StatusBadge tone={tone(status)}>{requirementLabels[status]}</StatusBadge>;
 }
 
-export function ProfilePanelHeading({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
-  return <header className="ep-panel-heading"><div><h3>{title}</h3>{description && <p>{description}</p>}</div>{action}</header>;
+/**
+ * 区块标题。`description` 只放**关键状态信息**（时间、口径、数量），
+ * 原理、计分方式、脱敏规则一类解释放 `help`，收进标题旁的说明按钮。
+ */
+export function ProfilePanelHeading({ title, description, help, action }: { title: string; description?: string; help?: ReactNode; action?: ReactNode }) {
+  return <header className="ep-panel-heading"><div><h3>{title}{help && <HelpTip label={`${title}说明`}>{help}</HelpTip>}</h3>{description && <p>{description}</p>}</div>{action}</header>;
 }
+
+/**
+ * 缺失值统一文案。缺失**不显示为零**，也不写成「材料不足」——后者是事实状态，
+ * 值是值、状态是状态，两者混用会让读者以为已经取到材料只是内容不足。
+ */
+export const MISSING_VALUE = "待补充";
 
 export function displayFactValue(value: number | null, textValue: string, unit: string) {
   if (value != null) return `${value.toLocaleString()}${unit ? ` ${unit}` : ""}`;
-  return textValue || "材料不足";
+  return textValue || MISSING_VALUE;
+}
+
+/** 事实的来源一行说明：来源标签 + 页码；没有来源时明确写「来源待补充」。 */
+export function factSourceLabel(fact: { source_label?: string | null; page?: number | null } | undefined) {
+  if (!fact) return MISSING_VALUE;
+  const label = fact.source_label || "来源待补充";
+  return fact.page ? `${label} · 第${fact.page}页` : label;
 }
 
 export function percent(value: number) {

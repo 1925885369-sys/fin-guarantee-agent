@@ -1,6 +1,7 @@
 import uuid
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.database import connect, json_dump, now_iso, row, rows
@@ -16,6 +17,15 @@ from backend.app.p0 import (
 )
 from backend.app.parsers import parse_pdf
 from backend.app.professional import analysis_fact_rows, fact_groups, sync_fact_assertions
+
+
+@pytest.fixture(autouse=True)
+def _ensure_schema():
+    """触库用例前确保 schema 已建立（与 test_evidence_records 同模式），
+    避免本文件排在批内首个时"no such table: projects"。"""
+    from backend.app.main import startup
+
+    startup()
 
 
 def _project(company: str = "P0测试企业") -> str:
@@ -164,8 +174,15 @@ def test_claim_validation_and_evidence_graph_trace_every_calculation():
         metric = next(item for item in metrics if item["metric_key"] == "net_margin")
         with connect() as conn:
             conn.execute(
-                "INSERT INTO report_sections (id,project_id,section_key,title,content,citation_ids,review_status,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-                ("section-p0", project_id, "financial", "财务分析", "2025年营业收入为100万元。", json_dump(["citation-p0"]), "draft", now_iso()),
+                "INSERT INTO report_sections (id,project_id,section_key,title,content,citation_ids,review_status,updated_at,table_records_json) VALUES (?,?,?,?,?,?,?,?,?)",
+                ("section-p0", project_id, "financial", "财务分析", "2025年营业收入为100万元。", json_dump(["citation-p0"]), "draft", now_iso(),
+                 # 数字支持改为按该章**冻结结构化记录**绑定（第三点细化方案 §二.2）：正例必须
+                 # 提供一条与主张同值同单位、且科目/期间一致的记录，否则会被判"无记录可绑"。
+                 json_dump([{
+                     "record_id": "cell:r01c01@table-evidence-v2", "value": "100", "unit": "万元",
+                     "label": "营业收入", "period": "2025", "subject": "证据链测试企业",
+                     "scope": "合并口径", "source_ids": ["source-p0"],
+                 }])),
             )
             conn.execute(
                 "INSERT INTO report_sections (id,project_id,section_key,title,content,citation_ids,review_status,updated_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -273,6 +290,72 @@ def test_requirement_and_boundary_claims_are_not_counted_as_unsupported_while_fa
         assert quality["factual_claims"] == 1
         assert quality["unsupported_claims"] == 1
         assert quality["status"] == "warning"
+    finally:
+        _cleanup(project_id)
+
+
+def test_reflow_alias_and_gap_predicates_do_not_trip_label_gate():
+    """收口方案 §一的支持侧修复（北投 0685da5d 实测的同类场景）：
+
+    ① PDF 断行归一："债券受托管理人"在页文本里被断成"受托管⏎理人" → 仍按存在处理；
+    ② 登记别名："评级机构" 的别名"中诚信"出现在证据里 → 按存在处理；
+    ③ 缺口短语扩展与后窗口："…到期债务未披露" 的谓语式缺口 → 跳过存在性闸门。
+    反例：材料里完全没有的科目（审计机构）仍判 unsupported。
+    """
+    project_id = _project("断行别名缺口测试企业")
+    try:
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO documents (id,project_id,filename,kind,media_type,sha256,size,parse_status,quality,locator_count,warning,created_at,parser,ocr_status,page_count) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("doc-reflow", project_id, "募集说明书.pdf", "募集说明书", "application/pdf", "hash", 100,
+                 "parsed", 1, 1, "", now_iso(), "native", "not_required", 1),
+            )
+            source_text = (
+                "本期债券受托管\n理人有权查询专户内的资金及其使用情况。"
+                "中诚信国际认为发行人主体信用等级为AAA。"
+            )
+            conn.execute(
+                "INSERT INTO sources (id,project_id,document_id,locator_type,locator,text,page,bbox_json,extraction_method,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                ("source-reflow", project_id, "doc-reflow", "pdf_page", "第 1 页", source_text, 1,
+                 json_dump([0, 0, 1, 1]), "native", "source-hash-reflow"),
+            )
+            conn.execute(
+                "INSERT INTO citations (id,project_id,source_id,document_id,label,quote,locator_type,locator) VALUES (?,?,?,?,?,?,?,?)",
+                ("citation-reflow", project_id, "source-reflow", "doc-reflow",
+                 "募集说明书.pdf · 第 1 页", source_text, "pdf_page", "第 1 页"),
+            )
+            content = (
+                "募集说明书披露，本期债券受托管理人有权查询专户内的资金。"
+                "该等指标系评级机构整理结果，本章不自行计算或换算。"
+                "有息负债合计及未来12个月到期债务未披露。"
+                "审计机构为某某会计师事务所。"
+            )
+            conn.execute(
+                "INSERT INTO report_sections (id,project_id,section_key,title,content,citation_ids,review_status,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                ("section-reflow", project_id, "cashflow", "现金流", content,
+                 json_dump(["citation-reflow"]), "draft", now_iso()),
+            )
+
+        valid = validate_report_support(project_id)
+        claims = {
+            item["claim_text"].rstrip("。").strip(): item
+            for item in rows(
+                "SELECT claim_text,claim_type,support_status FROM report_claims WHERE project_id=? AND section_id='section-reflow'",
+                (project_id,),
+            )
+        }
+        # ① 断行：科目在页文本里被换行拆开，仍算存在（不得判 unsupported）。
+        assert claims["募集说明书披露，本期债券受托管理人有权查询专户内的资金"]["support_status"] != "unsupported"
+        # ② 方法边界句：登记别名"中诚信"在证据里 → 且"不自行计算"按边界处理。
+        method = claims["该等指标系评级机构整理结果，本章不自行计算或换算"]
+        assert method["claim_type"] == "boundary"
+        assert method["support_status"] == "not_applicable"
+        # ③ 缺口谓语句："未披露" 在加宽后的后窗口内 → 跳过存在性闸门。
+        assert claims["有息负债合计及未来12个月到期债务未披露"]["support_status"] != "unsupported"
+        # 反例：材料里完全没有的科目仍判 unsupported。
+        assert claims["审计机构为某某会计师事务所"]["support_status"] == "unsupported"
+        assert valid["unsupported_claims"] == 1
     finally:
         _cleanup(project_id)
 

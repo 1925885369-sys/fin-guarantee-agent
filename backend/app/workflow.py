@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 from .database import connect, execute, json_dump, json_load, now_iso, row, rows
 from .bond_tranches import extract_bond_tranches, tranches_input_hash_component
@@ -22,7 +23,10 @@ from .facts import (
     source_supports_fact, source_supports_fact_value,
 )
 from .config import settings
-from .llm import LlmCallContext, LlmUsage, StructuredLlmError, extract_facts, identify_candidate_findings, is_configured, rewrite_section
+from .llm import (
+    LlmCallContext, LlmSection, LlmUsage, StructuredLlmError, extract_facts, identify_candidate_findings,
+    is_configured, rewrite_section,
+)
 from .metrics import compute_and_store_metrics
 from .policy import load_policy, save_policy_snapshot
 from .p0 import build_evidence_graph, compute_financial_tie_outs, default_scope, period_type, sync_project_entities, validate_report_support
@@ -30,7 +34,7 @@ from .professional import analysis_fact_rows, audit_event, canonical_fact_rows, 
 from .profile_evidence import analysis_source, materialize_snapshot_evidence
 from .retrieval import retrieve, retrieve_chunks, retrieval_signature
 from .review import decode_candidates, decode_tasks, generate_review_tasks, replace_candidates, sync_confirmed_candidate_risks
-from .report_delivery import content_sha256, write_report_section
+from .report_delivery import content_sha256, record_chapter_attempt, set_section_attempt, write_report_section
 from .rules import RuleResult, risks_from_checks
 
 
@@ -49,6 +53,21 @@ NODES = [
 ]
 TERMINAL = {"completed", "failed", "cancelled", "model_required"}
 NODE_KEYS = [item[0] for item in NODES]
+
+# 章节正文来自**模型**的两种 `generation_status`（计划 §四 line 37/38）：
+# `model_passed`＝全部检查通过（合格采用）；`model_needs_review`＝修复后**仅剩未决项**，
+# 正文照旧采用（`content_origin=model`、`adopted=True`、交付状态 `needs_review`），
+# 但**不计入合格采用率**。凡"这段正文是不是模型写的"用本元组判断；
+# "是不是**合格**采用"只认 `model_passed`。
+MODEL_CONTENT_STATUSES = ("model_passed", "model_needs_review")
+
+
+def is_model_content_status(generation_status: str) -> bool:
+    """章节正文是否来自模型（合格采用 + 仅剩未决项的待核验稿）。
+
+    单章再生与完整生成共用这一判定，避免两处各写一份"算不算模型稿"的清单。
+    """
+    return str(generation_status or "") in MODEL_CONTENT_STATUSES
 
 TAXONOMY_QUERIES = {
     "governance": "公司治理 实控人 审批权限 内控制度 关联方 决策 网银 印章 制衡 否决",
@@ -625,6 +644,46 @@ def _deterministic_fact_is_issuer_safe(fact: dict, section: object, source_text:
     return not any(_source_has_subsidiary_financial_disclosure(source_text.get(str(source_id), "")) for source_id in source_ids)
 
 
+# 评级字段的**文档级兜底**键集（收口方案 §四「核对发行人评级、品种评级、展望、机构及日期，
+# 与原文对象绑定」）。评级报告常把「信用评级公告 / 评级结论」放在章节定位锚点之外的首尾页
+# ——实测中邮 p2 公告页与 p24 评级结论页均不被任何 rating_* 节覆盖，只按分节抽取时
+# issuer_rating / bond_rating / rating_date 永远抽不到（试跑实测）。
+RATING_FALLBACK_KEYS = ("issuer_rating", "bond_rating", "rating_outlook", "rating_agency", "rating_date")
+
+
+def _rating_document_fallback_facts(source_rows: list[dict], section_plans: list,
+                                    source_text: dict[str, str]) -> list[dict]:
+    """评级报告整篇补扫：按固定键集对 rating_report 文档做确定性抽取（文档级兜底）。
+
+    评级字段少而固定、抽取是确定性的：整篇扫描不改变任何判定口径——命中项走与分节
+    抽取相同的 issuer-safe 守卫，合并阶段按 (fact_key, subject, scope, period) 去重，
+    既有分节结果优先（同键同日期的模型结果置信度更高/先到先得由 merge_facts 决定）。
+    """
+    rating_document_ids = {
+        str(item.get("document_id")) for item in source_rows
+        if str(item.get("document_role") or "") == "rating_report"
+    }
+    if not rating_document_ids:
+        return []
+    guard_section = next(
+        (plan.section for plan in section_plans if plan.section.role == "rating_result"),
+        next((plan.section for plan in section_plans), None),
+    )
+    rating_sources = [
+        item for item in source_rows if str(item.get("document_id")) in rating_document_ids
+    ]
+    fallback: list[dict] = []
+    for item in deterministic_extract(rating_sources, set(RATING_FALLBACK_KEYS)):
+        if guard_section is not None and not _deterministic_fact_is_issuer_safe(
+                item, guard_section, source_text):
+            continue
+        fallback.append({
+            **item, "section_role": "rating_report_fallback",
+            "origin_ref": "document:rating_report_fallback",
+        })
+    return fallback
+
+
 def _extract_project_facts(run_id: str, project_id: str) -> tuple[int, LlmUsage, dict]:
     existing = rows("SELECT * FROM facts WHERE project_id=?", (project_id,))
     project_kind = row("SELECT project_type,amount FROM projects WHERE id=?", (project_id,)) or {}
@@ -679,6 +738,9 @@ def _extract_project_facts(run_id: str, project_id: str) -> tuple[int, LlmUsage,
             deterministic.extend({
                 **item, "section_role": plan.section.role, "origin_ref": f"section:{plan.section.role}",
             } for item in extracted if _deterministic_fact_is_issuer_safe(item, plan.section, source_text))
+        # 评级报告整篇兜底（见 _rating_document_fallback_facts）：公告/结论页可能不在任何
+        # rating_* 节的定位范围内，只按分节抽取会永远漏掉主体/债项评级与落款日期。
+        deterministic.extend(_rating_document_fallback_facts(source_rows, section_plans, source_text))
     else:
         deterministic = []      # 债券章节均走分节抽取计划，此处不再有贷款式整篇抽取
     deterministic = _apply_borrower_context(project_id, deterministic)
@@ -988,11 +1050,64 @@ def _numbers_supported(content: str, original: str, evidence: list[dict]) -> boo
 
 
 def _report_boundary_safe(content: str) -> bool:
+    """报告边界安全：正文不得出现**我们方**做出的承保/审批结论。
+
+    不能按裸词拦截。实测中邮反担保章命中"同意担保"，实际原文是
+    "投资者认购本期债券即视为**同意担保函**全部条款"——"同意担保"只是
+    "同意担保函"的前缀，属**复述材料条款**，与承保决策无关；按裸词拦会把
+    合规的条款引用判成越权（修订稿 §3.1：不得退化成固定窗口共现）。
+
+    这些词**自带决策动词**（同意/拒绝/审批/核定），所以不能像"担保额度"那样
+    去命中位置之前找决策动词。改判"该词是否与**我们方主语**连用"：
+    出现委托/决策方主语（建议/公司同意/本所/本报告…）才算决策结论；
+    出现在"担保函/担保合同/条款/约定/视为/认购"这类**材料与条款语境**里则放行。
+    """
     prohibited = (
         "建议提供担保", "建议通过担保", "建议暂缓担保", "建议拒绝担保", "同意担保", "拒绝担保",
         "审批通过", "核定担保额度", "核定担保费率", "审批倾向",
     )
-    return not any(item in content for item in prohibited)
+    for item in prohibited:
+        index = content.find(item)
+        while index >= 0:
+            if _boundary_hit_is_decision(content, index, item):
+                return False
+            index = content.find(item, index + 1)
+    return True
+
+
+# 我方做出决策时的主语/语境记号：与这些词同分句出现才算越权结论。
+_BOUNDARY_DECISION_MARKERS = (
+    "建议", "本所", "本报告", "报告认为", "我们认为", "审核意见", "评审意见",
+    "同意以", "同意为", "决定", "决议", "批复", "拟同意",
+)
+# 材料与条款语境记号：出现在这些词附近说明是在复述原文/描述条款，不是我们的结论。
+_BOUNDARY_QUOTE_MARKERS = (
+    "担保函", "保证合同", "担保合同", "担保协议", "条款", "约定", "视为",
+    "认购", "募集说明书", "披露", "载明", "持有人", "受托管理",
+)
+
+
+def _boundary_hit_is_decision(content: str, index: int, item: str) -> bool:
+    """命中词是"我们方的承保结论"还是"复述材料条款"。"""
+    start = content.rfind("，", 0, index)
+    start = max(start, content.rfind("。", 0, index), content.rfind("\n", 0, index), -1) + 1
+    end_candidates = [
+        content.find("，", index), content.find("。", index), content.find("\n", index),
+        content.find("；", index), content.find(";", index),
+    ]
+    end_candidates = [pos for pos in end_candidates if pos >= 0]
+    end = min(end_candidates) if end_candidates else len(content)
+    clause = content[start:end]
+    # 引用/条款语境优先：材料里"视为同意担保函条款"不是我们的决策。
+    if any(marker in clause for marker in _BOUNDARY_QUOTE_MARKERS):
+        return False
+    if any(marker in clause for marker in _BOUNDARY_DECISION_MARKERS):
+        return True
+    # 无任何语境记号：保守起见按决策结论处理（宁可误退也不放过越权结论），
+    # 但"同意担保函/拒绝担保函"这类紧邻"函"的前缀已知是引用，直接放行。
+    if item in ("同意担保", "拒绝担保") and "担保函" in content[index:index + len(item) + 1]:
+        return False
+    return True
 
 
 def _attribution_block_missing(content: str, context: dict) -> bool:
@@ -1022,15 +1137,53 @@ def _preserve_chapter_boundaries(content: str, context: dict) -> str:
     return content.rstrip() + ("\n\n" + "\n\n".join(additions) if additions else "")
 
 
+# 模型自行绘制的 Markdown 表格（三项遗留修复方案 §二验收）：系统表格一律由服务端在
+# 正文后拼接；模型输出里去掉三类已知系统块后仍存在的"| … |"表格行（≥2 行）判自绘表格。
+_MARKDOWN_TABLE_LINE_RE = re.compile(r"^[ \t]*\|.*\|[ \t]*$", re.MULTILINE)
+
+
+def _model_drawn_table(content: str, chapter_context: dict) -> bool:
+    text = str(content or "")
+    for key in ("system_table_block", "conflict_block", "source_attribution_block"):
+        block = str((chapter_context or {}).get(key) or "")
+        if block:
+            text = text.replace(block, "")
+    return len(_MARKDOWN_TABLE_LINE_RE.findall(text)) >= 2
+
+
+def _apply_dropped_evidence(chapter_context: dict, drop_report: dict | None) -> None:
+    """预算整条丢弃证据后，把被丢证据从章节上下文里移除（修订稿 §3.2：修复不得扩大证据范围）。
+
+    验收判据「裁剪掉的证据不能支持正文」：收窄后的证据与引用白名单只含模型**实际收到**的
+    材料——被丢证据里的数字不再进允许集、其引用判"未授权引用"。就地修改：同一章节上下文
+    的后续校验、修复重建（``repair_chapter_*`` 复用同一份上下文）与写库都共享收窄结果。
+    """
+    dropped = {
+        str(item) for item in (drop_report or {}).get("dropped_evidence_ids") or [] if item
+    }
+    if not dropped:
+        return
+    evidence = list(chapter_context.get("evidence") or [])
+    kept = [item for item in evidence if str(item.get("source_id") or "") not in dropped]
+    if len(kept) == len(evidence):
+        return
+    chapter_context["evidence"] = kept
+    chapter_context["allowed_citation_ids"] = [
+        item.get("id") for item in kept if item.get("id")
+    ]
+
+
 def repair_chapter_length(title: str, content: str, evidence: list[dict], *, chapter_key: str,
                           chapter_context: dict, call_context: LlmCallContext,
-                          original_result: "LlmSection", original_validation: dict) -> tuple["LlmSection", dict, LlmUsage]:
+                          original_result: "LlmSection", original_validation: dict,
+                          drop_report: dict | None = None) -> tuple["LlmSection", dict, LlmUsage, str]:
     """篇幅超出目标上限时的一次定向压缩。完整生成与单章再生成共用这一份口径。
 
-    返回 ``(采用的正文, 校验结果, 本次用量)``：
+    返回 ``(采用的正文, 校验结果, 本次用量, 真实压缩响应)``：
 
     - 压缩稿安全通过 → 采用压缩稿，**仍然偏长也保留**：篇幅是写作目标，不是交付门槛；
     - 压缩稿引入新数字、无效引用或禁止结论 → 保留压缩前的合格正文，只记录这次压缩失败；
+      此时第 4 项仍是**这次压缩调用实际返回的正文**（台账不得用旧稿冒充压缩稿）。
     - 两条分支都不会因为篇幅回退到确定性草稿，也不会阻断交付。
 
     只在安全校验全过、仅篇幅超限时调用；函数自身不再触发任何修复，杜绝
@@ -1039,8 +1192,16 @@ def repair_chapter_length(title: str, content: str, evidence: list[dict], *, cha
     repaired, usage = rewrite_section(
         title, content, evidence, call_context,
         chapter_key=chapter_key, chapter_context=chapter_context,
-        strict_citations=True, length_repair=original_validation["length"],
+        strict_citations=True,
+        # 把"首稿模型正文"放进修复策略：`rewrite_section` 的篇幅分支**直接做一次定向压缩**
+        # （与安全修复同构），不再先做一次全量重写——每章最多一次额外模型调用。
+        length_repair={**original_validation["length"], "previous_content": original_result.content},
+        drop_report=drop_report,
     )
+    # 压缩调用若又丢弃证据，先收窄上下文再重检——裁剪掉的证据不能为压缩稿背书。
+    _apply_dropped_evidence(chapter_context, drop_report)
+    # 台账要存**模型原始压缩输出**；下面补边界块会改写 `repaired.content`，所以先留一份。
+    repair_response = repaired.content
     # 先量"模型有没有漏掉来源边界块"，再补齐——补齐之后这个判断恒为真。
     attribution_restored = _attribution_block_missing(repaired.content, chapter_context)
     repaired.content = _preserve_chapter_boundaries(repaired.content, chapter_context)
@@ -1051,12 +1212,392 @@ def repair_chapter_length(title: str, content: str, evidence: list[dict], *, cha
         revalidation["status"] = "rejected"
         revalidation["length_only_failure"] = False
     if revalidation["status"] == "passed":
-        return repaired, revalidation, usage
+        return repaired, revalidation, usage, repair_response
     return original_result, {
         **original_validation,
         "length_repair_failed": True,
         "length_repair_reasons": list(revalidation["reasons"]),
-    }, usage
+    }, usage, repair_response
+
+
+def repair_chapter_safety(title: str, content: str, evidence: list[dict], *, chapter_key: str,
+                          chapter_context: dict, call_context: LlmCallContext,
+                          original_result: "LlmSection", original_validation: dict,
+                          drop_report: dict | None = None) -> tuple["LlmSection", dict, LlmUsage, str]:
+    """章节被安全校验拒绝时的一次定向修复。完整生成与单章再生成共用这一份口径。
+
+    返回 ``(采用的正文, 校验结果, 本次用量, 真实修复响应)``：
+
+    - 修复稿安全通过**或仅剩未决项**（``passed`` / ``needs_review``）→ 采用修复稿
+      （篇幅偏长也采用：篇幅是写作目标，不是交付门槛），第 4 项即修复稿正文；
+      收口方案 §三明令「不能因修复后待核验而退回原被拒稿」——修复稿只带未决项时
+      退回被拒首稿，等于让那次修复机会白花，还会把可交付稿混进回退统计；
+    - 修复稿仍被拒 → 采用**被拒稿**与最初校验结果（其 ``status`` 仍是 ``rejected``），
+      由调用方回退确定性正文并在回退原因后追加"已尝试一次修复仍未通过"；此时第 4 项
+      **仍是这次修复调用实际返回的正文**——台账要能还原"模型到底修出了什么"，
+      不能用返回的原被拒稿冒充修复稿（财务修复计划 §四 line 40）。
+
+    修复输入是被拒稿正文与具体诊断（通过 ``rewrite_section(safety_repair=...)`` 传入
+    ``previous_content`` 与校验诊断），复用同一章节上下文、同一证据与同一引用别名表，
+    因此不会引入新的证据范围。``rewrite_section`` 只做**一次** ``_structured_call``，
+    函数自身不再触发任何修复，杜绝"修复 → 再修复"的第二次调用。
+    """
+    repaired, usage = rewrite_section(
+        title, content, evidence, call_context,
+        chapter_key=chapter_key, chapter_context=chapter_context,
+        strict_citations=True,
+        safety_repair={**original_validation, "previous_content": original_result.content},
+        drop_report=drop_report,
+    )
+    # 修复调用若又丢弃证据，先收窄上下文再重检——裁剪掉的证据不能为修复稿背书。
+    _apply_dropped_evidence(chapter_context, drop_report)
+    # 台账要存**模型原始修复输出**；下面补边界块会改写 `repaired.content`，所以先留一份。
+    repair_response = repaired.content
+    # 先量"模型有没有漏掉来源边界块"，再补齐——修复稿也要重跑全部检查。
+    attribution_restored = _attribution_block_missing(repaired.content, chapter_context)
+    repaired.content = _preserve_chapter_boundaries(repaired.content, chapter_context)
+    revalidation = validate_chapter_output(repaired.content, repaired.citation_ids, chapter_context)
+    revalidation["source_attribution_restored"] = attribution_restored
+    if not _report_boundary_safe(repaired.content):
+        revalidation["reasons"].append("章节包含禁止的承保或审批结论")
+        revalidation["status"] = "rejected"
+        revalidation["length_only_failure"] = False
+    # `needs_review`（修复稿仅剩未决项）同样采用：不能因修复后待核验退回原被拒稿
+    # （收口方案 §三）。未决项由调用方按三态收口为 `model_needs_review`，不计合格采用率。
+    if revalidation["status"] in {"passed", "needs_review"}:
+        return repaired, revalidation, usage, repair_response
+    return original_result, {
+        **original_validation,
+        "safety_repair_failed": True,
+        "safety_repair_reasons": list(revalidation["reasons"]),
+    }, usage, repair_response
+
+
+def chapter_diagnostics(validation: dict) -> dict:
+    """章节校验诊断：`chapter_guard.validation_diagnostics()` + 安全修复失败 + 支持失败记录。
+
+    不新增数据库列；安全修复失败（修复稿仍被拒）的信息并入诊断字典，回退原因之外还能定位
+    到这次修复本身是否失败、失败在哪些安全原因上。篇幅修复失败已由 `validation_diagnostics`
+    覆盖（`length_repair_failed` / `length_repair_reasons`）。
+
+    支持检查并入同一候选评估后（计划 §四 line 33），台账还要能回答"是章节校验还是证据支持
+    把这一稿拦下的、拦在哪几条主张上"——否则回退原因只剩一句笼统的"未通过前置证据支持检查"。
+    """
+    diagnostics = validation_diagnostics(validation)
+    if validation.get("safety_repair_failed"):
+        diagnostics["safety_repair_failed"] = True
+        diagnostics["safety_repair_reasons"] = [
+            str(item) for item in (validation.get("safety_repair_reasons") or [])
+        ][:3]
+    if validation.get("support_failed"):
+        diagnostics["support_failed"] = True
+        diagnostics["support_reasons"] = [
+            str(item) for item in (validation.get("support_reasons") or [])
+        ][:3]
+        diagnostics["support_unsupported_claims"] = int(
+            validation.get("support_unsupported_claims") or 0)
+        diagnostics["support_invalid_citations"] = int(
+            validation.get("support_invalid_citations") or 0)
+    return diagnostics
+
+
+def _frozen_input_snapshot(chapter_context: dict, *, chapter_key: str, expected: dict) -> dict:
+    """尝试台账里的冻结输入。
+
+    顶层保留原有的"版本 + 规模"摘要字段（旧消费方与归档脚本读它们）；
+    ``payload`` 是**完整冻结输入**（财务修复计划 §四 line 40）——模型这一次实际收到的
+    Prompt 原文、允许引用、证据（含引文原文）与三个服务端冻结块。没有它，事后只能
+    校验哈希，无法回答"这条数字当时到底在不在输入里"（北投 ``4,787.37`` 就属于
+    只能靠它才能定性的情形）。``chapter_context`` 在调用时**已完成证据收窄**，
+    因此存下来的就是模型真正看到的那一份。
+    """
+    return {
+        "chapter_key": chapter_key,
+        "input_hash": chapter_context.get("input_hash", ""),
+        "prompt_sha256": chapter_context.get("prompt_sha256", ""),
+        "prompt_version": chapter_context.get("prompt_version", ""),
+        "materials_version": chapter_context.get("materials_version", ""),
+        "expected_revision": expected.get("expected_revision"),
+        "expected_content_sha256": expected.get("expected_content_sha256", ""),
+        "allowed_citation_count": len(chapter_context.get("allowed_citation_ids") or []),
+        "evidence_count": len(chapter_context.get("evidence") or []),
+        "table_record_count": len(chapter_context.get("table_records") or []),
+        "payload": {
+            "prompt_text": str(chapter_context.get("prompt_text") or ""),
+            "allowed_citation_ids": list(chapter_context.get("allowed_citation_ids") or []),
+            "evidence": [
+                {
+                    "id": item.get("id"), "source_id": item.get("source_id"),
+                    "document_kind": item.get("document_kind"), "page": item.get("page"),
+                    "quote": item.get("quote"),
+                }
+                for item in (chapter_context.get("evidence") or [])
+            ],
+            "system_table_block": str(chapter_context.get("system_table_block") or ""),
+            "conflict_block": str(chapter_context.get("conflict_block") or ""),
+            "source_attribution_block": str(chapter_context.get("source_attribution_block") or ""),
+            "length_policy": chapter_context.get("length_policy") or {},
+            "table_snapshot_hash": chapter_context.get("table_snapshot_hash", ""),
+            "prompt_contract_version": chapter_context.get("prompt_contract_version", ""),
+        },
+    }
+
+
+def _json_repair_section(title: str, deterministic_content: str, evidence: list[dict], *,
+                         chapter_key: str, chapter_context: dict, call_context: "LlmCallContext",
+                         raw_content: str, error_type: str,
+                         drop_report: dict | None = None) -> tuple["LlmSection", LlmUsage]:
+    """报告章节首次输出不可解析（JSON/Schema）时的**唯一一次**修复调用，占用修复配额。
+
+    消费 γ 线冻结接口 ``llm.repair_section_json(...)``（一次性修复）；接口未落地时抛
+    ``StructuredLlmError`` 交由调用方归类为 ``model_call`` 回退，绝不产生第三次生成。
+    ``drop_report`` 与首次生成共用一份收集器：修复请求若仍整条丢弃证据，同样计入并收窄。
+    """
+    from . import llm as llm_module
+
+    repair = getattr(llm_module, "repair_section_json", None)
+    if repair is None:
+        raise StructuredLlmError(
+            "report_repair_required", "报告章节 JSON 修复接口不可用（repair_section_json 未实现）",
+        )
+    return repair(
+        title, deterministic_content, evidence, call_context,
+        chapter_key=chapter_key, chapter_context=chapter_context,
+        strict_citations=True, raw_content=raw_content, error_type=error_type,
+        drop_report=drop_report,
+    )
+
+
+def _attempt_result(*, content: str, citation_ids: list[str] | None, usage: "LlmUsage", validation: dict,
+                    generation_status: str, fallback_reason: str, fallback_stage: str,
+                    repair_attempted: bool) -> dict:
+    return {
+        "content": content,
+        "citation_ids": citation_ids,
+        "usage": usage,
+        "validation": validation,
+        "generation_status": generation_status,
+        "fallback_reason": fallback_reason,
+        "fallback_stage": fallback_stage,
+        "repair_attempted": repair_attempted,
+    }
+
+
+def _code_fingerprint() -> str:
+    """校验/抽取相关代码的指纹（财务修复计划 §四 line 40：台账要能自证"按哪版规则判的"）。
+
+    由三个已冻结的口径常量 + `chapter_guard.py` 源码短哈希组成：常量管**规则口径**
+    （记录版本 / 表格解析版本 / Prompt 契约版本），源码哈希管**实现**——只有两者都在，
+    才能区分"规则没变但实现改了"这类静默漂移。哈希失败时退化为常量串，绝不因此阻断生成。
+    """
+    parts = []
+    try:
+        from .chapter_prompts import PROMPT_CONTRACT_VERSION
+        from .evidence_records import RECORD_VERSION
+        from .table_evidence import PARSER_VERSION
+
+        parts = [f"record={RECORD_VERSION}", f"parser={PARSER_VERSION}",
+                 f"prompt_contract={PROMPT_CONTRACT_VERSION}"]
+    except Exception:
+        parts = []
+    try:
+        source = Path(__file__).with_name("chapter_guard.py").read_bytes()
+        parts.append("guard=" + hashlib.sha256(source).hexdigest()[:12])
+    except Exception:
+        pass
+    return "|".join(parts)
+
+
+def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: list[dict], *,
+                              chapter_key: str, chapter_context: dict,
+                              call_context: LlmCallContext, expected: dict | None = None,
+                              record_attempt: bool = True) -> dict:
+    """"生成 → 章节校验 → 一次修复（安全优先）→ 全部重检"的统一流程。
+
+    完整生成（``_generate_draft``）与单章再生（``main.regenerate_section``）共用本函数，
+    保证两侧判定一致（修订稿 §3.3，禁止单章入口只校验不执行完整判定）。每章最多一次额外
+    模型调用：安全被拒 / 待核验走一次安全修复，仅篇幅超限走一次篇幅压缩，首次 JSON 不可
+    解析也占用这一次机会——四者互斥且共用同一配额（修订稿 §3.2「JSON/Schema 修复也占用
+    这次机会」）。
+
+    返回 ``_attempt_result`` 描述的字典，并追加 ``attempt_id``（尝试台账主键；未记录为空）。
+    模型调用或修复调用抛异常时在内部转成 ``model_call`` 阶段回退，不向上抛出。
+    """
+    usage_total = LlmUsage()
+    repair_attempted = False
+    repair_type = "none"
+    draft_content = ""
+    repair_content = ""
+    # 预算整条丢弃的证据收集器（修订稿 §2.1 / §3.2）：本尝试内所有模型调用共用一份，
+    # 丢弃即刻收窄章节上下文——校验允许集、修复输入与写库白名单都只见模型实际收到的材料。
+    drop_collector: dict = {}
+    expected = expected or {}
+    project_id = str(getattr(call_context, "project_id", "") or chapter_context.get("project_id") or "")
+    run_id = str(getattr(call_context, "run_id", "") or "")
+
+    def _emit(*, content: str, citation_ids: list[str] | None, validation: dict,
+              generation_status: str, fallback_reason: str, fallback_stage: str,
+              status: str, stage: str, adopted: bool) -> dict:
+        attempt_id = ""
+        if record_attempt and project_id:
+            diagnostics = chapter_diagnostics(validation)
+            diagnostics.setdefault(
+                "needs_review_count", len(validation.get("needs_review_items") or []),
+            )
+            attempt_id = record_chapter_attempt(
+                project_id=project_id, section_key=chapter_key, run_id=run_id,
+                status=status, stage=stage, repair_type=repair_type, adopted=adopted,
+                usage=usage_total, diagnostics=diagnostics,
+                draft_content=draft_content, repair_content=repair_content,
+                # 组装后正文 = 本次 `_emit` 真正采用的这一版（补回来源边界块、拼上系统表格）。
+                # 与 draft（原始首稿）、repair（真实修复响应）分列，三段互不冒充。
+                assembled_content=content,
+                code_fingerprint=_code_fingerprint(),
+                frozen_input=_frozen_input_snapshot(chapter_context, chapter_key=chapter_key, expected=expected),
+                expected=expected,
+            )
+        return {
+            **_attempt_result(content=content, citation_ids=citation_ids, usage=usage_total,
+                              validation=validation, generation_status=generation_status,
+                              fallback_reason=fallback_reason, fallback_stage=fallback_stage,
+                              repair_attempted=repair_attempted),
+            "attempt_id": attempt_id,
+        }
+
+    try:
+        try:
+            result, usage = rewrite_section(
+                title, deterministic_content, evidence, call_context,
+                chapter_key=chapter_key, chapter_context=chapter_context, strict_citations=True,
+                drop_report=drop_collector,
+            )
+            _add_usage(usage_total, usage)
+        except StructuredLlmError as exc:
+            # 首次输出 JSON/Schema 不可解析 → 用**唯一一次**修复机会重跑；修复后重跑全部检查。
+            if getattr(exc, "error_type", "") == "report_repair_required" and not repair_attempted:
+                repair_attempted = True
+                repair_type = "json"
+                _add_usage(usage_total, getattr(exc, "usage", None) or LlmUsage())
+                # 首稿调用已丢弃的证据先收窄：JSON 修复复用同一份（收窄后的）输入。
+                _apply_dropped_evidence(chapter_context, drop_collector)
+                result, repair_usage = _json_repair_section(
+                    title, deterministic_content, evidence, chapter_key=chapter_key,
+                    chapter_context=chapter_context, call_context=call_context,
+                    raw_content=str(getattr(exc, "raw_content", "") or ""),
+                    error_type=str(getattr(exc, "error_type", "report_repair_required")),
+                    drop_report=drop_collector,
+                )
+                _add_usage(usage_total, repair_usage)
+                repair_content = result.content
+            else:
+                raise
+        # 生成（或 JSON 修复）阶段被整条丢弃的证据，在**任何校验之前**从上下文移除。
+        _apply_dropped_evidence(chapter_context, drop_collector)
+        draft_content = draft_content or result.content
+        attribution_restored = _attribution_block_missing(result.content, chapter_context)
+        result.content = _preserve_chapter_boundaries(result.content, chapter_context)
+        validation = validate_chapter_output(result.content, result.citation_ids, chapter_context)
+        validation["source_attribution_restored"] = attribution_restored
+        if not _report_boundary_safe(result.content):
+            validation["reasons"].append("章节包含禁止的承保或审批结论")
+            validation["status"] = "rejected"
+            validation["length_only_failure"] = False
+        if _model_drawn_table(result.content, chapter_context):
+            # 系统表格由服务端拼接（三项遗留修复方案 §二）：模型自行绘制/回声走样的
+            # Markdown 表格一律拒绝——去掉三类已知系统块后仍存在表格行不是"逐字保留"，
+            # 而是把表格当正文反复输出（24k 级回声、重复表格的来源）。
+            validation["reasons"].append("章节包含模型自行绘制的表格")
+            validation["status"] = "rejected"
+            validation["length_only_failure"] = False
+
+        # 支持检查**并入同一候选评估**（计划 §四 line 33）：与章节校验一起决定要不要用那一次
+        # 修复。旧流程把支持检查放在统一修复之外——章节校验通过后若支持未过就直接换确定性
+        # 模板，模型正文连一次修复机会都没有（北投/中邮各 3 章死在这里）。
+        validation = _merge_support_assessment(
+            validation,
+            _assess_candidate_support(
+                project_id, chapter_key, result.content, list(result.citation_ids or []),
+                chapter_context,
+            ),
+        )
+
+        if validation["status"] in {"rejected", "needs_review"} and not repair_attempted:
+            # 安全被拒 / 待核验 → 唯一一次修复机会（安全修复优先）
+            repair_attempted = True
+            repair_type = "safety"
+            result, validation, repair_usage, repair_draft = repair_chapter_safety(
+                title, deterministic_content, evidence, chapter_key=chapter_key,
+                chapter_context=chapter_context, call_context=call_context,
+                original_result=result, original_validation=validation,
+                drop_report=drop_collector,
+            )
+            _add_usage(usage_total, repair_usage)
+            # 台账存**真实修复响应**（失败时也不再拿被拒稿冒充）。
+            repair_content = repair_draft
+            # 修复后**两套检查都要重跑**：支持问题也要看这一稿有没有修好。
+            validation = _merge_support_assessment(
+                validation,
+                _assess_candidate_support(
+                    project_id, chapter_key, result.content, list(result.citation_ids or []),
+                    chapter_context,
+                ),
+            )
+        elif validation.get("length_only_failure") and not repair_attempted:
+            # 安全校验全过、仅篇幅超出目标上限 → 共用同一"每章一次"配额，定向压缩一次
+            repair_attempted = True
+            repair_type = "length"
+            result, validation, repair_usage, repair_draft = repair_chapter_length(
+                title, deterministic_content, evidence, chapter_key=chapter_key,
+                chapter_context=chapter_context, call_context=call_context,
+                original_result=result, original_validation=validation,
+                drop_report=drop_collector,
+            )
+            _add_usage(usage_total, repair_usage)
+            repair_content = repair_draft
+            validation = _merge_support_assessment(
+                validation,
+                _assess_candidate_support(
+                    project_id, chapter_key, result.content, list(result.citation_ids or []),
+                    chapter_context,
+                ),
+            )
+    except Exception as exc:
+        error_type = getattr(exc, "error_type", "") if isinstance(exc, StructuredLlmError) else ""
+        reason = f"章节模型调用或结构校验失败：{error_type or type(exc).__name__}"
+        return _emit(
+            content=deterministic_content, citation_ids=None,
+            validation={"status": "fallback", "reasons": [reason]},
+            generation_status="fallback", fallback_reason=reason, fallback_stage="model_call",
+            status="failed", stage="model_call", adopted=False,
+        )
+
+    if validation["status"] in {"passed", "needs_review"}:
+        # 计划 §四 line 37/38 三态收口：
+        #   全部通过 → `model_passed`（合格采用）；
+        #   修复后**仅剩未决项** → `model_needs_review`：正文仍是模型稿（content_origin=model、
+        #     adopted=True、交付状态 needs_review），但**不计入合格采用率**。
+        #   在此之前"仅剩未决项"被记成 `model_passed`，与"全部通过"混在一项统计里，
+        #   采用率因此虚高（原实现注释也写着"采用正文但按 needs_review 记录"——记录的
+        #   只是 attempt 的 status，章节的 generation_status 仍是 model_passed）。
+        adopted_status = "passed" if validation["status"] == "passed" else "needs_review"
+        generation_status = (
+            "model_passed" if validation["status"] == "passed" else "model_needs_review"
+        )
+        return _emit(
+            content=result.content, citation_ids=list(result.citation_ids), validation=validation,
+            generation_status=generation_status, fallback_reason="", fallback_stage="none",
+            status=adopted_status, stage="none", adopted=True,
+        )
+    # 兜底：修复后仍被拒 / 未归类的拒绝 → 回退确定性正文。
+    reason = "；".join(validation.get("reasons") or []) or "章节润色包含非法引用、新数字或审批结论"
+    if repair_attempted:
+        reason = f"{reason}（已尝试一次修复仍未通过）"
+    return _emit(
+        content=deterministic_content, citation_ids=None,
+        validation={**validation, "status": "fallback", "reasons": [reason]},
+        generation_status="fallback", fallback_reason=reason, fallback_stage="chapter_validation",
+        status="failed", stage="chapter_validation", adopted=False,
+    )
 
 
 def _generate_draft(run_id: str, project_id: str, project: dict, facts: list[dict], inventory: dict,
@@ -1079,6 +1620,8 @@ def _generate_draft(run_id: str, project_id: str, project: dict, facts: list[dic
     templates = _templates(project, facts, stored_checks, stored_risks, inventory)
     if section_keys is not None:
         templates = [item for item in templates if item.key in section_keys]
+    revision_row = row("SELECT report_revision FROM projects WHERE id=?", (project_id,))
+    base_revision = int((revision_row or {}).get("report_revision") or 0)
     for template in templates:
         if _cancelled(run_id):
             break
@@ -1091,56 +1634,91 @@ def _generate_draft(run_id: str, project_id: str, project: dict, facts: list[dic
         content, safe_citations = deterministic_content, citation_ids
         chapter_validation = {"status": "passed", "reasons": []}
         fallback_reason = ""
+        fallback_stage = "none"
+        attempt_id = ""
+        # 本章尝试的预期版本/哈希：写库前用它做并发校验，也作为尝试台账的冻结输入。
+        expected = {
+            "expected_revision": base_revision,
+            "expected_content_sha256": "",       # 完整生成会先删章节，无"旧正文"可比
+            "expected_prompt_sha256": chapter_context.get("prompt_sha256", ""),
+            "expected_materials_version": chapter_context.get("materials_version", ""),
+        }
+        # 沿用既有的 length_repair_attempted 列（不改列名）：=1 表示本章已用过唯一一次额外
+        # 内容调整——既包含篇幅压缩，也包含安全修复；"每章最多一次"由这里记账，绝不允许第二次。
         repair_attempted = False
         # 生成状态与证据支持状态必须分开：前者说明"模型结果有没有真正进入报告"，
         # 后者由 validate_report_support 事后按证据计算，不得互相覆盖。
-        generation_status = "deterministic" if not chapter_uses_llm(template.key) else "skipped"
-        if allow_llm and citation_ids and is_configured() and chapter_uses_llm(template.key) and chapter_context.get("llm_applicable", True):
-            try:
-                result, usage = rewrite_section(
-                    template.title, deterministic_content, evidence_rows,
-                    LlmCallContext(project_id, run_id, "draft", "report"),
-                    chapter_key=template.key,
-                    chapter_context=chapter_context,
-                    strict_citations=True,
+        if not chapter_uses_llm(template.key):
+            generation_status = "deterministic"
+        else:
+            # 未进入模型调用也必须记录**具体阶段**（修订稿 §3.3）；跳过类是"没跑"而不是
+            # "跑失败"，因此 fallback_reason 留空、generation_status 保持 skipped。
+            generation_status = "skipped"
+            skip_stage = ""
+            if not is_configured():
+                skip_stage = "not_configured"
+            elif not citation_ids:
+                skip_stage = "evidence"
+            elif not allow_llm:
+                skip_stage = "budget"
+            elif not chapter_context.get("llm_applicable", True):
+                skip_stage = "not_applicable"
+            if skip_stage:
+                fallback_stage = skip_stage
+                # 跳过也要留尝试台账（latest 指向本次、accepted 不动），否则界面无法区分
+                # "没跑"与"最新一次是否失败"。
+                attempt_id = record_chapter_attempt(
+                    project_id=project_id, section_key=template.key, run_id=run_id,
+                    status="skipped", stage=skip_stage, adopted=False,
+                    diagnostics={"skip_stage": skip_stage},
+                    draft_content=deterministic_content,
+                    frozen_input=_frozen_input_snapshot(chapter_context, chapter_key=template.key, expected=expected),
+                    expected=expected,
                 )
-                _add_usage(total_usage, usage)
-                _add_usage(draft_usage, usage)
-                attribution_restored = _attribution_block_missing(result.content, chapter_context)
-                result.content = _preserve_chapter_boundaries(result.content, chapter_context)
-                chapter_validation = validate_chapter_output(result.content, result.citation_ids, chapter_context)
-                chapter_validation["source_attribution_restored"] = attribution_restored
-                if not _report_boundary_safe(result.content):
-                    chapter_validation["reasons"].append("章节包含禁止的承保或审批结论")
-                    chapter_validation["status"] = "rejected"
-                    chapter_validation["length_only_failure"] = False
-                if chapter_validation.get("length_only_failure"):
-                    # 安全校验全过、仅篇幅超出目标上限 → 最多一次定向压缩（复用同一上下文）
-                    repair_attempted = True
-                    result, chapter_validation, repair_usage = repair_chapter_length(
-                        template.title, deterministic_content, evidence_rows,
-                        chapter_key=template.key, chapter_context=chapter_context,
-                        call_context=LlmCallContext(project_id, run_id, "draft", "report"),
-                        original_result=result, original_validation=chapter_validation,
-                    )
-                    _add_usage(total_usage, repair_usage)
-                    _add_usage(draft_usage, repair_usage)
-                safe_citations = _limit_chapter_citations(list(result.citation_ids), chapter_context, template.key)
-                content = result.content
-                if chapter_validation["status"] != "passed":
-                    fallback_reason = "；".join(chapter_validation["reasons"]) or "章节润色包含非法引用、新数字或审批结论"
-                    _reject_last_llm_attempt(run_id, "draft", "report_validation", fallback_reason)
+            else:
+                attempt = run_chapter_model_attempt(
+                    template.title, deterministic_content, evidence_rows,
+                    chapter_key=template.key, chapter_context=chapter_context,
+                    call_context=LlmCallContext(project_id, run_id, "draft", "report"),
+                    expected=expected,
+                )
+                _add_usage(total_usage, attempt["usage"])
+                _add_usage(draft_usage, attempt["usage"])
+                repair_attempted = attempt["repair_attempted"]
+                chapter_validation = attempt["validation"]
+                fallback_reason = attempt["fallback_reason"]
+                fallback_stage = attempt["fallback_stage"]
+                generation_status = attempt["generation_status"]
+                attempt_id = attempt.get("attempt_id") or ""
+                if generation_status in MODEL_CONTENT_STATUSES:
+                    content = attempt["content"]
+                    safe_citations = _limit_chapter_citations(
+                        list(attempt["citation_ids"]), chapter_context, template.key)
+                    # 支持校验先于保存（修订稿 §四）：候选未获证据支持时优先换确定性草稿并
+                    # 标记失败；确定性草稿也不合格时保留模型正文，交给后置 _fallback 兜底。
+                    #
+                    # 支持检查已并入 `run_chapter_model_attempt` 的同一候选评估（计划 §四
+                    # line 33），所以 `model_passed` 本身就意味着支持已过——这里是**写库前的
+                    # 兜底复核**，正常不会触发。留着的唯一理由是防住"评估与写库之间换了内容"
+                    # 这类意外（例如 `_limit_chapter_citations` 截断引用后口径变化）。
+                    # 触发时仍按老语义标 `report_support`，便于与历史记录对照。
+                    if not _candidate_passes_delivery_for(
+                            project_id, template.key, content, safe_citations, chapter_context):
+                        if _candidate_passes_delivery_for(
+                                project_id, template.key, deterministic_content, citation_ids,
+                                chapter_context, content_origin="deterministic"):
+                            content, safe_citations = deterministic_content, citation_ids
+                            generation_status = "fallback"
+                            fallback_reason = "模型正文未通过前置证据支持检查，已回退确定性模板"
+                            fallback_stage = "report_support"
+                            chapter_validation = {
+                                **chapter_validation, "status": "fallback",
+                                "reasons": [fallback_reason],
+                            }
+                else:
                     content, safe_citations = deterministic_content, citation_ids
-                    # 保留被拒版本的诊断信息：回退原因必须能定位到具体数字/表达，
-                    # 否则界面上只剩一句笼统的"新数字"。
-                    rejected_diagnostics = validation_diagnostics(chapter_validation)
-                    chapter_validation = {"status": "fallback", "reasons": [fallback_reason], **rejected_diagnostics}
-                generation_status = "model_passed" if chapter_validation["status"] == "passed" else "fallback"
-            except Exception as exc:
-                fallback_reason = f"章节模型调用或结构校验失败：{type(exc).__name__}"
-                content, safe_citations = deterministic_content, citation_ids
-                chapter_validation = {"status": "fallback", "reasons": [fallback_reason]}
-                generation_status = "fallback"
+                    # 回退原因必须能定位到具体数字/表达；被拒的模型尝试标记为 rejected。
+                    _reject_last_llm_attempt(run_id, "draft", "report_validation", fallback_reason)
         if _cancelled(run_id):
             break
         # 统一写入入口：正文与来源/状态/篇幅/哈希/冻结披露在同一事务内落库，
@@ -1149,22 +1727,38 @@ def _generate_draft(run_id: str, project_id: str, project: dict, facts: list[dic
             chapter_context.get("conflict_block"), chapter_context.get("system_table_block"),
             chapter_context.get("source_attribution_block"),
         ) if block]
+        # 白名单取**收窄后**的证据清单：被预算整条丢弃的证据不得留在章节可见来源里——
+        # 否则后置支持仍会拿它们的文本给主张背书，等于"裁剪掉的证据还能支持正文"。
+        visible_source_ids = [
+            item["source_id"] for item in chapter_context.get("evidence") or []
+        ]
         write_report_section(
             project_id=project_id, section_key=template.key, title=template.title,
             section_id=str(uuid.uuid4()), content=content,
-            citation_ids=safe_citations or citation_ids, allowed_source_ids=context_source_ids,
-            content_origin="model" if generation_status == "model_passed" else "deterministic",
+            citation_ids=safe_citations or citation_ids, allowed_source_ids=visible_source_ids,
+            content_origin="model" if generation_status in MODEL_CONTENT_STATUSES else "deterministic",
             generation_status=generation_status, fallback_reason=fallback_reason,
-            fallback_stage="chapter_validation" if fallback_reason else "none",
+            fallback_stage=fallback_stage,
             required_disclosures=required_disclosures, deterministic_draft=deterministic_content,
             table_records=chapter_context.get("table_records") or [],
+            # 统一冻结记录（fact/table/metric/rule）：与正文同事务冻结，后置支持唯一读它。
+            evidence_records=chapter_context.get("evidence_records") or None,
+            table_blocks=chapter_context.get("table_blocks") or None,
             length_policy=chapter_context.get("length_policy") or {},
-            diagnostics=validation_diagnostics(chapter_validation),
+            diagnostics=chapter_diagnostics(chapter_validation),
             prompt_version=chapter_context.get("prompt_version", ""),
             prompt_sha256=chapter_context.get("prompt_sha256", ""),
             input_hash=chapter_context.get("input_hash", ""),
-            support_status="pending",
+            # 计划 §四 line 38：`model_needs_review`（修复后仅剩未决项）的支持状态记
+            # **warning**，交付状态因此立即成为 `needs_review`（`assess_delivery`），
+            # 而不是先挂 `pending` 等后置检查——它本来就不该按"合格采用"对待。
+            support_status="warning" if generation_status == "model_needs_review" else "pending",
         )
+        # 尝试台账：模型正文真正落库（含"仅剩未决项"的 model_needs_review）→ accepted=latest=本次；
+        # 失败/跳过 → 只把 latest 指向本次，accepted 保持上一次成功（修订稿 §四）。
+        if chapter_uses_llm(template.key) and attempt_id:
+            set_section_attempt(project_id, template.key, attempt_id,
+                                adopted=generation_status in MODEL_CONTENT_STATUSES)
         if repair_attempted:
             execute("UPDATE report_sections SET length_repair_attempted=1 WHERE project_id=? AND section_key=?",
                     (project_id, template.key))
@@ -1176,11 +1770,16 @@ def _generate_draft(run_id: str, project_id: str, project: dict, facts: list[dic
                  "prompt_sha256": chapter_context.get("prompt_sha256", ""),
                  "input_hash": chapter_context.get("input_hash", ""),
                  "generation_status": generation_status,
-                 "model_attempted": generation_status in {"model_passed", "fallback"},
+                 "model_attempted": generation_status in {*MODEL_CONTENT_STATUSES, "fallback"},
+                 # 「合格采用」只认 model_passed（计划 §四 line 38：仅剩未决项**不计入**合格采用率）。
                  "model_output_accepted": generation_status == "model_passed",
+                 # 正文是否来自模型（含待核验稿）——与"合格采用"分开，前端据此区分
+                 # 「模型已采用」/「模型待核验」/「本次失败」（计划 §四 line 42）。
+                 "model_output_kept": generation_status in MODEL_CONTENT_STATUSES,
                  "fallback_reason_code": fallback_reason_code(fallback_reason),
+                 "fallback_stage": fallback_stage,
                  "length_repair_attempted": repair_attempted,
-                 "validation_diagnostics": validation_diagnostics(chapter_validation),
+                 "validation_diagnostics": chapter_diagnostics(chapter_validation),
                  "fallback_reason": fallback_reason}, "agent",
         )
         if fallback_reason:
@@ -1198,17 +1797,148 @@ def _candidate_passes_delivery(project_id: str, section: dict, content: str, cit
                                citation_map: dict, source_texts: dict, valid_sources: set,
                                required_disclosures: list[str]) -> bool:
     """候选正文是否通过"全部校验"：引用合法 + 主张有支持 + 强制披露完整（不含软性篇幅下限）。"""
+    return _delivery_assessment(
+        project_id, section, content, citation_ids, citation_map, source_texts, valid_sources,
+        required_disclosures,
+    )["passed"]
+
+
+def _delivery_assessment(project_id: str, section: dict, content: str, citation_ids: list[str],
+                         citation_map: dict, source_texts: dict, valid_sources: set,
+                         required_disclosures: list[str]) -> dict:
+    """支持评估的**带细节**版本（``_candidate_passes_delivery`` 的实现）。
+
+    只回布尔无法支撑"与章节校验并入同一候选评估"（计划 §四 line 33）：要把它交给那一次
+    修复，就必须知道**哪些主张没支持**，否则修复模型只能盲改。
+    """
     from .p0 import assess_section_claims
 
+    def fail(reasons: list[str], **extra) -> dict:
+        return {
+            "passed": False, "reasons": reasons, "unsupported_claims": 0,
+            "needs_review_claims": 0, "invalid_citations": 0,
+            "unsupported_claim_items": [], **extra,
+        }
+
     if not content.strip():
-        return False
-    if any(item not in citation_map for item in citation_ids):
-        return False
-    if any(block and block not in content for block in required_disclosures):
-        return False
+        return fail(["章节正文为空"])
+    missing_citations = [item for item in citation_ids if item not in citation_map]
+    if missing_citations:
+        return fail([f"存在未授权引用：{','.join(missing_citations[:5])}"],
+                    invalid_citations=len(missing_citations))
+    missing_blocks = [block for block in required_disclosures if block and block not in content]
+    if missing_blocks:
+        return fail(["章节缺少服务端冻结披露块"])
     probe = {**section, "content": content, "citation_ids": json_dump(citation_ids)}
     assessment = assess_section_claims(project_id, probe, citation_map, source_texts, valid_sources)
-    return assessment["unsupported_claims"] == 0 and assessment["invalid_citations"] == 0
+    unsupported = int(assessment.get("unsupported_claims") or 0)
+    invalid = int(assessment.get("invalid_citations") or 0)
+    needs_review = int(assessment.get("needs_review_claims") or 0)
+    # 无支持主张的具体句与其中数字：修复提示要能点名"哪一句不成立"。
+    # 位置 / 原因码 / 匹配记录随明细一起透传（收口方案 §三）：修复模型要知道是
+    # "记录没建（missing_record）"还是"科目对不上（explicit_mismatch）"才能对症改。
+    unsupported_items = [
+        {"claim_index": item["claim_index"], "claim_text": item["claim_text"],
+         "reason_code": str(item.get("reason_code") or ""),
+         "matched_record_ids": list(item.get("matched_record_ids") or []),
+         "unsupported_numbers": item.get("unsupported_numbers") or []}
+        for item in (assessment.get("claims") or [])
+        if item.get("support_status") == "unsupported"
+    ][:10]
+    reasons: list[str] = []
+    if unsupported:
+        reasons.append(f"模型正文未通过前置证据支持检查（{unsupported} 条主张无证据支持）")
+    if invalid:
+        reasons.append(f"存在未授权引用：{invalid} 条")
+    return {
+        "passed": not reasons,
+        "reasons": reasons,
+        "unsupported_claims": unsupported,
+        "needs_review_claims": needs_review,
+        "invalid_citations": invalid,
+        "unsupported_claim_items": unsupported_items,
+    }
+
+
+def _candidate_passes_delivery_for(project_id: str, section_key: str, content: str,
+                                   citation_ids: list[str], chapter_context: dict,
+                                   *, content_origin: str = "model") -> bool:
+    """写库前的支持评估（``_candidate_passes_delivery`` 的章节上下文封装）。
+
+    复用同一判定：引用合法 + 主张有支持 + 强制披露完整。完整生成在写入候选正文前先跑它，
+    把"支持校验先于保存"变成主路径；后置 ``_fallback_unsupported_sections`` 仍作兜底。
+
+    **生成期该章尚未写库**：统一冻结记录与内容来源必须从章节上下文透传——否则探针
+    章节没有 ``evidence_records_json``，数字一律判"无证据"（表格章有系统表格数字兜底
+    才"双双失败保留模型正文"，无表格章则模型正文被误换回确定性稿；三项遗留修复方案
+    §一"完整生成…全部读取同一份冻结记录"）。
+    """
+    return _assess_candidate_support(
+        project_id, section_key, content, citation_ids, chapter_context,
+        content_origin=content_origin,
+    )["passed"]
+
+
+def _assess_candidate_support(project_id: str, section_key: str, content: str,
+                              citation_ids: list[str], chapter_context: dict,
+                              *, content_origin: str = "model") -> dict:
+    """章节上下文封装的支持评估，返回 ``_delivery_assessment`` 的带细节结果。
+
+    生成期（章节尚未写库）与后置复核共用同一份冻结记录口径，避免"生成时判得过、
+    写库后又判不过"的两套标准（计划 §四 line 33「所有问题在保存前评估」）。
+    ``project_id`` 为空（隔离单测、无项目上下文）时**不做评估**并返回通过——
+    没有项目就没有冻结记录可查，硬判会把所有数字打成"无证据"。
+    """
+    from .p0 import _support_context
+
+    if not project_id:
+        return {"passed": True, "reasons": [], "unsupported_claims": 0,
+                "needs_review_claims": 0, "invalid_citations": 0, "unsupported_claim_items": []}
+    citation_map, source_texts, valid_sources = _support_context(project_id)
+    required_disclosures = [block for block in (
+        chapter_context.get("conflict_block"), chapter_context.get("system_table_block"),
+        chapter_context.get("source_attribution_block"),
+    ) if block]
+    section = {
+        "section_key": section_key,
+        "allowed_source_ids": [item["source_id"] for item in chapter_context.get("evidence", [])],
+        "required_disclosures": required_disclosures,
+        "evidence_records_json": json_dump(chapter_context.get("evidence_records") or []),
+        "content_origin": content_origin,
+    }
+    return _delivery_assessment(
+        project_id, section, content, citation_ids, citation_map, source_texts, valid_sources,
+        required_disclosures,
+    )
+
+
+def _merge_support_assessment(validation: dict, support: dict) -> dict:
+    """把支持评估**并入**章节校验结果，让同一次修复机会能修支持问题（计划 §四 line 33）。
+
+    旧流程里支持检查位于统一修复**之外**：章节校验通过后若支持未过，直接换确定性模板，
+    模型正文一次修复机会都用不上——实测北投/中邮各有 3 章死在这里。
+
+    并入后：有硬失败（无支持主张 / 未授权引用）→ ``status=rejected``，由既有"安全优先"
+    分支消费那一次修复；修复后重跑两套检查。这不是放宽：修复后仍不过的候选照样回退。
+    """
+    if support.get("passed"):
+        return validation
+    reasons = list(validation.get("reasons") or [])
+    for reason in support.get("reasons") or []:
+        if reason not in reasons:
+            reasons.append(reason)
+    return {
+        **validation,
+        "status": "rejected",
+        "reasons": reasons,
+        "length_only_failure": False,
+        # 供修复提示与台账使用：模型的修复输入里必须点名"哪一句主张没支持"。
+        "support_failed": True,
+        "support_reasons": list(support.get("reasons") or []),
+        "support_unsupported_claims": int(support.get("unsupported_claims") or 0),
+        "support_invalid_citations": int(support.get("invalid_citations") or 0),
+        "support_detail_items": list(support.get("unsupported_claim_items") or []),
+    }
 
 
 def _fallback_unsupported_sections(project_id: str, templates: dict[str, SectionTemplate],
@@ -1278,11 +2008,28 @@ def _fallback_unsupported_sections(project_id: str, templates: dict[str, Section
             "effective_min_chars": section.get("effective_min_chars") or 0,
             "effective_max_chars": section.get("effective_max_chars") or 0,
         }
+        # 后置支持校验**不得覆盖最初的失败诊断**（修订稿 §3.3）：该章若已有非空
+        # fallback_reason（章节校验被拒 / 模型调用失败等），写回时原样保留，支持检查结果
+        # 只写 diagnostics 与 audit；原本为空才写支持失败原因。
+        existing_reason = str(section.get("fallback_reason") or "")
+        existing_stage = str(section.get("fallback_stage") or "")
+        preserved_stage = existing_stage if existing_reason and existing_stage not in ("", "none") else "report_support"
+        diagnostics = json_load(section.get("validation_diagnostics") or "{}")
+        if existing_reason:
+            diagnostics = {
+                **diagnostics,
+                "post_support_unverified": True,
+                "post_support_unsupported_claims": len(unsupported_claims),
+            }
         if _candidate_passes_delivery(project_id, section, candidate, candidate_citations,
                                       citation_map, source_texts, valid_sources, required_disclosures):
             # 确定性章节自身的回退**不算模型失败**：阶段照记，生成状态保持确定性，
             # 否则采用率的分母会把从未调用模型的章节算进去。
             uses_llm = chapter_uses_llm(section["section_key"])
+            support_reason = (
+                "模型正文未通过后置证据检查，已回退确定性模板" if uses_llm
+                else "章节正文未通过后置证据检查，已回退确定性模板"
+            )
             write_report_section(
                 project_id=project_id, section_key=section["section_key"], content=candidate,
                 citation_ids=candidate_citations,
@@ -1290,12 +2037,9 @@ def _fallback_unsupported_sections(project_id: str, templates: dict[str, Section
                                     if item in citation_map] or json_load(section.get("allowed_source_ids") or "[]"),
                 content_origin="deterministic",
                 generation_status="fallback" if uses_llm else "deterministic",
-                fallback_reason=(
-                    "模型正文未通过后置证据检查，已回退确定性模板" if uses_llm
-                    else "章节正文未通过后置证据检查，已回退确定性模板"
-                ),
-                fallback_stage="report_support", required_disclosures=required_disclosures,
-                length_policy=length_policy, diagnostics=json_load(section.get("validation_diagnostics") or "{}"),
+                fallback_reason=existing_reason or support_reason,
+                fallback_stage=preserved_stage, required_disclosures=required_disclosures,
+                length_policy=length_policy, diagnostics=diagnostics,
                 prompt_version=section.get("prompt_version") or "",
                 prompt_sha256=section.get("prompt_sha256") or "",
                 input_hash=section.get("input_hash") or "", support_status="pending",
@@ -1308,16 +2052,17 @@ def _fallback_unsupported_sections(project_id: str, templates: dict[str, Section
                 citation_ids=citation_ids, allowed_source_ids=json_load(section.get("allowed_source_ids") or "[]"),
                 content_origin=section.get("content_origin") or "unknown",
                 generation_status=section.get("generation_status") or "",
-                fallback_reason="部分主张尚未获得证据支持，已保留正文供人工核验",
-                fallback_stage="report_support", required_disclosures=required_disclosures,
-                length_policy=length_policy, diagnostics=json_load(section.get("validation_diagnostics") or "{}"),
+                fallback_reason=existing_reason or "部分主张尚未获得证据支持，已保留正文供人工核验",
+                fallback_stage=preserved_stage, required_disclosures=required_disclosures,
+                length_policy=length_policy, diagnostics=diagnostics,
                 prompt_version=section.get("prompt_version") or "",
                 prompt_sha256=section.get("prompt_sha256") or "",
                 input_hash=section.get("input_hash") or "", support_status="warning",
             )
             outcome = "kept_for_human_review"
         audit_event(project_id, "fallback", "report_section", section["id"], before,
-                    {"outcome": outcome, "fallback_stage": "report_support",
+                    {"outcome": outcome, "fallback_stage": preserved_stage,
+                     "preserved_initial_reason": bool(existing_reason),
                      "reason_code": "support_unverified", "unsupported_claims": unsupported_claims,
                      "citation_ids": citation_ids, "content_sha256": content_sha256(section["content"])})
         fallback_count += 1
@@ -1695,12 +2440,19 @@ def _run(run_id: str, project_id: str, resume_node: str = "inventory", source_ru
             "FROM llm_attempts WHERE run_id=?", (run_id,),
         ) or {"input_tokens": total_usage.input_tokens, "output_tokens": total_usage.output_tokens, "cost": total_usage.cost}
         with connect() as conn:
+            # 报告快照与"任务完成"在同一事务内落库（需求：先确定正文与校验结果，
+            # 再保存快照、再发布完成状态）。采集失败会让异常冒泡到外层 except，
+            # 整个任务转 failed——宁可失败重跑，也不要"显示已完成却没有历史报告"。
+            from .report_snapshots import capture_snapshot
+
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute("UPDATE projects SET status='review',analysis_stale=0,updated_at=? WHERE id=?", (now_iso(), project_id))
             conn.execute(
                 "UPDATE runs SET status='completed',current_node='review',review_phase='human_review',progress=100,message=?,finished_at=?,latency_ms=?,input_tokens=?,output_tokens=?,cost=? WHERE id=?",
                 (f"等待人工复核；{quality_warning}" if quality_warning else "等待人工复核",
                  now_iso(), latency, measured_usage["input_tokens"], measured_usage["output_tokens"], measured_usage["cost"], run_id),
             )
+            capture_snapshot(project_id, run_id, conn=conn)
         # A completed run publishes the report only if evidence validation
         # passed.  Any later human decision increments review_revision and
         # explicitly makes this version stale again.
@@ -1735,6 +2487,9 @@ def start_run(project_id: str, policy_profile: str = "", *, resumed_from_run_id:
         raise ValueError(f"未知节点：{resume_node}")
     run_id = str(uuid.uuid4())
     with connect() as conn:
+        # 与「项目基础信息修改」（PATCH /api/projects/{id}）争夺同一把写锁：先拿到锁的一方先落库，
+        # 后到者能看见对方的结果，避免改基础信息与起任务交错。
+        conn.execute("BEGIN IMMEDIATE")
         project_row = conn.execute("SELECT project_type,archived_at FROM projects WHERE id=?", (project_id,)).fetchone()
         if project_row and project_row["archived_at"]:
             raise ValueError("项目已归档，请先恢复项目后再启动尽调")

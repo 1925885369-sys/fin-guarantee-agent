@@ -9,6 +9,14 @@ from typing import Any
 from .database import connect, json_dump, json_load, now_iso, row, rows
 from .facts import FACT_REGISTRY
 
+# "缺少/未提供X"类缺失陈述的语境记号：科目存在性闸门对它不生效（见 _claim_support_status）。
+# 扩展（收口方案 §一："扩展缺口识别覆盖'未识别到、未见明确约定'"）：北投 financial #44 /
+# cashflow #5/#23 实测——"未识别到原表""未见明确约定" 未在词表里，缺口陈述被当成
+# "无证据事实"。
+_GAP_STATEMENT_CONTEXT_RE = re.compile(
+    r"(缺少|缺乏|缺失|材料不足|未提供|未获取|未取得|未披露|未识别到|未识别|未见|未在现有材料"
+    r"|没有|无法获取|无法识别|暂无|暂缺)"
+)
 
 POINT_IN_TIME_KEYS = {
     "accounts_receivable", "inventory", "prepayments", "other_receivables", "cash", "fixed_assets",
@@ -24,6 +32,9 @@ SYSTEM_SECTIONS = {
     # not expected to be repeated verbatim in a source excerpt.
     "scope", "proceeds", "investor_protection",
     "counter_guarantee", "mitigation",
+    # 风险矩阵由规则引擎拼装（"缺少0类/4项"这类系统计数），与 risks 同一性质：
+    # 不是模型事实主张，判 system_derived（北投 risk_matrix#4 实测误报）。
+    "risk_matrix",
 }
 
 
@@ -51,12 +62,30 @@ def borrower_entity(project_id: str) -> dict:
     if not project:
         raise ValueError("项目不存在")
     entity_id = f"entity-{project_id}-borrower"
+    name = project["company_name"]
     now = now_iso()
     with connect() as conn:
+        # 冲突目标必须是 borrower 的确定 id，而不是 (project_id,entity_type,name)：
+        # 项目基础信息可以修改发行人名称，旧行与新名不同名时按名字做 upsert 不会命中，
+        # 插入会直接撞主键抛 UNIQUE constraint failed（改一次名就再也打不开实体列表）。
+        duplicate = conn.execute(
+            "SELECT id FROM project_entities WHERE project_id=? AND entity_type='enterprise' AND name=? AND id<>?",
+            (project_id, name, entity_id),
+        ).fetchone()
+        if duplicate:
+            # 目标名已被本项目另一个企业实体占用：把指向它的记录改挂到 borrower 再删除重复行。
+            # 只挪 subject_id 指向，不改任何事实内容。
+            for table in ("facts", "fact_assertions", "canonical_facts"):
+                conn.execute(
+                    f"UPDATE {table} SET subject_id=? WHERE project_id=? AND subject_id=?",
+                    (entity_id, project_id, duplicate["id"]),
+                )
+            conn.execute("DELETE FROM project_entities WHERE id=?", (duplicate["id"],))
         conn.execute(
             "INSERT INTO project_entities (id,project_id,entity_type,name,is_borrower,status,attributes_json,created_at,updated_at) "
-            "VALUES (?,?,?,?,1,'confirmed','{}',?,?) ON CONFLICT(project_id,entity_type,name) DO UPDATE SET is_borrower=1,updated_at=excluded.updated_at",
-            (entity_id, project_id, "enterprise", project["company_name"], now, now),
+            "VALUES (?,?,?,?,1,'confirmed','{}',?,?) "
+            "ON CONFLICT(id) DO UPDATE SET name=excluded.name,is_borrower=1,updated_at=excluded.updated_at",
+            (entity_id, project_id, "enterprise", name, now, now),
         )
     return row("SELECT * FROM project_entities WHERE project_id=? AND is_borrower=1", (project_id,)) or {}
 
@@ -239,12 +268,19 @@ def _claim_lines(content: str) -> list[str]:
 # "无证据事实"拉低支持率、甚至触发整章回退。
 NON_FACTUAL_CLAIM_TYPES = {"narrative", "requirement", "boundary"}
 
+# 计入「已获支持」的状态。``needs_review``（归属不明，待人工核验）**不在其中**：
+# 修订稿 §二.2「归属不明不得自动算作支持」，且待核验事实须计入独立指标并阻止最终交付。
+SUPPORTED_STATUSES = {"direct", "derived", "system_derived"}
+
 # 来源边界 / 使用限制声明：说明披露材料的效力边界，不对业务字段取值
 # （"本次披露未经独立核验""不构成…""仅作为披露信息""以原件为准"）。
 _BOUNDARY_PHRASES = (
     "不等同于", "不构成", "不得替代", "不应替代", "仅反映", "不等于", "不代表",
     "未经独立核验", "未经核实", "未经审计核验", "仅作为披露", "仅供披露",
     "以原件为准", "以正式文件为准", "不作为", "供参考",
+    # 取值口径/方法边界声明（收口方案 §一："来源说明与具体业务事实分开检查"）。
+    # 北投 financial/debt 实测："均只能引用确定性值…未推算换算"、"本章不自行计算"。
+    "只能引用", "不自行计算", "不自动计算",
 )
 
 # 审查要求 / 建议核验动作：表述"应当做什么"，不主张业务事实取值。刻意用**多字词组**
@@ -255,6 +291,8 @@ _REQUIREMENT_RE = re.compile(
     r"|应核对|应核实|应核查|应取得|应提供|应补充|应函证|应说明|应披露|应列示|应呈示|应验算|应复核"
     r"|需核对|需核实|需核查|需取得|需提供|需补充|需函证|需说明|需进一步|需重新"
     r"|请提供|请补充|请说明|要求提供|要求补充"
+    # 后续核验动作清单（"后续核验动作包括：取得…原件，核对…"）：北投 debt #30 实测。
+    r"|后续核验|核验动作"
 )
 
 
@@ -300,10 +338,6 @@ def _numbers(text: str) -> list[float]:
     return output
 
 
-def _number_matches(value: float, candidates: list[float]) -> bool:
-    return any(abs(value - candidate) <= max(0.51, abs(value) * 0.005) for candidate in candidates)
-
-
 def _evidence_context(project_id: str, source_ids: list[str]) -> tuple[list[float], set[str]]:
     if not source_ids:
         return [], set()
@@ -332,57 +366,329 @@ def _evidence_context(project_id: str, source_ids: list[str]) -> tuple[list[floa
     return values, labels
 
 
-def _frozen_table_evidence(section: dict) -> tuple[list[float], set[str]]:
-    """该章**冻结**的结构化允许记录给出的（数值, 科目名）。
+def _number_mentions(claim: str) -> list[dict]:
+    """按 ``chapter_guard`` 的口径提取（归一化数值, 归一化单位, 局部语境）。
 
-    表格单元格的数在材料页面原文里不一定以同样写法出现（单位写在表头、单元格是裸数字、
-    千分位与精度不同），而科目名又常常只出现在表格行首；只靠 ``evidence_text`` 匹配会把
-    正常引用判成"无证据声明"——**科目标签检查比数字检查更早触发**，所以两者都要并入
-    （修订稿 §3.1："同时传入章节校验与后置支持校验"）。
+    延迟导入：``chapter_guard → professional → p0`` 成环，不能在模块顶层导入。
     """
-    records = json_load(section.get("table_records_json"))
-    values: list[float] = []
-    labels: set[str] = set()
-    for item in records if isinstance(records, list) else []:
-        if not isinstance(item, dict):
+    from .chapter_guard import _number_mentions as _impl
+
+    return _impl(claim)
+
+
+def _frozen_evidence_records(project_id: str, section: dict) -> tuple[list[dict], str]:
+    """该章**冻结的统一记录**与记录版本（``evidence_records_json``；旧行兼容迁移）。
+
+    后置复查只读冻结输入（第三点细化方案 §二.2 / §四 + 三项遗留修复方案 §一）：优先取
+    调用方随 ``section`` 传入的记录；未携带时按 ``(project_id, section_key)`` 读已存的
+    ``evidence_records_json``——旧章节只有 ``table_records_json`` 时就地迁移为
+    ``record_type=table``；两者都为空标 ``legacy_unfrozen``（不自动补证据，需人工再生）。
+    **禁止**重新查询当前表格或页面数值池。
+    """
+    from .evidence_records import RECORD_VERSION, records_from_legacy
+
+    def _decode(raw) -> list[dict]:
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        if isinstance(raw, str) and raw.strip():
+            decoded = json_load(raw)
+            if isinstance(decoded, list):
+                return [item for item in decoded if isinstance(item, dict)]
+        return []
+
+    for key in ("evidence_records_json", "evidence_records"):
+        records = _decode(section.get(key))
+        if records:
+            return records, RECORD_VERSION
+
+    section_key = str(section.get("section_key") or "")
+    stored = None
+    if project_id and section_key:
+        stored = row(
+            "SELECT evidence_records_json, table_records_json FROM report_sections "
+            "WHERE project_id=? AND section_key=?",
+            (project_id, section_key),
+        )
+    if stored:
+        records = _decode(stored.get("evidence_records_json"))
+        if records:
+            return records, RECORD_VERSION
+        legacy = _decode(stored.get("table_records_json"))
+        if legacy:
+            return records_from_legacy(legacy), "legacy:table-records-v1"
+    legacy = _decode(section.get("table_records_json")) or _decode(section.get("table_records"))
+    if legacy:
+        return records_from_legacy(legacy), "legacy:table-records-v1"
+    return [], "legacy_unfrozen"
+
+
+def _frozen_records(project_id: str, section: dict) -> list[dict]:
+    """兼容封装：仅返回记录列表（旧调用方沿用）。"""
+    return _frozen_evidence_records(project_id, section)[0]
+
+
+def _record_identity(record: dict) -> tuple[str, str, str, str, str]:
+    """记录的归属身份：科目/期间/主体/口径/单位。同数值多条记录身份相同才算"归属唯一"。"""
+    from .chapter_guard import _canonical_measurement
+
+    _value, unit, _ = _canonical_measurement(record.get("value"), str(record.get("unit") or ""))
+    return (
+        str(record.get("label") or "").strip(), str(record.get("period") or "").strip(),
+        str(record.get("subject") or "").strip(), str(record.get("scope") or "").strip(), unit,
+    )
+
+
+def _mentions_ambiguous_attribution(item: dict, records: list[dict]) -> bool:
+    """某数字是否**归属不明**：命中多条归属不同的记录，而主张紧邻语境没写出任何线索。
+
+    线索 = 该章科目词表里出现的科目名 / 数字前的年份（非比较基准）/ 口径声明。任意一条
+    线索存在时，'跨记录/无记录拼接'的判定交给 ``_record_binding``（更严格），这里不重复。
+    """
+    from .chapter_guard import (
+        PERIOD_COMPARATIVE_MARKERS, PERIOD_TOKEN_RE, SCOPE_TERMS, SUBJECT_BINDING_WINDOW, _canonical_measurement,
+    )
+
+    value, unit = str(item.get("normalized_value")), item.get("normalized_unit") or ""
+    has_unit = bool(item.get("has_unit"))
+    candidates = []
+    for record in records:
+        record_value, record_unit, _ = _canonical_measurement(record.get("value"), str(record.get("unit") or ""))
+        if record_value != value or (has_unit and record_unit != unit):
             continue
-        try:
-            values.append(float(str(item.get("value"))))
-        except (TypeError, ValueError):
-            pass
-        label = str(item.get("label") or "").strip()
-        if label:
-            labels.add(label)
-    return values, labels
+        candidates.append(record)
+    if len({_record_identity(record) for record in candidates}) <= 1:
+        return False
+    prefix = str(item.get("context") or "").split(str(item["raw"]), 1)[0]
+    vocabulary = {str(record.get("label") or "").strip() for record in records}
+    vocabulary.discard("")
+    if any(label in prefix[-SUBJECT_BINDING_WINDOW:] for label in vocabulary):
+        return False
+    years = list(PERIOD_TOKEN_RE.finditer(prefix))
+    if len(years) == 1:
+        found = years[0]
+        around = prefix[max(0, found.start() - 3):found.end() + 6]
+        if not any(marker in around for marker in PERIOD_COMPARATIVE_MARKERS):
+            return False
+    if any(term in prefix for term in SCOPE_TERMS):
+        return False
+    return True
+
+
+def _same_value_record_ids(mentions: list[dict], records: list[dict], limit: int = 5) -> list[str]:
+    """与主张数字**同值**的记录 id（支持失败诊断里的"匹配记录"，收口方案 §三）。
+
+    只回记录 id、不回正文；按记录顺序去重取前 ``limit`` 条。裸数字（主张没写单位）
+    按数值匹配、单位不参与；主张写了单位则须同单位。
+    """
+    from .chapter_guard import _canonical_measurement
+
+    wanted: set[tuple[str, str]] = set()
+    for item in mentions or []:
+        value = str(item.get("normalized_value") or "")
+        if value:
+            wanted.add((value, str(item.get("normalized_unit") or "")))
+    if not wanted:
+        return []
+    found: list[str] = []
+    for record in records or []:
+        record_value, record_unit, _ = _canonical_measurement(
+            record.get("value"), str(record.get("unit") or ""))
+        if not record_value:
+            continue
+        for wanted_value, wanted_unit in wanted:
+            if record_value == wanted_value and (not wanted_unit or record_unit == wanted_unit):
+                record_id = str(record.get("record_id") or "")
+                if record_id and record_id not in found:
+                    found.append(record_id)
+                break
+        if len(found) >= limit:
+            break
+    return found
+
+
+def _numeric_binding_outcome(project_id: str, records: list[dict], claim: str,
+                             mentions: list[dict], claim_type: str) -> tuple[str, str, list[str]]:
+    """数字支持判定（统一冻结记录，三层；三项遗留修复方案 §一）+ **失败原因码与匹配记录**。
+
+    返回 ``(status, reason_code, matched_record_ids)``；``reason_code`` 仅在失败时有值
+    （收口方案 §三"每条支持失败返回主张位置、匹配记录和原因码"）：
+
+    - ``missing_record``：该章有记录体系，但数字/科目在冻结记录里查无（缺记录）；
+    - ``field_ambiguity``：命中记录但归属不唯一，或仅命中待核验记录（待人工核验）；
+    - ``explicit_mismatch``：命中同值记录，但科目/期间/主体/口径与所写**冲突**（明确错配）；
+    - ``infrastructure_error``：该章没有冻结记录可核对（legacy_unfrozen）——先补/再生
+      记录，不是改句子（三项遗留修复方案 §一）。
+
+    状态口径（direct/needs_review/unsupported）与旧 ``_numeric_binding_status`` 完全一致，
+    后者是它的纯状态封装。复用 ``chapter_guard._record_binding`` 这一"共同校验器"
+    （细化方案 §二.2），与章节级校验**同口径**，后置复查不另起一套判定。
+    """
+    from .chapter_guard import (
+        _allowed_number_index, _mention_allowed, _project_entity_registry, _record_binding,
+    )
+    from .evidence_records import (
+        evidence_number_keys, matchable_records, records_from_legacy, review_records,
+        supportable_records,
+    )
+
+    if not records:
+        return "unsupported", "infrastructure_error", []
+    if any(not item.get("record_type") for item in records):
+        # 旧冻结数据（纯表格记录）就地升级为统一记录。
+        records = records_from_legacy(records)
+    supported_index = _allowed_number_index(evidence_number_keys(supportable_records(records)))
+    review_index = _allowed_number_index(evidence_number_keys(review_records(records)))
+    missing_supported = [item for item in mentions if not _mention_allowed(item, supported_index)]
+    if missing_supported:
+        matched = _same_value_record_ids(mentions, records)
+        if all(
+            _mention_allowed(item, supported_index) or _mention_allowed(item, review_index)
+            for item in mentions
+        ):
+            # 每个数字都能被记录接住，但至少一个只命中待核验记录 → 待人工核验。
+            return "needs_review", "field_ambiguity", matched
+        return "unsupported", "missing_record", matched
+    binding_records = matchable_records(records)
+    allowed_entries = evidence_number_keys(binding_records)
+    registry = _project_entity_registry(project_id)
+    conflicts, review_items = _record_binding(mentions, binding_records, registry, claim, allowed_entries)
+    matched = _same_value_record_ids(mentions, binding_records)
+    if conflicts:
+        return "unsupported", "explicit_mismatch", matched
+    if review_items:
+        return "needs_review", "field_ambiguity", matched
+    if any(_mentions_ambiguous_attribution(item, binding_records) for item in mentions):
+        return "needs_review", "field_ambiguity", matched
+    return ("derived" if claim_type == "risk_judgment" else "direct"), "", matched
+
+
+def _numeric_binding_status(project_id: str, records: list[dict], claim: str,
+                            mentions: list[dict], claim_type: str) -> str:
+    """兼容封装：仅返回支持状态（旧调用方沿用字符串口径）。"""
+    return _numeric_binding_outcome(project_id, records, claim, mentions, claim_type)[0]
+
+
+def _lookup_normalize(text: str) -> str:
+    """存在性检索用的空白归一：去掉**汉字之间**的空白与换行。
+
+    引文与页文本是 PDF 回流（"本期债券受托管⏎理人有权查询专户内的资金"），不归一会把材料里
+    明明有的科目判成"不存在"（北投 cashflow #3 实测："债券受托管理人"被断行拆成"受托管/理人"）。
+    只用于检索，不改写正文。
+    """
+    return re.sub(r"(?<=[\u4e00-\u9fff])[\s\u3000]+(?=[\u4e00-\u9fff])", "", str(text or ""))
+
+
+def _label_present_in_sources(names, evidence_lookup: str, evidence_labels: set,
+                              record_labels: set) -> bool:
+    """科目标签在章节证据里是否存在：**登记别名一并检索** + PDF 断行归一。
+
+    只认"所写科目的登记名与别名"（北投实测："债券受托管理人" 的登记别名含"受托管理人"、
+    "评级机构" 别名含"中诚信"）：材料用别名写法时按存在处理，别名也不在才判不存在。
+    """
+    for name in names:
+        if not name:
+            continue
+        if _lookup_normalize(name) in evidence_lookup or name in evidence_labels or name in record_labels:
+            return True
+    return False
+
+
+def _claim_support_outcome(
+    project_id: str, section_key: str, claim: str, claim_type: str,
+    source_ids: list[str], source_texts: dict[str, str],
+    records: list[dict] | None = None, content_origin: str = "",
+) -> tuple[str, str, list[str]]:
+    """单条主张的**支持状态 + 失败原因码 + 匹配记录**（收口方案 §三）。
+
+    数字支持来自该章**统一冻结记录**（``evidence_records``：fact/table/metric/rule），
+    按同一条记录核对科目/期间/主体/口径；``evidence_text`` 仅用于**无数字主张**的直接引用
+    支持与科目存在性判断，不再充当"整页数值池"（第三点细化方案 §二.2）。
+
+    确定性内容分流（三项遗留修复方案 §一）：确定性模板的普通说明文字不自动视为事实支持——
+    无数字的说明/缺口句标 ``not_applicable``；带数字的仍按业务事实校验（无冻结记录可依时
+    记 ``system_derived``，不再因为没有原文逐字匹配而误报）；核验要求、边界声明和叙述类
+    句子沿用既有分类。
+
+    原因码仅在失败（``unsupported`` / ``needs_review``）时有值，四类口径见
+    ``_numeric_binding_outcome``；无来源的模型内容与存在性闸门失败记为
+    ``missing_record``（缺记录/来源）。``_claim_support_status`` 是仅回状态的兼容封装。
+    """
+    if section_key in SYSTEM_SECTIONS:
+        return "system_derived", "", []
+    if section_key == "risks" and row("SELECT COUNT(*) count FROM risks WHERE project_id=?", (project_id,))["count"] == 0:
+        return "system_derived", "", []
+    if not source_ids:
+        if content_origin == "deterministic":
+            mentions = _number_mentions(claim)
+            if not mentions:
+                # 模板说明文字（"…为材料不足""…待核验"等）：不是事实主张，也不是"无证据声明"。
+                return "not_applicable", "", []
+            if records:
+                return _numeric_binding_outcome(project_id, records, claim, mentions, claim_type)
+            # 确定性内容且整章没有冻结记录（非受控表格章节）：无结构化输入可核对，
+            # 按系统生成内容记录，不判"无证据"。
+            return "system_derived", "", []
+        # 模型内容无来源仍按不支持处理（不放宽）；失败原因是还没有可核对来源/记录。
+        return "unsupported", "missing_record", []
+    evidence_text = "\n".join(source_texts.get(source_id, "") for source_id in source_ids)
+    # 存在性检索前做 PDF 断行/空白归一（"受托管⏎理人"）。
+    evidence_lookup = _lookup_normalize(evidence_text)
+    _evidence_values, evidence_labels = _evidence_context(project_id, source_ids)
+    record_labels = {str(item.get("label") or "").strip() for item in (records or [])}
+    # "缺少/未提供X"类**缺失陈述**：主张的是"该科目材料缺失"，不是"有该科目的某数值"——
+    # 科目存在性闸门对它不应生效（北投 governance 实测："缺少关联方往来或其他应收款及
+    # 净资产"因"其他应收款"不在证据里被误判无支持）。**任一出现**处于缺口语境即按缺失
+    # 陈述处理（"关于主体与债项评级…核验，材料不足：缺少主体评级和债项评级"里，科目
+    # 第一次出现在主题短语、第二次才带"缺少"）。带数字的句子仍走数字判定，不受影响。
+    # 语境窗口：前 16 字 / 后 24 字——缺口短语常是整段枚举的**谓语**（"A、B、C…等，
+    # 材料不足/未披露"），后窗口太窄会漏（北投 financial #44 "…到期债务未披露" 实测）。
+    claim_labels: list[tuple[str, tuple[str, ...]]] = []
+    for definition in FACT_REGISTRY.values():
+        positions = [match.start() for match in re.finditer(re.escape(definition.label), claim)]
+        if not positions:
+            continue
+        # 缺口语境可前可后："缺少X" vs "X为材料不足/未披露"——两者都按缺失陈述处理。
+        # 后窗口 32：缺口谓语常是整段枚举的**谓语**，谓语前的枚举项都要一并跳过——
+        # 实测中邮 guarantee「保证责任上限、保证范围…以及保证人代偿能力，**均因材料不足**
+        # 而无法判断」：首个标签距谓语 25 字，旧 24 字窗口差 1 字漏判，整句被误记无支持。
+        gap = False
+        for index in positions:
+            before = claim[max(0, index - 16):index]
+            after = claim[index + len(definition.label): index + len(definition.label) + 32]
+            if _GAP_STATEMENT_CONTEXT_RE.search(before) or _GAP_STATEMENT_CONTEXT_RE.search(after):
+                gap = True
+                break
+        if gap:
+            continue
+        # 注意：展平成 (登记名, *别名) 一维序列——`_label_present_in_sources` 逐名检索，
+        # 嵌套元组会让别名静默失效（北投 financial #36/#41 "评级机构"→别名"中诚信" 实测）。
+        claim_labels.append((definition.label, *tuple(definition.aliases or ())))
+    if claim_labels and not any(
+        _label_present_in_sources(names, evidence_lookup, evidence_labels, record_labels)
+        for names in claim_labels
+    ):
+        # 科目在证据与记录里都查无 → 缺记录（不是"数字错"，是"记录没建/没进证据"）。
+        return "unsupported", "missing_record", []
+    mentions = _number_mentions(claim)
+    if mentions:
+        # 确定性内容**带数字**时仍按业务事实校验（方案 §一"带数字的…仍按业务事实校验"）；
+        # 数字无对账输入的问题由来源空分支与 SYSTEM_SECTIONS 两道口径处理，不在此放宽。
+        return _numeric_binding_outcome(project_id, records or [], claim, mentions, claim_type)
+    if claim_type == "risk_judgment":
+        return "derived", "", []
+    return "direct", "", []
 
 
 def _claim_support_status(
     project_id: str, section_key: str, claim: str, claim_type: str,
     source_ids: list[str], source_texts: dict[str, str],
-    table_values: list[float] | None = None, table_labels: set[str] | None = None,
+    records: list[dict] | None = None, content_origin: str = "",
 ) -> str:
-    if section_key in SYSTEM_SECTIONS:
-        return "system_derived"
-    if section_key == "risks" and row("SELECT COUNT(*) count FROM risks WHERE project_id=?", (project_id,))["count"] == 0:
-        return "system_derived"
-    if not source_ids:
-        return "unsupported"
-    if claim_type == "risk_judgment":
-        return "derived"
-    evidence_text = "\n".join(source_texts.get(source_id, "") for source_id in source_ids)
-    evidence_values, evidence_labels = _evidence_context(project_id, source_ids)
-    labels = [definition.label for definition in FACT_REGISTRY.values() if definition.label in claim]
-    if labels and not any(
-        label in evidence_text or label in evidence_labels or label in (table_labels or set())
-        for label in labels
-    ):
-        return "unsupported"
-    claim_numbers = _numbers(claim)
-    if claim_numbers:
-        candidates = _numbers(evidence_text) + evidence_values + list(table_values or [])
-        if not all(_number_matches(value, candidates) for value in claim_numbers):
-            return "unsupported"
-    return "direct"
+    """兼容封装：仅返回支持状态（旧调用方与测试沿用字符串口径）。"""
+    return _claim_support_outcome(
+        project_id, section_key, claim, claim_type, source_ids, source_texts,
+        records, content_origin,
+    )[0]
 
 
 def _support_context(project_id: str) -> tuple[dict, dict, set]:
@@ -423,34 +729,71 @@ def assess_section_claims(project_id: str, section: dict, citation_map: dict,
     for block in [*_as_list(section.get("required_disclosures")), SOURCE_ATTRIBUTION_BLOCK]:
         if block and block in content:
             content = content.replace(block, "")
-    claims, factual, supported = [], 0, 0
-    # 冻结的**结构化记录**一并作为候选证据（数值 + 科目名）：表格里的数在页面原文里常是
-    # 另一种写法、科目名常只出现在行首，不并入就会把正常引用误判成"无证据声明"。
-    table_values, table_labels = _frozen_table_evidence(section)
+    claims, factual, supported, needs_review = [], 0, 0, 0
+    # **统一冻结记录**（fact/table/metric/rule）是该章数字支持的唯一来源（第三点细化方案
+    # §二.2 + 三项遗留修复方案 §一）：只读这一份冻结输入，不重取页面数值池；旧章节
+    # 兼容迁移，缺记录标 legacy_unfrozen。
+    records, record_version = _frozen_evidence_records(project_id, section)
+    content_origin = str(section.get("content_origin") or "")
+    position_cursor = 0
     for index, claim in enumerate(_claim_lines(content), start=1):
         claim_type = _claim_type(claim)
+        # 主张在**评估文本**（系统披露块剥离后）中的字符位置：收口方案 §三要求诊断带
+        # "正文位置"。按顺序向后检索，重复句不会永远锚在第一次出现处。
+        position = content.find(claim, position_cursor)
+        if position < 0:
+            position = position_cursor
+        position_cursor = position + len(claim)
         if claim_type in NON_FACTUAL_CLAIM_TYPES:
             # 叙述、审查要求/核验动作、来源边界声明都不是业务事实主张：不参与证据支持
             # 统计，状态给 not_applicable（与 narrative 完全一致的处理）。
-            status = "not_applicable"
+            status, reason_code, matched_record_ids = "not_applicable", "", []
         else:
             factual += 1
-            status = _claim_support_status(
+            status, reason_code, matched_record_ids = _claim_support_outcome(
                 project_id, section["section_key"], claim, claim_type, source_ids, source_texts,
-                table_values, table_labels,
+                records, content_origin,
             )
-            if status != "unsupported":
+            if status in SUPPORTED_STATUSES:
                 supported += 1
-        unsupported_numbers = re.findall(r"-?\d+(?:\.\d+)?", claim) if status == "unsupported" else []
+            elif status == "needs_review":
+                needs_review += 1
+        # 诊断里的"无支持数字"必须与**判定用过的**那份数字同源。裸 `re.findall` 会把
+        # 引用别名（`（E01）`→`01`）、`〔资料03〕`、页码、日期一起读成数字——这些正是
+        # `_strip_format_numbers` 的唯一剔除点要清掉的东西。它们经 `unsupported_numbers`
+        # 送到修复提示里，只会让模型跑去"改引用"，而真正该删的数字被漏掉。
+        unsupported_numbers = (
+            list(dict.fromkeys(item["raw"] for item in _number_mentions(claim)))
+            if status == "unsupported" else []
+        )
         claims.append({
             "claim_index": index, "claim_text": claim, "claim_type": claim_type, "support_status": status,
+            # 支持失败诊断三件套（收口方案 §三）：位置 / 原因码 / 匹配记录。
+            "position": position, "reason_code": reason_code, "matched_record_ids": matched_record_ids,
             "source_ids": source_ids, "citation_ids": citation_ids, "unsupported_numbers": unsupported_numbers,
         })
+    needs_review_items = [
+        {"claim_index": item["claim_index"], "claim_text": item["claim_text"], "claim_type": item["claim_type"],
+         "position": item["position"], "reason_code": item["reason_code"],
+         "matched_record_ids": item["matched_record_ids"]}
+        for item in claims if item["support_status"] == "needs_review"
+    ]
+    # 无证据声明数与 claims 状态**同源**：确定性模板句（"…为材料不足"）在
+    # `_claim_support_status` 里按 not_applicable 处理，不再能从差额法
+    # （factual - supported - needs_review）里漏出来被计成"无证据声明"
+    # （收口方案 §一"材料不足句 … 不作为独立取值核验"；北投模板句实测）。
     return {
         "claims": claims, "factual": factual, "supported": supported,
-        "unsupported_claims": factual - supported,
+        "unsupported_claims": sum(
+            1 for item in claims if item["support_status"] == "unsupported"
+        ),
+        "needs_review_claims": needs_review,
+        "needs_review_claim_items": needs_review_items,
         "invalid_citations": sum(1 for item in citation_ids if item not in citation_map),
         "support_rate": round(supported / factual, 4) if factual else 1.0,
+        # 三项遗留修复方案 §一：记录规模与版本随评估结果输出（接口/验收可见）。
+        "evidence_record_count": len(records),
+        "support_record_version": record_version,
     }
 
 
@@ -461,14 +804,21 @@ def validate_report_support(project_id: str) -> dict:
     sections = rows("SELECT * FROM report_sections WHERE project_id=? ORDER BY rowid", (project_id,))
     citation_map, source_texts, valid_sources = _support_context(project_id)
     total_factual = total_supported = invalid_citations = 0
-    disclosure_missing = needs_review = 0
+    total_needs_review = 0
+    disclosure_missing = needs_review_sections = 0
+    needs_review_items: list[dict] = []
     with connect() as conn:
         conn.execute("DELETE FROM report_claims WHERE project_id=?", (project_id,))
         for section in sections:
             assessment = assess_section_claims(project_id, section, citation_map, source_texts, valid_sources)
             total_factual += assessment["factual"]
             total_supported += assessment["supported"]
+            total_needs_review += assessment["needs_review_claims"]
             invalid_citations += assessment["invalid_citations"]
+            for item in assessment["needs_review_claim_items"]:
+                needs_review_items.append({
+                    "section_id": section["id"], "section_key": section["section_key"], **item,
+                })
             for claim in assessment["claims"]:
                 conn.execute(
                     "INSERT INTO report_claims (id,project_id,section_id,claim_index,claim_text,claim_type,support_status,source_ids,supporting_ids,unsupported_numbers,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -479,6 +829,11 @@ def validate_report_support(project_id: str) -> dict:
                 )
             rate = assessment["support_rate"]
             status = "passed" if rate == 1 and assessment["invalid_citations"] == 0 else "warning"
+            if str(section.get("generation_status") or "") == "model_needs_review":
+                # 计划 §四 line 38：修复后**仅剩未决项**的章节不得报 `passed`。它的支持率
+                # 可能刚好 100%，但章节本身还有未决项、不计入合格采用率——支持状态强制
+                # `warning`，交付状态于是保持 `needs_review`，等人工裁决。
+                status = "warning"
             # 强制披露与交付状态独立于支持率：冲突块缺失时即便支持率 100% 也不可交付。
             disclosure_status, delivery_status, validated_hash = assess_delivery(
                 content=section.get("content") or "",
@@ -488,7 +843,7 @@ def validate_report_support(project_id: str) -> dict:
                 validated_content_sha256=section.get("validated_content_sha256") or "",
             )
             disclosure_missing += 1 if disclosure_status != "passed" else 0
-            needs_review += 1 if delivery_status == "needs_review" else 0
+            needs_review_sections += 1 if delivery_status == "needs_review" else 0
             # 证据支持状态只写它自己的字段（validation_status 为兼容字段）。
             # 绝不能覆盖 generation_status / fallback_reason——那会把"模型回退"
             # 伪装成"通过"，前端就再也看不出模型结果有没有真正进入报告。
@@ -498,14 +853,20 @@ def validate_report_support(project_id: str) -> dict:
                 (rate, status, status, disclosure_status, delivery_status, validated_hash,
                  content_sha256(section.get("content") or ""), section["id"]),
             )
-    unsupported = total_factual - total_supported
+    unsupported = total_factual - total_supported - total_needs_review
     return {
         "factual_claims": total_factual, "supported_claims": total_supported, "unsupported_claims": unsupported,
+        # 待核验事实计入独立指标（第三点细化方案 §二.2）：不得自动算支持，供交付阻断消费。
+        "needs_review_claims": total_needs_review,
+        "needs_review_claim_items": needs_review_items,
         "support_rate": round(total_supported / total_factual, 4) if total_factual else 1.0,
         "invalid_citations": invalid_citations,
         "disclosure_missing_sections": disclosure_missing,
-        "needs_review_sections": needs_review,
-        "status": "passed" if unsupported == 0 and invalid_citations == 0 and disclosure_missing == 0 else "warning",
+        "needs_review_sections": needs_review_sections,
+        "status": (
+            "passed" if unsupported == 0 and total_needs_review == 0
+            and invalid_citations == 0 and disclosure_missing == 0 else "warning"
+        ),
     }
 
 
@@ -530,6 +891,10 @@ def migrate_report_generation_status() -> int:
         elif reason and reason != NO_MODEL_REASON:
             status = "fallback"
         else:
+            # 只覆盖"历史空值行"：`WHERE generation_status='' OR IS NULL` 保证**不会**
+            # 覆盖已写入的 `model_needs_review`。老行无法回溯区分"全部通过"与"仅剩未决项"
+            # （当时的实现把两者都记成 model_passed，行里没有留下区分信息），
+            # 因此这里只能给 model_passed；新运行一律走 `run_chapter_model_attempt` 的判定。
             status = "model_passed"
         with connect() as conn:
             conn.execute(
@@ -626,16 +991,27 @@ def calculation_trace(project_id: str, metric_id: str) -> dict:
 
 def report_quality(project_id: str) -> dict:
     sections = rows("SELECT id,citation_ids FROM report_sections WHERE project_id=?", (project_id,))
-    claims = rows("SELECT section_id,claim_type,support_status,unsupported_numbers FROM report_claims WHERE project_id=?", (project_id,))
+    claims = rows(
+        "SELECT section_id,claim_index,claim_text,claim_type,support_status,unsupported_numbers "
+        "FROM report_claims WHERE project_id=? ORDER BY section_id,claim_index",
+        (project_id,),
+    )
     factual = [item for item in claims if item["claim_type"] not in NON_FACTUAL_CLAIM_TYPES]
-    supported = [item for item in factual if item["support_status"] != "unsupported"]
+    # needs_review（归属不明）不得自动算支持：单列一个指标供交付阻断，且不计入 supported。
+    supported = [item for item in factual if item["support_status"] in SUPPORTED_STATUSES]
+    needs_review_claim_items = [
+        {"section_id": item["section_id"], "claim_index": item["claim_index"],
+         "claim_text": item["claim_text"], "claim_type": item["claim_type"]}
+        for item in factual if item["support_status"] == "needs_review"
+    ]
     valid_citations = {item["id"] for item in rows("SELECT id FROM citations WHERE project_id=?", (project_id,))}
     invalid_citations = sum(
         citation_id not in valid_citations
         for section in sections
         for citation_id in json_load(section["citation_ids"])
     )
-    unsupported = len(factual) - len(supported)
+    unsupported = len([item for item in factual if item["support_status"] == "unsupported"])
+    needs_review = len(needs_review_claim_items)
     evidence_factual = [item for item in factual if item["support_status"] != "system_derived"]
     factual_section_ids = {item["section_id"] for item in evidence_factual}
     cited_factual_sections = sum(
@@ -645,11 +1021,15 @@ def report_quality(project_id: str) -> dict:
     )
     quality = {
         "factual_claims": len(factual), "supported_claims": len(supported), "unsupported_claims": unsupported,
+        "needs_review_claims": needs_review,
+        "needs_review_claim_items": needs_review_claim_items,
         "support_rate": round(len(supported) / len(factual), 4) if factual else 0,
         "factual_section_citation_coverage": round(cited_factual_sections / len(factual_section_ids), 4) if factual_section_ids else 1.0,
         "invalid_citations": invalid_citations,
         "unsupported_numeric_claims": sum(bool(json_load(item["unsupported_numbers"])) for item in claims),
-        "status": ("passed" if unsupported == 0 and invalid_citations == 0 else "warning") if claims else "not_generated",
+        "status": (
+            "passed" if unsupported == 0 and needs_review == 0 and invalid_citations == 0 else "warning"
+        ) if claims else "not_generated",
     }
     quality["tie_outs"] = {
         status: row("SELECT COUNT(*) count FROM financial_tie_outs WHERE project_id=? AND status=?", (project_id, status))["count"]
@@ -667,9 +1047,12 @@ def report_quality(project_id: str) -> dict:
     )
     # 采用率的分母只算**启用模型的章节**：确定性章节即使发生后置回退，
     # 也不是"模型未被采用"，计入分母会低估采用率。
+    # `model_needs_review`（修复后仅剩未决项）也算"尝试过模型"——它占分母、不占分子，
+    # 于是"不计入合格采用率"（计划 §四 line 38）在统计上自然成立。
     attempted = [
         item for item in delivery_rows
-        if chapter_uses_llm(item["section_key"]) and item["generation_status"] in {"model_passed", "fallback"}
+        if chapter_uses_llm(item["section_key"])
+        and item["generation_status"] in {"model_passed", "model_needs_review", "fallback"}
     ]
     quality["delivery_quality"] = {
         "model_attempted_sections": len(attempted),          # 本次实际尝试模型生成的章节数

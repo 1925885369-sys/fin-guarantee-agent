@@ -26,23 +26,33 @@ from .table_block import table_block_from_dict
 # ---------------------------------------------------------------------------
 BLACK = RGBColor(0, 0, 0)
 TYPO = {
-    # 正文：宋体 小四(12pt)、1.5 倍行距、首行缩进 2 字符
+    # 正文：宋体 四号(14pt)、行距**固定值 24pt**、首行缩进 2 字符
+    # （固定值以 Pt 传入 paragraph_format.line_spacing，python-docx 会写成
+    #  w:line="480" w:lineRule="exact"，而不是 1.5 倍这类倍数行距）
     "body_font": "宋体",
-    "body_size": 12,
-    "body_line_spacing": 1.5,
+    "body_size": 14,
+    "body_line_spacing_pt": 24,
     "body_space_after_pt": 6,
-    # 标题层级：一级黑体三号(16) / 二级黑体四号(14) / 三级黑体小四(12)，全黑
+    # 标题层级：分部与二级章节黑体三号(16) / 正文小标题黑体四号(14) / 更深标题同四号，全黑
     "heading_font": "黑体",
     "title_size": 22,
     "h1_size": 16,
-    "h2_size": 14,
-    "h3_size": 12,
+    "h2_size": 16,
+    "h3_size": 14,
     "heading_color": BLACK,
-    "heading_space_before_pt": (18, 12, 6),
+    "heading_space_before_pt": (18, 12, 6, 6),
     # 表格与页眉页脚：表头黑体、单元格宋体、同用五号(10.5)
     "table_font": "宋体",
     "table_header_font": "黑体",
     "table_size": 10.5,
+    # 表格段落：显式固定改动前的行距／段后／首行缩进。
+    # 样式优先级是 段落样式 > 表格样式（Word 文档默认 → 表格样式 → 编号 → 段落 →
+    # 字符 → 直接格式），所以单元格段落实际继承的是 Normal。正文默认样式一旦改成
+    # 固定 24pt、首行缩进按 14pt 算，表格就会跟着变高变缩进——这三个值把表格按在
+    # 改动前的样子上（缩进 24pt 即原先 12pt × 2 字符）。
+    "table_line_spacing": 1.5,
+    "table_space_after_pt": 6,
+    "table_first_line_indent_pt": 24,
     "header_footer_font": "宋体",
     "header_footer_size": 9,
     # 西文/数字统一映射（中文文档常规做法）
@@ -262,7 +272,9 @@ def _set_east_asia_font(element, font_name: str, latin: str | None = None) -> No
 
 
 def _configure_style(style, font_name: str, size: float, *, bold: bool = False,
-                     color: RGBColor | None = None, first_line_indent: bool = False) -> None:
+                     color: RGBColor | None = None, first_line_indent: bool = False,
+                     line_spacing=None) -> None:
+    """样式级排版。``line_spacing`` 传 ``Pt`` 即固定行距，不传沿用 1.5 倍。"""
     style.font.name = font_name
     style.font.size = Pt(size)
     style.font.bold = bold
@@ -270,9 +282,19 @@ def _configure_style(style, font_name: str, size: float, *, bold: bool = False,
         style.font.color.rgb = color
     _set_east_asia_font(style._element, font_name)
     style.paragraph_format.space_after = Pt(8)
-    style.paragraph_format.line_spacing = 1.5
+    style.paragraph_format.line_spacing = 1.5 if line_spacing is None else line_spacing
     if first_line_indent:
         style.paragraph_format.first_line_indent = Pt(size * 2)
+
+
+def _add_heading_text(document: Document, text: str, level: int):
+    """写标题：编号与名称连续输出，不插入制表符或空白填充。
+
+    编号在 ``report_outline`` 里已经拼进 label（``一、分部``／``（一）章节``），
+    这里只把异常空白折叠掉——标题任何位置出现制表符或连续空白，都会在 Word 里
+    把编号和名称撑开，破坏「编号紧邻名称」的体例。
+    """
+    return document.add_heading(re.sub(r"\s+", " ", str(text or "")).strip(), level=level)
 
 
 def _add_page_number(paragraph) -> None:
@@ -316,9 +338,9 @@ def _configure_document(document: Document, project: dict) -> None:
 
     body_font, body_size = TYPO["body_font"], TYPO["body_size"]
     heading_font = TYPO["heading_font"]
-    _configure_style(document.styles["Normal"], body_font, body_size,
-                     color=BLACK, first_line_indent=True)
-    document.styles["Normal"].paragraph_format.line_spacing = TYPO["body_line_spacing"]
+    body_spacing = Pt(TYPO["body_line_spacing_pt"])
+    _configure_style(document.styles["Normal"], body_font, body_size, color=BLACK,
+                     first_line_indent=True, line_spacing=body_spacing)
     document.styles["Normal"].paragraph_format.space_after = Pt(TYPO["body_space_after_pt"])
 
     _configure_style(document.styles["Title"], heading_font, TYPO["title_size"], bold=True, color=BLACK)
@@ -326,18 +348,22 @@ def _configure_document(document: Document, project: dict) -> None:
         ("Heading 1", TYPO["h1_size"], 0),
         ("Heading 2", TYPO["h2_size"], 1),
         ("Heading 3", TYPO["h3_size"], 2),
+        ("Heading 4", TYPO["h3_size"], 3),
     )
     for name, size, index in headings:
+        # 标题不传 line_spacing：沿用 1.5 倍，改动只落在字号上。
         _configure_style(document.styles[name], heading_font, size, bold=True, color=BLACK)
         style = document.styles[name]
         style.paragraph_format.keep_with_next = True
         style.paragraph_format.space_before = Pt(TYPO["heading_space_before_pt"][index])
         style.paragraph_format.space_after = Pt(6)
         style.paragraph_format.first_line_indent = Pt(0)
-    _configure_style(document.styles["Quote"], body_font, body_size, color=RGBColor(82, 94, 110))
+    # 正文（段落／列表／引用）统一固定行距 24pt；标题与表注不在此列。
+    _configure_style(document.styles["Quote"], body_font, body_size,
+                     color=RGBColor(82, 94, 110), line_spacing=body_spacing)
     document.styles["Quote"].paragraph_format.first_line_indent = Pt(0)
-    _configure_style(document.styles["List Bullet"], body_font, body_size)
-    _configure_style(document.styles["List Number"], body_font, body_size)
+    _configure_style(document.styles["List Bullet"], body_font, body_size, line_spacing=body_spacing)
+    _configure_style(document.styles["List Number"], body_font, body_size, line_spacing=body_spacing)
     try:
         source_style = document.styles["Source Note"]
     except KeyError:
@@ -371,6 +397,7 @@ def _enforce_typography(document: Document) -> None:
         "Heading 1": TYPO["h1_size"],
         "Heading 2": TYPO["h2_size"],
         "Heading 3": TYPO["h3_size"],
+        "Heading 4": TYPO["h3_size"],
     }
     for paragraph in document.paragraphs:
         style_name = paragraph.style.name
@@ -398,10 +425,19 @@ def _enforce_typography(document: Document) -> None:
             _set_east_asia_font(element, font)
 
     table_size = TYPO["table_size"]
+    table_spacing = TYPO["table_line_spacing"]
+    table_space_after = Pt(TYPO["table_space_after_pt"])
+    table_indent = Pt(TYPO["table_first_line_indent_pt"])
     for table in document.tables:
         for row_index, row in enumerate(table.rows):
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
+                    # 单元格段落继承的是 Normal（段落样式优先级高于表格样式），正文改成
+                    # 固定 24pt 后会连表格一起改。这里把行距／段后／缩进显式写回改动前的
+                    # 值，表格外观与正文默认样式的调整解耦。
+                    paragraph.paragraph_format.line_spacing = table_spacing
+                    paragraph.paragraph_format.space_after = table_space_after
+                    paragraph.paragraph_format.first_line_indent = table_indent
                     for run in paragraph.runs:
                         run.font.size = Pt(table_size)
                         if run.font.color.rgb is None:
@@ -533,7 +569,7 @@ def _add_section_blocks(document: Document, blocks: list[dict]) -> None:
                 _add_markdown_table(document, block.get("rows") or [])
             continue
         if kind == "heading":
-            document.add_heading(block["label"], level=block["level"])
+            _add_heading_text(document, block["label"], int(block["level"]))
             continue
         if kind == "list":
             style = "List Number" if block.get("ordered") else "List Bullet"
@@ -560,7 +596,7 @@ def _add_source_note(document: Document, text: str) -> None:
 def _add_cover(document: Document, project: dict, title: str, level: str, has_open: bool,
                *, variant: str, state: dict) -> None:
     document.add_paragraph()
-    heading = document.add_heading(title, level=0)
+    heading = _add_heading_text(document, title, 0)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     subtitle = document.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -607,7 +643,7 @@ def _add_cover(document: Document, project: dict, title: str, level: str, has_op
 
 
 def _add_contents(document: Document, sections: list[dict]) -> None:
-    document.add_heading("报告目录", level=1)
+    _add_heading_text(document, "报告目录", 1)
     for group in grouped_sections(sections):
         paragraph = document.add_paragraph()
         run = paragraph.add_run(group["label"])
@@ -630,7 +666,7 @@ def _add_evidence_appendix(document: Document, records: list[dict], citation_num
     from .delivery_wording import normalize_report_text
 
     document.add_page_break()
-    document.add_heading(heading, level=1)
+    _add_heading_text(document, heading, 1)
     intro = document.add_paragraph()
     _add_inline_markdown(intro, "本附录集中列示正文实际引用的证据定位及短摘录。完整原文仍以系统证据抽屉及原始文件为准。")
     if not records:
@@ -689,10 +725,10 @@ def docx_report(project_id: str, variant: str = "draft") -> bytes:
     # 与 Markdown 出口共用同一套论文式编号：一级 一、二级 （一）三级 1.
     groups = grouped_sections(sections)
     for group in groups:
-        document.add_heading(group["label"], level=1)
+        _add_heading_text(document, group["label"], 1)
         for chapter in group["chapters"]:
             section = chapter["section"]
-            document.add_heading(chapter["label"], level=2)
+            _add_heading_text(document, chapter["label"], 2)
             _add_section_blocks(document, section_blocks(project_id, section, subject=subject))
             _add_source_note(document, _section_source_line(section, citation_numbers, records_by_id))
         fallback = group.get("section")
@@ -700,7 +736,7 @@ def docx_report(project_id: str, variant: str = "draft") -> bytes:
             _add_section_blocks(document, section_blocks(project_id, fallback, subject=subject))
             _add_source_note(document, _section_source_line(fallback, citation_numbers, records_by_id))
     if open_lines:
-        document.add_heading(f"{cn_number(len(groups) + 1)}、未决事项附录", level=1)
+        _add_heading_text(document, f"{cn_number(len(groups) + 1)}、未决事项附录", 1)
         for line in open_lines:
             paragraph = document.add_paragraph(style="List Bullet")
             _add_inline_markdown(paragraph, line)

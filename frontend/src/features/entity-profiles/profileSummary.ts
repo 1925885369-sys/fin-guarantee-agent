@@ -11,7 +11,7 @@ const PROVINCE_CITY = /^(.+?(?:省|自治区))(.+?(?:市|自治州|地区|盟))/
  */
 export function administrativeAddress(value: string): string {
   const compact = value.replace(/\s+/g, "").trim();
-  if (!compact) return "材料不足";
+  if (!compact) return "待补充";
   if (MUNICIPALITIES.test(compact)) {
     const municipality = compact.match(MUNICIPALITIES)?.[1] || "";
     const district = compact.slice(municipality.length).match(/^(.+?(?:区|县))/)?.[1];

@@ -225,16 +225,16 @@ def test_fit_json_prompt_only_trims_above_the_limit_it_is_given():
 
 
 def test_length_repair_reuses_the_same_payload_and_aliases(monkeypatch):
-    """篇幅修复是第二次调用，必须复用完全相同的证据、引用别名与上下文。"""
+    """篇幅修复是**唯一一次**额外调用：直接压缩被拒稿，不再先做一次主稿重写。
+
+    修订稿 §3.3"每章最多一次额外内容调整"；此前 `rewrite_section(length_repair=…)` 会先做
+    一次全量重写再压缩（真实链路 3 次调用），本用例把修复路径钉在一次调用上。
+    """
     calls: list[dict] = []
 
     def fake_chat(system_prompt, prompt, *, schema=None, normalizer=None,
                   allowed_source_ids=None, context=None, max_input_chars=None):
-        payload = json.loads(prompt)
-        calls.append(payload)
-        if len(calls) == 1:
-            return ({"content": "过长正文" * 500, "citation_ids": ["E01"]},
-                    llm.LlmUsage(input_tokens=100, output_tokens=50, cost=0.01))
+        calls.append(json.loads(prompt))
         return ({"content": "修正后的正文", "citation_ids": ["E01"]},
                 llm.LlmUsage(input_tokens=120, output_tokens=40, cost=0.012))
 
@@ -253,26 +253,24 @@ def test_length_repair_reuses_the_same_payload_and_aliases(monkeypatch):
         "财务趋势与盈利质量", "草稿", [{"id": "c-1", "source_id": "s-1", "quote": "收入100万元"}],
         chapter_key="financial", chapter_context=chapter_context, strict_citations=True,
         length_repair={"message": "章节超出目标篇幅上限", "visible_content_chars": 3000,
-                       "effective_min_chars": 1000, "effective_max_chars": 2600},
+                       "effective_min_chars": 1000, "effective_max_chars": 2600,
+                       "previous_content": "过长正文" * 500},
     )
 
-    assert len(calls) == 2
-    first, second = calls
-    assert "length_repair" not in first
-    repair = second["length_repair"]
+    # 只有一次调用：修复稿直接由压缩请求产出，不再先做一次主稿重写。
+    assert len(calls) == 1
+    repair = calls[0]["length_repair"]
     assert repair["target_min_chars"] == 1000 and repair["target_max_chars"] == 2600
     assert repair["rule"] == llm.LENGTH_REPAIR_RULE
     assert repair["previous_content"] == "过长正文" * 500
 
-    # 同一份证据、同一别名表、同一上下文——修复不得扩大或改变证据范围
-    assert second["allowed_citation_ids"] == first["allowed_citation_ids"] == ["E01"]
-    assert second["evidence"] == first["evidence"]
-    assert second["chapter_context"] == first["chapter_context"]
-    assert all("source-1" not in json.dumps(item, ensure_ascii=False) for item in (first, second))
+    # 同一份证据、同一别名表——修复不得扩大或改变证据范围
+    assert calls[0]["allowed_citation_ids"] == ["E01"]
+    assert "source-1" not in json.dumps(calls[0], ensure_ascii=False)
 
     assert result.content == "修正后的正文"
     assert result.citation_ids == ["c-1"]
-    assert (usage.input_tokens, usage.output_tokens) == (220, 90)
+    assert (usage.input_tokens, usage.output_tokens) == (120, 40)
 
 
 def test_no_repair_call_without_a_length_verdict(monkeypatch):
@@ -314,6 +312,55 @@ def test_repair_section_length_makes_exactly_one_call(monkeypatch):
     assert calls[0]["length_repair"]["previous_content"] == "第一次模型正文"
     assert calls[0]["length_repair"]["target_max_chars"] == 2600
     assert result.content == "压缩后的正文"
+
+
+def test_repair_section_json_makes_exactly_one_call_with_bounded_raw_output(monkeypatch):
+    """报告首次输出不可解析时，上层用同一份上下文做**恰好一次**修复（第三点细化方案 §3.2）。
+
+    - 复用同一别名表与证据范围：真实 ``source_id`` 不随请求下发模型；
+    - “原始输出 + 错误类型”按 ``_repair_message`` 语义回灌，并沿用 12000 字符限制；
+    - 本函数自身不再触发任何后续修复（调用次数恒为 1）。
+    """
+    calls: list[dict] = []
+    captured_sources: dict = {}
+
+    def fake_chat(system_prompt, prompt, *, schema=None, normalizer=None,
+                  allowed_source_ids=None, context=None, max_input_chars=None,
+                  drop_report=None, evidence_sources=None):
+        calls.append(json.loads(prompt))
+        captured_sources["evidence_sources"] = evidence_sources
+        return ({"content": "修复后的正文", "citation_ids": ["E01", "E99"]},
+                llm.LlmUsage(input_tokens=10, output_tokens=5))
+
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "_chat_json", fake_chat)
+    monkeypatch.setattr(llm, "chapter_prompt", lambda *_args, **_kwargs: "system")
+
+    chapter_context = {
+        "project_id": "project-1",
+        "evidence": [{"id": "c-1", "source_id": "s-1", "quote": "收入100万元"}],
+    }
+    raw = "HEAD" + ("x" * 20000) + "TAIL"
+    result, _usage = llm.repair_section_json(
+        "财务趋势与盈利质量", "草稿",
+        [{"id": "c-1", "source_id": "s-1", "quote": "收入100万元"}],
+        chapter_key="financial", chapter_context=chapter_context,
+        strict_citations=False, raw_content=raw, error_type="schema_error",
+    )
+
+    assert len(calls) == 1                                   # 恰好一次，不再触发后续修复
+    repair = calls[0]["json_repair"]
+    assert repair["error_type"] == "schema_error"
+    assert "TAIL" in repair["instruction"]                   # 保留结尾原文
+    assert "HEAD" not in repair["instruction"]               # 只回灌受限的尾部 12000 字符
+    assert "<previous_output>" in repair["instruction"]
+    # 同一别名表、同一证据范围：真实 source_id 不下发模型
+    assert calls[0]["allowed_citation_ids"] == ["E01"]
+    assert "s-1" not in json.dumps(calls[0], ensure_ascii=False)
+    assert captured_sources["evidence_sources"] == {"E01": "s-1"}
+    # 返回结果按别名映射回真实引用，并被 strict_citations 过滤
+    assert result.content == "修复后的正文"
+    assert result.citation_ids == ["c-1"]
 
 
 def test_report_request_uses_the_effective_config_from_context(monkeypatch):

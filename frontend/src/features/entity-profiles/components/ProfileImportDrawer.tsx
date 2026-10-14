@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, FileSearch, LoaderCircle, Upload, X } from "lucide-react";
 import { ErrorState, StatusBadge } from "../../../components/common";
 import type {
@@ -54,15 +54,27 @@ export function ProfileImportDrawer({
       try {
         const next = await repository.getImport(job.id);
         setJob(next);
-        if (terminalStatuses.has(next.status)) {
-          setSelected(new Set(next.candidates.filter(candidateHasEvidence).map((item) => item.id)));
-        }
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "导入状态读取失败");
       }
     }, 900);
     return () => window.clearTimeout(timer);
   }, [job, repository]);
+
+  /**
+   * 候选默认只勾选**有可靠证据**的那些。
+   *
+   * 必须按 job.id 只做一次，且不能只挂在轮询回调里：结构化导入是同步完成的，
+   * 首次响应就可能已经是 ready_to_commit，那条回调对终态直接 early-return，
+   * 结果一个候选都没勾上、「提交为新版本」永远点不动。
+   */
+  const autoSelectedJob = useRef("");
+  useEffect(() => {
+    if (!job || autoSelectedJob.current === job.id) return;
+    if (!["needs_mapping", "ready_to_commit"].includes(job.status)) return;
+    autoSelectedJob.current = job.id;
+    setSelected(new Set(job.candidates.filter(candidateHasEvidence).map((item) => item.id)));
+  }, [job]);
 
   const selectedCandidates = useMemo(
     () => (job?.candidates || []).filter((candidate) => selected.has(candidate.id)),

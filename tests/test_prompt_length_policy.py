@@ -294,7 +294,8 @@ def _regenerate_with_fake_model(monkeypatch, reply) -> dict:
         calls: list[dict] = []
 
         def fake_rewrite(title, content, evidence, call_context=None, *, chapter_key=None,
-                         chapter_context=None, strict_citations=False, length_repair=None):
+                         chapter_context=None, strict_citations=False, length_repair=None,
+                         safety_repair=None, drop_report=None):
             calls.append({
                 "chapter_key": chapter_key, "length_repair": length_repair,
                 "content_input": content,
@@ -420,7 +421,8 @@ def test_full_generation_keeps_the_long_model_body(monkeypatch):
         calls: list[tuple[str, bool]] = []
 
         def fake_rewrite(title, content, evidence, call_context=None, *, chapter_key=None,
-                         chapter_context=None, strict_citations=False, length_repair=None):
+                         chapter_context=None, strict_citations=False, length_repair=None,
+                         safety_repair=None, drop_report=None):
             calls.append((chapter_key, length_repair is not None))
             return (LlmSection(content=content,
                                citation_ids=list((chapter_context or {}).get("allowed_citation_ids") or [])),

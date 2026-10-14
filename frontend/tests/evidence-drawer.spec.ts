@@ -118,11 +118,21 @@ async function openReviewCenter(page: Page, testInfo: { project: { name: string 
   await expect(page.getByRole("heading", { name: "复核中心" })).toBeVisible();
 }
 
-/** 点第 index 张冲突卡片上的「证据」，返回打开的抽屉。 */
-async function openDrawerFrom(page: Page, index: number) {
-  const card = page.locator(".conflict-item").nth(index);
-  await expect(card).toBeVisible();
-  await card.locator(".assertion-option").first().locator("i").click();
+/** 点第 index 张冲突卡片上的「证据」，返回打开的抽屉。
+ *  复核中心已从「卡片流」改为「清单表格 + 详情」主从布局（App.tsx:774/829/833）：
+ *  先选中冲突行，再点详情里该披露值对应的来源按钮 `.rc-source`。 */
+async function openDrawerFrom(page: Page, index: number, testInfo: { project: { name: string } }) {
+  // 移动端列表 / 详情互斥：处于详情态时先点「返回清单」，才能再选中下一行。
+  if (testInfo.project.name === "mobile") {
+    const back = page.locator(".rc-back");
+    if (await back.isVisible()) await back.click();
+  }
+  const row = page.locator(".rc-table tbody tr").nth(index);
+  await expect(row).toBeVisible();
+  await row.click();
+  const source = page.locator(".rc-assertion .rc-source").first();
+  await expect(source).toBeVisible();
+  await source.click();
   const drawer = page.locator(".evidence-drawer.open");
   await expect(drawer).toBeVisible();
   return drawer;
@@ -148,7 +158,7 @@ test("证据抽屉按行重排原文，表格页数值列对齐", async ({ page 
   await mockEvidence(page, PAGE_QUOTE, ["137902.04", "2741290.13"]);
   await openReviewCenter(page, testInfo);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  const drawer = await openDrawerFrom(page, 0);
+  const drawer = await openDrawerFrom(page, 0, testInfo);
 
   // 1. 只搬运不改写：逐字节等于原文，重排没有增删、改写、重排任何字符。
   expect(await drawer.locator("blockquote").evaluate((element) => element.textContent)).toBe(PAGE_QUOTE);
@@ -180,13 +190,15 @@ test("证据抽屉按行重排原文，表格页数值列对齐", async ({ page 
   await expect(drawer.locator(".evidence-line.hit").first()).toContainText("137,902.04");
   await expect.poll(() => drawer.evaluate((box) => box.scrollTop)).toBeGreaterThan(0);
   await expect.poll(() => hitInView(drawer)).toBe(true);
+  console.log(`[evidence] 复核中心命中行居中 scrollTop = ${await drawer.evaluate((box) => box.scrollTop)}`);
 
   // 5. 同一个值出现在多行时全部高亮（资产总计 与 正文各一处）。
   await closeDrawer(page);
-  const multi = await openDrawerFrom(page, 1);
+  const multi = await openDrawerFrom(page, 1, testInfo);
   await expect(multi.locator(".evidence-line.hit")).toHaveCount(2);
   await expect(multi.locator(".evidence-page")).toHaveAttribute("data-hit-count", "2");
   await expect.poll(() => hitInView(multi)).toBe(true);
+  console.log(`[evidence] 复核中心命中行居中(多命中) scrollTop = ${await multi.evaluate((box) => box.scrollTop)}`);
 });
 
 test("定位不到或目标过短时不高亮、不误报", async ({ page }, testInfo) => {
@@ -195,7 +207,7 @@ test("定位不到或目标过短时不高亮、不误报", async ({ page }, tes
   await page.emulateMedia({ reducedMotion: "reduce" });
 
   // 值不在本页：不高亮，明确告诉复核人抽取结果与事实对不上。
-  const missing = await openDrawerFrom(page, 0);
+  const missing = await openDrawerFrom(page, 0, testInfo);
   await expect(missing.locator(".evidence-line.hit")).toHaveCount(0);
   await expect(missing.locator(".evidence-focus-miss")).toContainText("未在本页文本中定位到「99999999.99」");
   await expect.poll(() => missing.evaluate((box) => box.scrollTop)).toBe(0);
@@ -203,7 +215,7 @@ test("定位不到或目标过短时不高亮、不误报", async ({ page }, tes
 
   // 目标不足 4 位数字不定位：否则页码 "95" 会把复核人带到页眉。
   await closeDrawer(page);
-  const short = await openDrawerFrom(page, 1);
+  const short = await openDrawerFrom(page, 1, testInfo);
   await expect(short.locator(".evidence-line.hit")).toHaveCount(0);
   await expect(short.locator(".evidence-focus-miss")).toContainText("未在本页文本中定位到「95」");
 });
@@ -211,7 +223,7 @@ test("定位不到或目标过短时不高亮、不误报", async ({ page }, tes
 test("正文页不排成假表格", async ({ page }, testInfo) => {
   await mockEvidence(page, PROSE_QUOTE, ["2741290.13"]);
   await openReviewCenter(page, testInfo);
-  const drawer = await openDrawerFrom(page, 0);
+  const drawer = await openDrawerFrom(page, 0, testInfo);
 
   await expect(drawer.locator(".evidence-line")).toHaveCount(PROSE_QUOTE.split("\n").length);
   await expect(drawer.locator(".evidence-line.row")).toHaveCount(0);

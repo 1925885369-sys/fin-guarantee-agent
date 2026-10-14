@@ -267,11 +267,52 @@ CREATE TABLE IF NOT EXISTS report_sections (
   support_rate REAL NOT NULL DEFAULT 0, validation_status TEXT NOT NULL DEFAULT 'pending',
   UNIQUE(project_id, section_key)
 );
+-- 章节生成尝试台账（第三点细化方案 §四）：区分"现正文来自哪次成功"（report_sections.
+-- accepted_attempt_id）与"最新尝试是否失败"（report_sections.latest_attempt_id）。原文
+-- （首稿/修复稿）仅供授权项目诊断，不进入报告成品。字段齐备即可：尝试ID/项目/章节/运行ID、
+-- 预期版本及哈希、冻结输入JSON、首稿与修复稿、分阶段诊断、是否采用、调用用量及时间。
+CREATE TABLE IF NOT EXISTS chapter_generation_attempts (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, section_key TEXT NOT NULL,
+  run_id TEXT NOT NULL DEFAULT '',
+  expected_revision INTEGER NOT NULL DEFAULT 0,
+  expected_content_sha256 TEXT NOT NULL DEFAULT '',
+  expected_prompt_sha256 TEXT NOT NULL DEFAULT '',
+  expected_materials_version TEXT NOT NULL DEFAULT '',
+  frozen_input_json TEXT NOT NULL DEFAULT '{}',
+  draft_json TEXT NOT NULL DEFAULT '{}',
+  repair_json TEXT NOT NULL DEFAULT '{}',
+  -- 组装后正文（补回来源边界块、拼上系统表格、真正落库的那一版）与代码指纹：
+  -- 与 draft_json（原始首稿）、repair_json（真实修复响应）三段分列、互不冒充。
+  assembled_json TEXT NOT NULL DEFAULT '{}',
+  code_fingerprint TEXT NOT NULL DEFAULT '',
+  diagnostics_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'skipped', stage TEXT NOT NULL DEFAULT '',
+  repair_type TEXT NOT NULL DEFAULT '', adopted INTEGER NOT NULL DEFAULT 0,
+  usage_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chapter_attempts_section
+  ON chapter_generation_attempts(project_id, section_key, created_at);
 CREATE TABLE IF NOT EXISTS report_table_snapshots (
   project_id TEXT NOT NULL, chapter_key TEXT NOT NULL, blocks_json TEXT NOT NULL,
   input_hash TEXT NOT NULL, rule_version TEXT NOT NULL, updated_at TEXT NOT NULL,
   PRIMARY KEY(project_id,chapter_key)
 );
+-- 完成任务时冻结的不可变报告快照：每个 run 最多一份（UNIQUE(run_id)）。
+-- 与 report_sections（可变的"当前正文"）彻底解耦：snapshot 一旦写入不再更新，
+-- 历史报告查看只回放 payload_json，不回查当前库——材料或复核决议后续怎么变，
+-- 都不会改写既有快照。payload 内连 citation 原文一起冻结，避免历史阅读时
+-- 还要去打 /api/citations（那些来源可能已随材料变化）。
+CREATE TABLE IF NOT EXISTS report_snapshots (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  report_revision INTEGER NOT NULL DEFAULT 0, review_revision INTEGER NOT NULL DEFAULT 0,
+  validation_status TEXT NOT NULL DEFAULT '', support_rate REAL NOT NULL DEFAULT 0,
+  title TEXT NOT NULL DEFAULT '', report_level TEXT NOT NULL DEFAULT '',
+  subject TEXT NOT NULL DEFAULT '', schema_version TEXT NOT NULL DEFAULT 'report-snapshot-v1',
+  payload_json TEXT NOT NULL DEFAULT '{}', content_sha256 TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, UNIQUE(run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_report_snapshots_project
+  ON report_snapshots(project_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS report_prompt_overrides (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, chapter_key TEXT NOT NULL,
   prompt TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -485,6 +526,13 @@ MIGRATIONS = {
     # 表名恢复来源（unit_anchor | title_hint | none）。修订稿要求"新增 caption_origin 等
     # 元数据必须保存到数据库和版本历史"——不落库就无法区分表名是强锚点得来的还是猜的。
     "document_tables": {"caption_origin": "TEXT NOT NULL DEFAULT 'none'"},
+    # 尝试台账的"组装后正文"（财务修复计划 §四）：与 draft_json（原始首稿）、
+    # repair_json（**真实**修复响应）并列，三者互不冒充。组装后正文是补回来源边界块、
+    # 拼上系统表格、真正落进 report_sections 的那一版。
+    "chapter_generation_attempts": {
+        "assembled_json": "TEXT NOT NULL DEFAULT '{}'",
+        "code_fingerprint": "TEXT NOT NULL DEFAULT ''",
+    },
     "projects": {"consent_at": "TEXT NOT NULL DEFAULT ''", "project_type": "TEXT NOT NULL DEFAULT 'bond_guarantee'", "bond_name": "TEXT NOT NULL DEFAULT ''",
                  "data_class": "TEXT NOT NULL DEFAULT 'user_project'", "evaluation_eligible": "INTEGER NOT NULL DEFAULT 0",
                  "issuer_profile_id": "TEXT", "profile_snapshot_id": "TEXT",
@@ -595,6 +643,9 @@ MIGRATIONS = {
         # 贯通两道校验（修订稿 §3.1："记录随章节上下文冻结并持久化…同时传入章节校验与
         # 后置支持校验"）。存 JSON 文本，供审计与校验复用，不参与其他查询。
         "table_records_json": "TEXT NOT NULL DEFAULT '[]'",
+        # 统一冻结记录（三项遗留修复方案 §一）：fact/table/metric/rule 四类一次冻结，
+        # 章节校验与后置支持校验读取同一份；旧行缺省为空，读取时兼容 table_records_json。
+        "evidence_records_json": "TEXT NOT NULL DEFAULT '[]'",
         # 交付一致性：正文真实来源、正文哈希、最近一次完整交付校验对应的哈希、
         # 回退发生阶段、强制披露是否完整、是否可交付。后置回退必须同步这些字段，
         # 否则"正文已是模板、界面仍显示模型已采用"。
@@ -615,6 +666,10 @@ MIGRATIONS = {
         "effective_min_chars": "INTEGER NOT NULL DEFAULT 0",
         "effective_max_chars": "INTEGER NOT NULL DEFAULT 0",
         "length_repair_attempted": "INTEGER NOT NULL DEFAULT 0",
+        # 尝试台账外键（第三点细化方案 §四）：accepted_attempt_id = 现正文来自哪次成功；
+        # latest_attempt_id = 最新一次尝试（可能是失败/待核验/跳过）。默认空保持旧行兼容。
+        "accepted_attempt_id": "TEXT NOT NULL DEFAULT ''",
+        "latest_attempt_id": "TEXT NOT NULL DEFAULT ''",
     },
     "report_prompt_overrides": {
         "structured_json": "TEXT NOT NULL DEFAULT ''",

@@ -175,6 +175,10 @@ def test_rating_date_is_normalized_and_internal_prefixes_never_leak() -> None:
     assert text_value_token("rating_date", "评级时间：2025年5月30日") == "date:2025-05-30"
     assert text_value_token("rating_date", "主体评级结果 债项评级结果 评级时间") is None
     assert text_value_token("rating_date", "评级时间为空") is None
+    # **幂等**：抽取阶段存库的就是 date: 输出，冲突分组会对存库值再跑一次——
+    # 不能二次解析会让 rating_date 永远选不进 canonical（北投/中邮实测）。
+    assert text_value_token("rating_date", "date:2026-07-03") == "date:2026-07-03"
+    assert text_value_token("rating_date", "date:2026-13-03") is None  # 非法月份不取
     for value, expected in (
         ("agency:中诚信国际信用评级有限责任公司", "中诚信国际信用评级有限责任公司"),
         ("date:2025-05-30", "2025-05-30"),
@@ -226,3 +230,51 @@ def test_rating_date_uses_the_report_signature_date_only() -> None:
     assert _extract_labelled_text("rating_date", "联合资信", "因联合资信于2026年5月及6月对…")[0] is None
     # 反例：正文里的预判年份
     assert _extract_labelled_text("rating_date", "中诚信", "中诚信国际预计2026年二季度中国GDP增长")[0] is None
+
+
+def test_rating_date_accepts_chinese_numeral_signature_date() -> None:
+    """中文数字落款（实测中邮末页"联合资信评估股份有限公司 评级总监： 二〇二六年七月十日"）。
+
+    署名日期必须紧跟机构名（可隔署名栏"评级总监："）；正文叙述里的中文年份、缺月日的
+    年份、非法月日都不取（修订稿 §2.4 仍成立）。
+    """
+    from backend.app.facts import FACT_REGISTRY, _extract_labelled_text, _find_alias
+
+    text = "特此公告 联合资信评估股份有限公司 评级总监： 二〇二六年七月十日"
+    assert _extract_labelled_text("rating_date", "联合资信", text)[0] == "date:2026-07-10"
+    assert _find_alias("rating_date", FACT_REGISTRY["rating_date"].aliases, text.replace(" ", "")) == "联合资信评估股份有限公司"
+    # 反例：未被机构名"紧跟"的中文年份（叙述语）与缺月日的年份都不取。
+    assert _extract_labelled_text("rating_date", "联合资信", "联合资信预计二〇二六年中国债券市场回暖")[0] is None
+    assert _extract_labelled_text("rating_date", "联合资信", "联合资信评估股份有限公司 二〇二六年")[0] is None
+    # 反例：非法月日（十三月）不取。
+    assert _extract_labelled_text("rating_date", "联合资信", "联合资信评估股份有限公司 二〇二六年十三月十日")[0] is None
+
+
+def test_rating_document_fallback_scans_whole_report_for_announcement_fields() -> None:
+    """评级报告整篇兜底：公告/结论页不在任何 rating_* 节定位范围时，评级五字段仍可抽出。
+
+    实测中邮评级报告 p2 公告页与 p24 评级结论页均不被章节定位覆盖，只按分节抽取时
+    issuer_rating / bond_rating / rating_date 永远为空（2026-10-14 试跑实测）。
+    """
+    from backend.app.workflow import _rating_document_fallback_facts
+
+    text = ("十三、评级结论\n基于对公司经营风险与财务风险的评估，联合资信确定中邮证券有限责任公司"
+            "主体长期信用等级为AA+，本期债券信用等级为AAA，评级展望为稳定。\n特此公告\n"
+            "联合资信评估股份有限公司\n评级总监：\n二〇二六年七月十日")
+    source_rows = [{
+        "id": "rating-p024", "document_id": "doc-rating", "document_role": "rating_report",
+        "locator_type": "pdf_page", "locator": "第 24 页", "page": 24, "text": text,
+    }]
+    facts = _rating_document_fallback_facts(source_rows, [], {"rating-p024": text})
+    got = {item["fact_key"]: item.get("text_value") for item in facts}
+    assert got.get("issuer_rating") == "rating:AA+"
+    assert got.get("bond_rating") == "rating:AAA"
+    assert got.get("rating_outlook") == "outlook:稳定"
+    assert got.get("rating_agency") == "agency:联合资信"
+    assert got.get("rating_date") == "date:2026-07-10"
+    # 全部命中项都标记为兜底来源（台账可区分"分节抽取"与"整篇兜底"），并带原文来源页。
+    assert all(item["section_role"] == "rating_report_fallback" for item in facts)
+    assert all(list(item["source_ids"]) == ["rating-p024"] for item in facts)
+    # 负例：非评级报告文档不触发兜底（不扩大其它文档的字段来源）。
+    assert _rating_document_fallback_facts(
+        [{**source_rows[0], "document_role": "prospectus"}], [], {}) == []

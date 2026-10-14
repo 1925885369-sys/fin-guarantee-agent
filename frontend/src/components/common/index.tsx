@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, Inbox, LoaderCircle, X } from "lucide-react";
 
+export { HelpTip } from "./HelpTip";
+export { Pagination, DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "./Pagination";
+export type { PageSize } from "./Pagination";
+
 export function StatusBadge({ tone = "neutral", children }: { tone?: "success" | "info" | "warning" | "danger" | "neutral"; children: ReactNode }) {
   return <span className={`status-badge tone-${tone}`}>{children}</span>;
 }

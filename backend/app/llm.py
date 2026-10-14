@@ -108,10 +108,14 @@ class LlmCallContext:
 
 
 class StructuredLlmError(RuntimeError):
-    def __init__(self, error_type: str, message: str, usage: LlmUsage | None = None):
+    def __init__(self, error_type: str, message: str, usage: LlmUsage | None = None, *,
+                 raw_content: str | None = None):
         super().__init__(message)
         self.error_type = error_type
         self.usage = usage or LlmUsage()
+        # 报告任务首次生成不可解析时，把**原始模型输出**附在异常上供上层做一次修复的输入。
+        # 只挂在属性上：不拼接进 ``message``，也不写入 ``llm_attempts`` 正文（修订稿 §3.2）。
+        self.raw_content = raw_content
 
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
@@ -263,7 +267,9 @@ def _relevant_field_registry(source_rows: list[dict]) -> dict[str, str]:
 def _structured_call(system_prompt: str, prompt: str, schema: type[SchemaT], *,
                      context: LlmCallContext, normalizer: Callable[[dict], dict] | None = None,
                      allowed_source_ids: set[str] | None = None,
-                     max_input_chars: int | None = None) -> tuple[dict, LlmUsage]:
+                     max_input_chars: int | None = None,
+                     drop_report: dict | None = None,
+                     evidence_sources: dict[str, str] | None = None) -> tuple[dict, LlmUsage]:
     # Two-argument fallback keeps existing test doubles and third-party integrations compatible.
     parameters = inspect.signature(_chat_json).parameters
     if "schema" not in parameters:
@@ -275,6 +281,12 @@ def _structured_call(system_prompt: str, prompt: str, schema: type[SchemaT], *,
                     "allowed_source_ids": allowed_source_ids, "context": context}
     if "max_input_chars" in parameters:
         kwargs["max_input_chars"] = max_input_chars
+    # 报告任务的“整条丢弃”收集器与证据 ID 映射只透传给支持它的实现；测试替身（两参
+    # 或老签名 ``_chat_json``）不会被塞进未知关键字。
+    if "drop_report" in parameters:
+        kwargs["drop_report"] = drop_report
+    if "evidence_sources" in parameters:
+        kwargs["evidence_sources"] = evidence_sources
     return _chat_json(system_prompt, prompt, **kwargs)
 
 
@@ -465,14 +477,107 @@ def _repair_message(raw_content: str, error_type: str, schema: type[BaseModel] |
     )
 
 
-def _fit_json_prompt(prompt: str, limit: int) -> str:
-    """Shrink source text before serialization limits are applied, preserving valid JSON."""
+def _compact_json(payload: object) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+# 报告任务请求里允许**整条丢弃**的相关性列表键，按丢弃先后排列（修订稿 §2.1 / §3.2）。
+# 顶层 ``evidence`` 先丢，其次 ``chapter_context`` 里的事实/指标/交叉核验记录。
+# 这些列表上游已按章节相关性排序，因此一律**从尾部**丢掉整条记录。
+_REPORT_CONTEXT_DROPPABLE_KEYS = ("facts", "metrics", "cross_checks")
+
+
+def _report_droppable_lists(payload: object) -> list[list]:
+    """报告请求中“可按相关性整条丢弃”的列表，按丢弃先后返回（同列表引用，可原地 pop）。
+
+    只认顶层 ``evidence`` 与 ``chapter_context`` 的 facts/metrics/cross_checks。
+    ``system_tables``、冲突块、Prompt、允许期等必要材料都不是这里的列表，**不参与丢弃**。
+    """
+    if not isinstance(payload, dict):
+        return []
+    pools: list[list] = []
+    evidence = payload.get("evidence")
+    if isinstance(evidence, list):
+        pools.append(evidence)
+    context = payload.get("chapter_context")
+    if isinstance(context, dict):
+        for key in _REPORT_CONTEXT_DROPPABLE_KEYS:
+            value = context.get(key)
+            if isinstance(value, list):
+                pools.append(value)
+    return pools
+
+
+def _dropped_evidence_id(item: object, evidence_sources: dict[str, str] | None) -> str | None:
+    """被丢 evidence 条目的标识：优先真实 ``source_id``，其次映射表，最后退回条目 ``id``。"""
+    if not isinstance(item, dict):
+        return None
+    source_id = item.get("source_id")
+    if not source_id and evidence_sources:
+        source_id = evidence_sources.get(item.get("id"))
+    if not source_id:
+        source_id = item.get("id")
+    return str(source_id) if source_id not in (None, "") else None
+
+
+def _record_dropped_evidence(drop_report: dict, item: object,
+                             evidence_sources: dict[str, str] | None) -> None:
+    """把一次“整条丢弃”记进调用方传入的 ``drop_report`` 收集器（修订稿 §2.1 / §3.2）。
+
+    只写两个约定键：``dropped_evidence_ids``（按丢弃顺序的 source_id）与
+    ``budget_exceeded``（是否发生过丢弃）。无丢弃时本函数不会被调用，收集器保持原样。
+    """
+    source_id = _dropped_evidence_id(item, evidence_sources)
+    if source_id is not None:
+        drop_report.setdefault("dropped_evidence_ids", []).append(source_id)
+    drop_report["budget_exceeded"] = True
+
+
+def _drop_report_items(payload: object, limit: int, *, drop_report: dict | None = None,
+                       evidence_sources: dict[str, str] | None = None) -> str:
+    """报告任务超预算裁剪：只整条丢弃，绝不截断任何字符串。
+
+    ``drop_report`` 传入时，顶层 ``evidence`` 每次被整条丢弃都会把其 ``source_id``
+    按丢弃顺序记入收集器；``facts``/``metrics``/``cross_checks`` 的丢弃不计入 evidence 列表。
+    """
+    compact = _compact_json(payload)
+    evidence_pool = payload.get("evidence") if isinstance(payload, dict) else None
+    for pool in _report_droppable_lists(payload):
+        # 同一条列表丢到最后一条仍不够时，再进入下一条列表（evidence → facts → …）。
+        while pool and len(compact) > limit:
+            dropped = pool.pop()
+            if drop_report is not None and pool is evidence_pool:
+                _record_dropped_evidence(drop_report, dropped, evidence_sources)
+            compact = _compact_json(payload)
+        if len(compact) <= limit:
+            return compact
+    raise StructuredLlmError(
+        "input_budget_exceeded",
+        f"报告任务输入超过字符上限：丢弃全部可裁证据后仍有必要材料 {len(compact)} 字符 > 上限 {limit}，"
+        "无法容纳（不截断单元格或原文）",
+    )
+
+
+def _fit_json_prompt(prompt: str, limit: int, *, drop_items_only: bool = False,
+                     drop_report: dict | None = None,
+                     evidence_sources: dict[str, str] | None = None) -> str:
+    """Shrink source text before serialization limits are applied, preserving valid JSON.
+
+    ``drop_items_only=True`` 走**报告任务**口径（修订稿 §2.1）：超预算时只允许按相关性
+    整条丢弃列表条目（evidence → facts/metrics/cross_checks，一律从尾部丢），**绝不截断
+    任何字符串**；连必要材料都塞不下时抛 ``input_budget_exceeded``。默认 ``False`` 保持旧的
+    “把最长的 text/quote 对半截断”行为（抽取/候选/基线等批次任务）。
+    """
     if len(prompt) <= limit:
         return prompt
     try:
         payload = json.loads(prompt)
     except json.JSONDecodeError as exc:
         raise StructuredLlmError("scope_error", "模型输入超过字符上限且不是可安全裁剪的 JSON") from exc
+
+    if drop_items_only:
+        return _drop_report_items(payload, limit, drop_report=drop_report,
+                                  evidence_sources=evidence_sources)
 
     def text_entries(value: object) -> list[tuple[dict, str]]:
         output: list[tuple[dict, str]] = []
@@ -487,7 +592,7 @@ def _fit_json_prompt(prompt: str, limit: int) -> str:
                 output.extend(text_entries(item))
         return output
 
-    compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    compact = _compact_json(payload)
     while len(compact) > limit:
         entries = text_entries(payload)
         if not entries:
@@ -497,16 +602,22 @@ def _fit_json_prompt(prompt: str, limit: int) -> str:
         if len(text) <= 128:
             raise StructuredLlmError("scope_error", "模型证据输入超过字符上限，无法继续安全裁剪")
         container[key] = text[:max(128, len(text) // 2)]
-        compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        compact = _compact_json(payload)
     return compact
 
 
 def _chat_json(system_prompt: str, prompt: str, *, schema: type[SchemaT] | None = None,
                normalizer: Callable[[dict], dict] | None = None, allowed_source_ids: set[str] | None = None,
                context: LlmCallContext | None = None, max_output_tokens: int | None = None,
-               max_input_chars: int | None = None) -> tuple[dict, LlmUsage]:
+               max_input_chars: int | None = None, drop_report: dict | None = None,
+               evidence_sources: dict[str, str] | None = None) -> tuple[dict, LlmUsage]:
     context = context or LlmCallContext()
-    prompt = _fit_json_prompt(prompt, max_input_chars or settings.llm_batch_max_chars)
+    # 报告任务走“整条丢弃”预算口径，其余任务保持旧的截断逻辑（修订稿 §2.1）。
+    prompt = _fit_json_prompt(
+        prompt, max_input_chars or settings.llm_batch_max_chars,
+        drop_items_only=context.task_type in REPORT_TASK_TYPES,
+        drop_report=drop_report, evidence_sources=evidence_sources,
+    )
     output_limit = _output_limit(context.task_type, max_output_tokens)
     payload = {
         "model": settings.llm_model,
@@ -608,6 +719,21 @@ def _chat_json(system_prompt: str, prompt: str, *, schema: type[SchemaT] | None 
             total_usage.output_tokens += attempt_usage.output_tokens
             total_usage.latency_ms += attempt_usage.latency_ms
             total_usage.cost += attempt_usage.cost
+            # 报告任务关闭底层独立 JSON 修复链（修订稿 §3.2）：JSON/Schema 解析失败不再
+            # 追加一次修复请求，而是归类为可区分的 ``report_repair_required``，把这次修复
+            # 机会留给上层（“每章最多一次内容调整”）。传输/限流重试与降级逻辑保持不变。
+            if context.task_type in REPORT_TASK_TYPES and error_type in {"invalid_json", "schema_error"}:
+                report_error = StructuredLlmError(
+                    "report_repair_required",
+                    f"报告章节首次生成输出不可解析（{error_type}）：{_safe_error(exc, error_type)}",
+                    raw_content=last_raw_content,
+                )
+                last_error = report_error
+                error_type = "report_repair_required"
+                _persist_attempt(context, attempt, "failed", request_hash,
+                                 schema.__name__ if schema else "", attempt_usage, error_type,
+                                 _safe_error(report_error, error_type))
+                break
             _persist_attempt(context, attempt, "failed", request_hash, schema.__name__ if schema else "", attempt_usage, error_type, _safe_error(exc, error_type))
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
             if status_code == 400 and "thinking" in payload and not thinking_fallback_used and attempt < 3:
@@ -631,7 +757,12 @@ def _chat_json(system_prompt: str, prompt: str, *, schema: type[SchemaT] | None 
             break
     error_type = last_error.error_type if isinstance(last_error, StructuredLlmError) else _error_type(last_error or RuntimeError())
     diagnostic = _safe_error(last_error or RuntimeError(), error_type)
-    raise StructuredLlmError(error_type, f"模型调用失败（{error_type}）：{diagnostic}", total_usage) from last_error
+    # 上层做“一次修复”时要用原始模型输出：把 ``report_repair_required`` 携带的
+    # ``raw_content`` 原样转到最终异常上，仍只挂在属性、不进入 message。
+    raise StructuredLlmError(
+        error_type, f"模型调用失败（{error_type}）：{diagnostic}", total_usage,
+        raw_content=getattr(last_error, "raw_content", None),
+    ) from last_error
 
 
 def extract_facts(
@@ -1050,8 +1181,55 @@ def combine_usage(first: LlmUsage, second: LlmUsage) -> LlmUsage:
 
 LENGTH_REPAIR_RULE = (
     "只调整正文长度到目标范围：不得新增或删除事实、数字、引用 ID、主体、风险状态和结论，"
-    "不得改变章节结构与证据边界，不得为凑长度重复同一事实。"
+    "不得改变章节结构与证据边界，不得为凑长度重复同一事实；"
+    "系统表格、冲突披露块与来源边界块由服务端拼接，不要复制进正文。"
 )
+
+SAFETY_REPAIR_RULE = (
+    "只修复被标记的问题：删除或改写新增/错误的数字、新主体、新评级，以及禁止的承保、审批或"
+    "投资结论；把数字修正到正确的科目、期间、主体与口径归属。逐字保留全部合法正文；"
+    "系统表格、冲突披露块与来源边界块由服务端拼接，不要在 content 中复制。"
+    "不得引入任何新的数字、主体或结论，不得新增或删除引用 ID。"
+)
+
+# 安全修复诊断的发送上限：每类最多 10 条，整体 JSON 字符数封顶，避免把被拒稿细节整段回灌。
+_SAFETY_DETAIL_LIMIT = 10
+_SAFETY_DETAIL_CHAR_CAP = 2000
+
+
+def _safety_repair_details(validation: dict) -> dict:
+    """把章节校验结果压成非敏感、可发给模型的修复要点。
+
+    取 ``unexpected_numbers`` / ``attribution_conflicts`` / ``forbidden_matches`` /
+    ``invalid_citations`` 四类，外加**证据支持失败**（``support_detail_items``，
+    计划 §四 line 33 把支持检查并入同一候选评估后，支持问题也走这唯一一次修复——
+    不点名"哪一句没支持"，修复模型只能盲改）。每类最多 ``_SAFETY_DETAIL_LIMIT`` 条，
+    整体 JSON 字符数不超过 ``_SAFETY_DETAIL_CHAR_CAP``（超限时逐条丢弃最占字数的类），
+    不保存被拒绝的模型正文。
+    """
+    keys = ("unexpected_numbers", "attribution_conflicts", "forbidden_matches", "invalid_citations")
+    details: dict = {key: list(validation.get(key) or [])[:_SAFETY_DETAIL_LIMIT] for key in keys}
+    if validation.get("support_failed"):
+        items = [
+            {
+                "claim_index": item.get("claim_index"),
+                "claim_text": str(item.get("claim_text") or "")[:160],
+                # 原因码与匹配记录随明细下发（收口方案 §三）：让修复模型区分"记录没建"
+                # 与"科目/期间对不上"，而不是盲删数字。
+                "reason_code": str(item.get("reason_code") or ""),
+                "matched_record_ids": list(item.get("matched_record_ids") or [])[:3],
+                "unsupported_numbers": list(item.get("unsupported_numbers") or [])[:6],
+            }
+            for item in (validation.get("support_detail_items") or [])[:_SAFETY_DETAIL_LIMIT]
+        ]
+        # 只要"无支持的主张"，不要整句回灌：既要模型能定位，也不把被拒稿大段带回请求。
+        details["unsupported_claims"] = items
+    while len(json.dumps(details, ensure_ascii=False)) > _SAFETY_DETAIL_CHAR_CAP:
+        largest = max(details, key=lambda key: len(json.dumps(details[key], ensure_ascii=False)))
+        if not details[largest]:
+            break
+        details[largest] = details[largest][:-1]
+    return details
 
 
 def _report_request(title: str, content: str, evidence: list[dict], context: LlmCallContext | None,
@@ -1083,7 +1261,12 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
             "generation_scope": (
                 "基于 chapter_context 中的事实、指标、规则核验结果、证据原文与冲突披露直接撰写完整分析正文；"
                 "不得引入材料中没有的数字、主体、年度或评级；不得自行计算或换算；"
-                "系统数据表、冲突披露块与来源边界块逐字保留；表格由系统附入、不得自行绘制；"
+                # 旧句是"系统数据表、冲突披露块与来源边界块逐字保留；表格由系统附入、不得自行绘制"。
+                # 与 v4 契约（只下发结构化摘要、完整 Markdown 留服务端）**直接矛盾**：模型手里没有
+                # 逐字原文，"逐字保留"既做不到又诱导它把 24k 表格块抄进正文。与
+                # `chapter_prompts.GENERATE_BOUNDARY_SENTENCE` 同一口径（计划 §二）。
+                "系统表格、冲突披露块与来源边界块由服务端在正文后原样附加——只返回分析正文和引用 ID，"
+                "不要输出、复制或重写系统表格，正文不重复逐行列示；"
                 "冲突事实并列，缺失信息写“材料不足”；"
                 "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议。"
             ),
@@ -1110,32 +1293,123 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
     if table_block:
         if mode != "generate":
             request["deterministic_draft"] = content.replace(table_block, "").strip()
-        request["system_tables"] = table_block
+        # 三项遗留修复方案 §二：请求**不再携带完整渲染后的 Markdown 表格**——模型只拿
+        # 标题与章节职责、结构化记录摘要、科目/期间/口径/单位索引、分析要求与快照哈希；
+        # 完整表格块留在服务端，由 `_preserve_chapter_boundaries` 在正文后原样拼接。
+        request["system_tables"] = _system_table_digest(chapter_context)
         request["system_table_rules"] = (
             str((chapter_context or {}).get("system_table_role") or "")
-            + "系统表格只供分析参考，不要在返回的 content 中复制、重写或输出表格；"
-              "服务端将在模型正文后原样拼接全部系统表格。"
+            + "系统表格只供分析参考：只返回分析正文和引用ID，不要在返回的 content 中"
+              "输出、复制、重写或逐行列示系统表格；系统表格由服务端在模型正文后附加。"
         )
     prompt_project_id = context.project_id if context else str((chapter_context or {}).get("project_id") or "")
     system_prompt = chapter_prompt(chapter_key, prompt_project_id) if chapter_key else SYSTEM_PROMPT
     if mode == "generate":
-        # **幂等兜底**：`chapter_prompt()` 的解析顺序是「项目覆盖 > 全局默认 > YAML」，而库里
-        # 存的是**当时编译好的文本**——里面可能仍写着"确定性草稿是允许主张的唯一边界；只能
-        # 改善表达"，与直接撰写模式直接冲突（实测 financial 的全局默认就是这样）。
-        # 这里就地换掉旧句、补上新句，保证"改了 generation_mode 就真的生效"，不依赖用户
-        # 逐章重置 Prompt；已重置过的分支也幂等（重复执行结果不变）。
-        from .chapter_prompts import GENERATE_BOUNDARY_SENTENCE, REWRITE_BOUNDARY_SENTENCE
+        # **幂等兜底 + 旧句迁移**：`chapter_prompt()` 的解析顺序是「项目覆盖 > 全局默认 >
+        # YAML」，而库里存的是**当时编译好的文本**——可能仍写着"确定性草稿是允许主张的
+        # 唯一边界"（改写模式旧句），或"系统数据表…必须逐字保留，表格一律由系统附入"
+        # （表格回声的旧矛盾句，三项遗留修复方案 §二）。这里就地删旧句、补新句：
+        # 只替换系统自动编译的边界句，用户自定义的业务目标/结构/篇幅不受影响。
+        from .chapter_prompts import (
+            GENERATE_BOUNDARY_SENTENCE, LEGACY_BOUNDARY_SENTENCES, REWRITE_BOUNDARY_SENTENCE,
+        )
 
         system_prompt = system_prompt.replace(REWRITE_BOUNDARY_SENTENCE, "").rstrip()
+        for legacy in LEGACY_BOUNDARY_SENTENCES:
+            system_prompt = system_prompt.replace(legacy, "").rstrip()
         if GENERATE_BOUNDARY_SENTENCE not in system_prompt:
             system_prompt = f"{system_prompt}\n{GENERATE_BOUNDARY_SENTENCE}"
     return system_prompt, request, alias_to_citation, context or LlmCallContext(task_type="report"), allowed
 
 
+def _report_evidence_sources(chapter_context: dict | None, evidence: list[dict],
+                             alias_to_citation: dict[str, str]) -> dict[str, str]:
+    """模型侧 evidence 别名（``E01``）→ 真实 ``source_id`` 映射，供丢弃收集器回填。
+
+    报告请求里顶层 ``evidence`` 只发短别名（真实 ID 不下发模型），因此整条丢弃时得靠这份
+    映射把被丢条目还原成 ``source_id``。来源是章节上下文与入参证据里带 ``source_id`` 的条目。
+    """
+    citation_to_alias = {citation_id: alias for alias, citation_id in alias_to_citation.items()}
+    mapping: dict[str, str] = {}
+    for item in [*((chapter_context or {}).get("evidence") or []), *(evidence or [])]:
+        if not isinstance(item, dict):
+            continue
+        alias = citation_to_alias.get(item.get("id"))
+        source_id = item.get("source_id")
+        if alias and source_id:
+            mapping.setdefault(alias, str(source_id))
+    return mapping
+
+
+def _strip_system_blocks(text: str, chapter_context: dict | None) -> str:
+    """移除三类系统块（系统表格/冲突披露/来源边界）后的模型正文（修复输入用）。
+
+    服务端会在写入前原样重新拼接这些块（``_preserve_chapter_boundaries``），修复请求
+    因此只发送**模型分析正文**——否则模型会跟着 previous_content 把整块表格照抄回来
+    （三项遗留修复方案 §二：24k 级回声的根因之一）。
+    """
+    output = str(text or "")
+    for key in ("system_table_block", "conflict_block", "source_attribution_block"):
+        block = str((chapter_context or {}).get(key) or "")
+        if block:
+            output = output.replace(block, "")
+    return output.strip()
+
+
+def _system_table_digest(chapter_context: dict | None) -> dict:
+    """系统表格的**紧凑结构化摘要**（替代完整 Markdown 下发，三项遗留修复方案 §二）。
+
+    模型只接收：标题与章节职责、**表×行矩阵**（科目 + 各列原值，体积与原表相当而非
+    Markdown 形态）、科目/期间/口径/单位索引、分析要求与快照哈希。完整渲染后的表格块
+    留在服务端，用于最终拼接、完整性检查与 Word 导出。
+
+    注意：早期版本把每条记录渲染成五键字典（北投 financial 1112 条 → 151k 字符），
+    直接把请求推爆输入预算（input_budget_exceeded）。这里按表矩阵输出，控制体积。
+    """
+    context = chapter_context or {}
+
+    def _field(item, name, default=""):
+        if isinstance(item, dict):
+            return item.get(name, default)
+        return getattr(item, name, default)
+
+    records = context.get("table_records") or []
+    tables: list[dict] = []
+    for block in context.get("table_blocks") or []:
+        columns = [str(_field(column, "label") or "") for column in (_field(block, "columns", None) or [])]
+        rows: list[list[str]] = []
+        for row in (_field(block, "rows", None) or []):
+            cells = [str(_field(cell, "raw") or "") for cell in (_field(row, "cells", None) or [])]
+            if any(cells):
+                rows.append(cells)
+        tables.append({
+            "title": str(_field(block, "title") or ""),
+            "table_id": str(_field(block, "table_id") or ""),
+            "subject": str(_field(block, "subject") or ""),
+            "scope": str(_field(block, "scope") or ""),
+            "unit": str(_field(block, "unit") or ""),
+            "columns": columns,
+            "rows": rows,
+        })
+    return {
+        "table_snapshot_hash": str(context.get("table_snapshot_hash") or ""),
+        "role": str(context.get("system_table_role") or ""),
+        "tables": tables,
+        "index": {
+            "periods": sorted({str(item.get("period") or "") for item in records if item.get("period")}),
+            "subjects": sorted({str(item.get("subject") or "") for item in records if item.get("subject")}),
+            "scopes": sorted({str(item.get("scope") or "") for item in records if item.get("scope")}),
+            "units": sorted({str(item.get("unit") or "") for item in records if item.get("unit")}),
+        },
+        "requirements": "基于上述表格数据分析；只引用表中的数值与科目，不逐行列示、不复述表格。",
+    }
+
+
 def repair_section_length(title: str, content: str, evidence: list[dict], context: LlmCallContext | None = None,
                           *, chapter_key: str | None = None, chapter_context: dict | None = None,
                           strict_citations: bool = False, previous_content: str,
-                          length_policy: dict) -> tuple[LlmSection, LlmUsage]:
+                          length_policy: dict,
+                          drop_report: dict | None = None) -> tuple[LlmSection, LlmUsage]:
     """篇幅超上限时对**第一次模型正文**做一次定向压缩。
 
     复用同一章节上下文、同一证据、同一引用别名、同一 Prompt 与同一 `input_hash`，
@@ -1151,11 +1425,85 @@ def repair_section_length(title: str, content: str, evidence: list[dict], contex
         "target_min_chars": length_policy.get("effective_min_chars"),
         "target_max_chars": length_policy.get("effective_max_chars"),
         "rule": LENGTH_REPAIR_RULE,
-        "previous_content": previous_content.replace(str((chapter_context or {}).get("system_table_block") or ""), "").strip(),
+        "previous_content": _strip_system_blocks(previous_content, chapter_context),
     }
     body, usage = _structured_call(system_prompt, json.dumps(request, ensure_ascii=False), LlmSection,
                                    context=call_context, allowed_source_ids=set(alias_to_citation),
-                                   max_input_chars=settings.llm_report_max_chars)
+                                   max_input_chars=settings.llm_report_max_chars,
+                                   drop_report=drop_report,
+                                   evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
+    parsed = LlmSection.model_validate(body)
+    parsed.citation_ids = list(dict.fromkeys(
+        alias_to_citation.get(cid, cid) for cid in parsed.citation_ids
+    ))
+    if not strict_citations:
+        parsed.citation_ids = [cid for cid in parsed.citation_ids if cid in allowed]
+    return parsed, usage
+
+
+def repair_section_safety(title: str, content: str, evidence: list[dict], context: LlmCallContext | None = None,
+                          *, chapter_key: str | None = None, chapter_context: dict | None = None,
+                          strict_citations: bool = False, previous_content: str,
+                          validation: dict,
+                          drop_report: dict | None = None) -> tuple[LlmSection, LlmUsage]:
+    """章节被安全校验拒绝时对**被拒稿**做一次定向修复（与 ``repair_section_length`` 同构）。
+
+    复用同一章节上下文、同一证据、同一引用别名、同一 Prompt 与同一 ``input_hash``，
+    请求体额外携带被拒稿（去掉系统表格块）、具体诊断与修复规则。本函数自身只做**一次**
+    ``_structured_call``，不再触发任何后续修复，保证"每章最多一次额外内容调整"。
+    """
+    system_prompt, request, alias_to_citation, call_context, allowed = _report_request(
+        title, content, evidence, context, chapter_key, chapter_context,
+    )
+    request["safety_repair"] = {
+        "reasons": [str(item) for item in (validation.get("reasons") or [])],
+        "details": _safety_repair_details(validation),
+        "rule": SAFETY_REPAIR_RULE,
+        "previous_content": _strip_system_blocks(previous_content, chapter_context),
+    }
+    body, usage = _structured_call(system_prompt, json.dumps(request, ensure_ascii=False), LlmSection,
+                                   context=call_context, allowed_source_ids=set(alias_to_citation),
+                                   max_input_chars=settings.llm_report_max_chars,
+                                   drop_report=drop_report,
+                                   evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
+    parsed = LlmSection.model_validate(body)
+    parsed.citation_ids = list(dict.fromkeys(
+        alias_to_citation.get(cid, cid) for cid in parsed.citation_ids
+    ))
+    if not strict_citations:
+        parsed.citation_ids = [cid for cid in parsed.citation_ids if cid in allowed]
+    return parsed, usage
+
+
+def repair_section_json(title: str, content: str, evidence: list[dict], context: LlmCallContext | None = None,
+                        *, chapter_key: str | None = None, chapter_context: dict | None = None,
+                        strict_citations: bool = False, raw_content: str,
+                        error_type: str, drop_report: dict | None = None) -> tuple[LlmSection, LlmUsage]:
+    """报告章节首次生成不可解析（``report_repair_required``）时的**唯一一次**修复入口。
+
+    上层拿到 ``StructuredLlmError.error_type == "report_repair_required"`` 与它携带的
+    ``raw_content`` 后调用本函数：把“原始输出 + 错误类型”按 ``_repair_message`` 语义回灌，
+    复用与首次生成**同一章节上下文、同一证据、同一引用别名表**（``_report_request``），
+    因此不会扩大证据范围。
+
+    本函数自身只做**恰好一次** ``_structured_call``，不再触发任何后续修复；报告任务的底层
+    自动 JSON 修复链保持关闭（修订稿 §3.2「每章最多首次生成加一次内容调整」）。
+
+    ``drop_report`` 传入时，若本次修复请求仍需整条丢弃证据，收集器按与首次生成相同口径回填。
+    """
+    system_prompt, request, alias_to_citation, call_context, allowed = _report_request(
+        title, content, evidence, context, chapter_key, chapter_context,
+    )
+    # 把“原始输出 + 错误类型”作为不可信数据回灌；bounded 与 _repair_message 完全共用。
+    request["json_repair"] = {
+        "error_type": error_type,
+        "instruction": _repair_message(raw_content, error_type, LlmSection),
+    }
+    body, usage = _structured_call(system_prompt, json.dumps(request, ensure_ascii=False), LlmSection,
+                                   context=call_context, allowed_source_ids=set(alias_to_citation),
+                                   max_input_chars=settings.llm_report_max_chars,
+                                   drop_report=drop_report,
+                                   evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
     parsed = LlmSection.model_validate(body)
     parsed.citation_ids = list(dict.fromkeys(
         alias_to_citation.get(cid, cid) for cid in parsed.citation_ids
@@ -1168,7 +1516,9 @@ def repair_section_length(title: str, content: str, evidence: list[dict], contex
 def rewrite_section(title: str, content: str, evidence: list[dict], context: LlmCallContext | None = None,
                     chapter_key: str | None = None, chapter_context: dict | None = None,
                     strict_citations: bool = False,
-                    length_repair: dict | None = None) -> tuple[LlmSection, LlmUsage]:
+                    length_repair: dict | None = None,
+                    safety_repair: dict | None = None,
+                    drop_report: dict | None = None) -> tuple[LlmSection, LlmUsage]:
     if not is_configured():
         return LlmSection(content=content, citation_ids=[item["id"] for item in evidence]), LlmUsage()
     system_prompt, request, alias_to_citation, call_context, allowed = _report_request(
@@ -1184,19 +1534,37 @@ def rewrite_section(title: str, content: str, evidence: list[dict], context: Llm
             result.citation_ids = [cid for cid in result.citation_ids if cid in allowed]
         return result
 
-    body, usage = _structured_call(system_prompt, json.dumps(request, ensure_ascii=False), LlmSection,
-                                   context=call_context, allowed_source_ids=set(alias_to_citation),
-                                   max_input_chars=settings.llm_report_max_chars)
-    parsed = _finalize(body)
-
+    # ``safety_repair`` 与 ``length_repair`` 互斥（调用方保证只传一个）；两者都传时安全修复优先。
+    # 两种修复同构：**各自直接做唯一一次定向修复，不再先做一次主稿重写**——此前篇幅分支会先做
+    # 一次全量重写再压缩，真实链路达 3 次调用，违反修订稿 §3.3"每章最多一次额外内容调整"，也
+    # 正是 ``repair_section_length`` docstring 明令杜绝的"润色 → 重新润色 → 再压缩"链。
+    # 策略里若携带 ``previous_content``（被拒稿/首稿模型正文），用它作为修复输入；否则退回入参正文。
+    if safety_repair:
+        policy = safety_repair
+        repaired, repair_usage = repair_section_safety(
+            title, content, evidence, context, chapter_key=chapter_key,
+            chapter_context=chapter_context, strict_citations=strict_citations,
+            previous_content=str(policy.get("previous_content") or content),
+            validation=policy.get("validation") or policy,
+            drop_report=drop_report,
+        )
+        return repaired, repair_usage
     if length_repair:
         repaired, repair_usage = repair_section_length(
             title, content, evidence, context, chapter_key=chapter_key,
             chapter_context=chapter_context, strict_citations=strict_citations,
-            previous_content=parsed.content, length_policy=length_repair,
+            previous_content=str(length_repair.get("previous_content") or content),
+            length_policy=length_repair,
+            drop_report=drop_report,
         )
-        usage = combine_usage(usage, repair_usage)
-        parsed = repaired
+        return repaired, repair_usage
+
+    body, usage = _structured_call(system_prompt, json.dumps(request, ensure_ascii=False), LlmSection,
+                                   context=call_context, allowed_source_ids=set(alias_to_citation),
+                                   max_input_chars=settings.llm_report_max_chars,
+                                   drop_report=drop_report,
+                                   evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
+    parsed = _finalize(body)
     return parsed, usage
 
 

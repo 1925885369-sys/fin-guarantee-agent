@@ -421,22 +421,68 @@ RATING_OTHER_SUBJECT_TERMS = (
 )
 
 
+def _chinese_int(text: str) -> int | None:
+    """中文数字串 → 整数（支持 〇/零一二…九 逐位，及 十/十X/二十X/三十X）。"""
+    if not text:
+        return None
+    digits = {"〇": 0, "○": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if all(char in digits for char in text):
+        return int("".join(str(digits[char]) for char in text))
+    if "十" in text:
+        left, _, right = text.partition("十")
+        tens = digits.get(left) if left else 1
+        ones = digits.get(right, 0) if right else 0
+        if tens is None or ones is None or (right and right not in digits):
+            return None
+        return tens * 10 + ones
+    return None
+
+
+# 评级报告署名日期也会用中文数字落款（实测中邮末页"联合资信评估股份有限公司 评级总监：
+# 二〇二六年七月十日"）。阿拉伯数字分支之外补这一支；必须仍**紧跟**机构名（可隔署名栏
+# 标签"评级总监："），不以标签形态出现的正文年份不得当评级时间（修订稿 §2.4）。
+_CHINESE_SIGNATURE_DATE_RE = re.compile(
+    r"([〇○零一二三四五六七八九]{2,4})\s*年\s*([一二三四五六七八九十]{1,3})\s*月"
+    r"(?:\s*([一二三四五六七八九十]{1,3})\s*日)?"
+)
+
+
+def _signature_date(text: str, spelling: str) -> tuple[str, str] | None:
+    """评级机构署名日期 → ``(date:YYYY-MM-DD, 年份)``；不满足"紧跟"约束返回 None。
+
+    支持阿拉伯数字（北投"中诚信国际信用评级有限责任公司2026年7月3日"）与中文数字
+    （中邮末页），机构名后可隔署名栏"评级总监："。日期必须紧跟机构名：正文里
+    "中诚信国际预计2026年二季度…"这类年份仍然不取。
+    """
+    for match in re.finditer(re.escape(spelling), text or ""):
+        tail = (text or "")[match.end():].lstrip(" \t|｜,，、:：\x01")
+        tail = re.sub(r"^评级总监[：:]?", "", tail).lstrip(" \t\x01")
+        arabic = re.match(r"((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?", tail)
+        if arabic:
+            day = arabic.group(3) or "01"
+            return f"date:{arabic.group(1)}-{int(arabic.group(2)):02d}-{int(day):02d}", arabic.group(1)
+        chinese = _CHINESE_SIGNATURE_DATE_RE.match(tail)
+        if chinese:
+            year = _chinese_int(chinese.group(1))
+            month = _chinese_int(chinese.group(2))
+            day = _chinese_int(chinese.group(3)) if chinese.group(3) else 1
+            if year and month and day and 1 <= month <= 12 and 1 <= day <= 31:
+                return f"date:{year}-{month:02d}-{day:02d}", str(year)
+    return None
+
+
 def _find_alias(
     fact_key: str, aliases: tuple[str, ...], text: str, *, strict_financial_labels: bool = False,
 ) -> str | None:
     is_rating = fact_key in {"issuer_rating", "bond_rating", "rating_outlook"}
     if fact_key == "rating_date":
-        # 报告出具日期形态：**评级机构名后面紧跟年月日**（实测北投 p2 结尾
-        # "中诚信国际信用评级有限责任公司2026年7月3日"）。产品已确认该日期即评级时间。
-        # 这里没有"评级时间"标签，所以先在标签检测阶段认定它是命中；具体取值交给
-        # _extract_labelled_text 的同名分支。要求日期**紧跟**机构名，避免把正文里
-        # "中诚信国际预计2026年二季度…"这类年份当成评级时间。
+        # 报告出具日期形态：**评级机构名后面紧跟年月日**（阿拉伯或中文数字，可隔署名栏
+        # "评级总监："）。产品已确认该日期即评级时间。要求日期**紧跟**机构名，避免把
+        # 正文里"中诚信国际预计2026年二季度…"这类年份当成评级时间。
         for _canonical, spellings in RATING_AGENCIES:
             for spelling in spellings:
-                if re.search(
-                    re.escape(spelling) + r"[ \t|｜,，、:：\x01]{0,3}(?:19|20)\d{2}\s*年\s*\d{1,2}\s*月",
-                    text or "",
-                ):
+                if _signature_date(text or "", spelling):
                     return spelling
     for alias in aliases:
         for match in re.finditer(re.escape(alias), text):
@@ -672,6 +718,15 @@ def text_value_token(fact_key: str, raw: object) -> str | None:
                 return "agency:" + canonical
         return None
     if fact_key in ("establishment_date", "bond_maturity_date", "rating_date"):
+        # **幂等**：抽取阶段存库的就是本函数的 ``date:`` 输出（前缀已在上方剥掉），
+        # 冲突分组阶段会对存库值再跑一次。只认"年月日"原文形态会让已规范化的
+        # "2026-07-03" 二次解析落空 → 该断言被当成垃圾、签名 None →
+        # `rating_date` 永远选不进 canonical（实测北投/中邮：facts 有值、canonical 为空）。
+        normalized = re.fullmatch(r"((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})", value.strip())
+        if normalized:
+            month, day = int(normalized.group(2)), int(normalized.group(3))
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                return f"date:{normalized.group(1)}-{month:02d}-{day:02d}"
         match = re.search(r"((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?", value)
         if not match:
             return None
@@ -830,8 +885,15 @@ def _extract_labelled_text(fact_key: str, alias: str, text: str) -> tuple[str | 
             # "AA+，本期债项信用等级为AAA" 整段交给 text_value_token——它见到两个不同等级
             # 会整体判否（那是为防"由AA-提升至AA+"这类比较句设计的），结果连正确的 AA+
             # 一起丢掉。实测中邮原文正是"公司主体长期信用等级为AA+，本期债项信用等级为AAA"。
-            immediate = RATING_TOKEN_RE.search(compacted[value_start:value_start + 12])
+            window = compacted[value_start:value_start + 12]
+            immediate = RATING_TOKEN_RE.search(window)
             if immediate:
+                # 别名与等级之间若隔着比较/变化词（"债项评级较主体评级由AA-提升至AA+"），
+                # 紧邻取值会拿到**比较基准**的等级 AA-，把债项评级写错（实测华辰案例）。
+                # 整条跳过：这不是字段取值句，正确等级由"债项及评级结果：…AA+"等确切
+                # 写法提供，取不到就宁缺毋滥。
+                if re.search(r"较|比|由|升至|降至|提升|下调|上调", window[:immediate.start()]):
+                    continue
                 token_text = immediate.group(0)
         token = text_value_token(fact_key, token_text)
         if token is None:
@@ -842,23 +904,15 @@ def _extract_labelled_text(fact_key: str, alias: str, text: str) -> tuple[str | 
         years = re.findall(r"20\d{2}", preceding)
         return token, (years[-1] if years else "")
     if fact_key == "rating_date":
-        # 报告出具日期（产品已确认视同评级时间）：**紧跟**在评级机构名之后的年月日。
-        # 实测北投 p2 结尾是"中诚信国际信用评级有限责任公司2026年7月3日"——没有
-        # "评级时间："标签，但位置固定（机构署名处）。必须"紧跟"，否则正文里
-        # "中诚信国际预计2026年二季度…"这类年份会被当成评级时间（修订稿 §2.4 禁止）。
+        # 报告出具日期（产品已确认视同评级时间）：**紧跟**在评级机构名之后的年月日
+        # （阿拉伯或中文数字，可隔署名栏"评级总监："）。没有"评级时间："标签，但位置
+        # 固定（机构署名处）。必须"紧跟"，否则正文里"中诚信国际预计2026年二季度…"
+        # 这类年份会被当成评级时间（修订稿 §2.4 禁止）。
         for _canonical, spellings in RATING_AGENCIES:
             for spelling in spellings:
-                for match in re.finditer(re.escape(spelling), compacted):
-                    tail = compacted[match.end():].lstrip(" \t|｜,，、:：\x01")
-                    date_match = re.match(
-                        r"((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?", tail,
-                    )
-                    if date_match:
-                        day = date_match.group(3) or "01"
-                        return (
-                            f"date:{date_match.group(1)}-{int(date_match.group(2)):02d}-{int(day):02d}",
-                            date_match.group(1),
-                        )
+                found = _signature_date(compacted, spelling)
+                if found:
+                    return found
     return None, ""
 
 

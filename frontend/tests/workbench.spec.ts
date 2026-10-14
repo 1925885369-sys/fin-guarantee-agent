@@ -84,9 +84,12 @@ test("bond project can be inspected from evidence to report", async ({ page }, t
   await page.getByRole("button", { name: /债券 Agent 分析/ }).click();
   await expect(page.getByText("最近一次运行")).toBeVisible();
   await expect(page.getByText("报表勾稽校验")).toBeVisible();
+  // 分析页 v2：计算链路已迁入指标抽屉。先开抽屉 → 点行内「查看计算链路」→ 断言轨迹 → 返回列表 → 关闭抽屉。
+  await page.getByRole("button", { name: "查看全部指标" }).click();
   await page.getByRole("button", { name: "查看计算链路" }).first().click();
   await expect(page.getByText("Deterministic calculation trace")).toBeVisible();
-  await page.getByRole("button", { name: "关闭计算链路" }).click();
+  await page.getByRole("button", { name: "返回指标列表" }).click();
+  await page.getByRole("button", { name: "关闭财务指标" }).click();
 
   if (testInfo.project.name === "mobile") {
     await page.locator(".menu-button").click();

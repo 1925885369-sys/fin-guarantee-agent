@@ -1,3 +1,4 @@
+import hashlib
 import time
 from io import BytesIO
 
@@ -525,5 +526,52 @@ def test_real_reference_prompt_edit_requires_local_direct_and_global_is_forbidde
             assert client.delete(
                 f"/api/projects/{project_id}/report-prompts/financial",
             ).status_code == 200
+        finally:
+            _delete_test_project(project_id)
+
+
+def test_prompt_outdated_compares_generated_hash_and_never_regenerates():
+    """§四 line 41：`prompt_outdated` = 当前有效 Prompt 哈希 ≠ **生成时**哈希；保存 Prompt 不自动再生。
+
+    旧口径比的是"库里的覆盖文本 vs 当前编译器对同一 structured_json 的重编译结果"，
+    回答的是"覆盖文本该不该重编译"（编辑器侧的事，由 `recompile_structured_prompts` 在启动时
+    自行处理）——它回答不了"**这份报告是不是用旧 Prompt 生成的**"。改为按生成时哈希比之后：
+    保存覆盖 → 立刻转为 True，而**正文与生成时哈希都保持不变**（保存不触发再生）。
+    """
+    with TestClient(app) as client:
+        created = client.post("/api/projects", json={
+            "company_name": "Prompt age test project", "amount": 500, "term_months": 12,
+            "purpose": "working capital", "data_consent": True,
+        })
+        assert created.status_code == 201
+        project_id, token = created.json()["id"], created.json()["accessToken"]
+        headers = {"X-Project-Token": token}
+        try:
+            # 生成时哈希 = 正文生成那一刻的有效 Prompt 哈希（生产里由 build_chapter_context 冻结）
+            generated = hashlib.sha256(
+                chapter_prompt("financial", project_id).encode("utf-8")).hexdigest()
+            execute(
+                "INSERT INTO report_sections (id,project_id,section_key,title,content,citation_ids,"
+                "review_status,updated_at,prompt_sha256) VALUES (?,?,?,?,?,?,?,?,?)",
+                ("section-prompt-age", project_id, "financial", "财务趋势与盈利质量",
+                 "据募集说明书披露，材料不足。", "[]", "draft", now_iso(), generated),
+            )
+            listed = client.get(f"/api/projects/{project_id}/report", headers=headers).json()
+            section = next(item for item in listed if item["section_key"] == "financial")
+            assert section["prompt_outdated"] is False, "Prompt 未变时不得谎报过期"
+
+            # 保存项目级 Prompt 覆盖 → 只写覆盖与审计，不碰 report_sections
+            saved = client.patch(
+                f"/api/projects/{project_id}/report-prompts/financial", headers=headers,
+                json={"prompt": "Only use the approved evidence list and state material gaps explicitly."},
+            )
+            assert saved.status_code == 200
+
+            listed = client.get(f"/api/projects/{project_id}/report", headers=headers).json()
+            section = next(item for item in listed if item["section_key"] == "financial")
+            assert section["prompt_outdated"] is True, "Prompt 改过之后报告须标记为用旧 Prompt 生成"
+            # 「保存 Prompt 不自动再生」：正文与生成时哈希都不动
+            assert section["content"] == "据募集说明书披露，材料不足。"
+            assert section["prompt_sha256"] == generated
         finally:
             _delete_test_project(project_id)

@@ -33,6 +33,7 @@ BOND_SOURCE_KINDS = {
 BOND_METRIC_KEYS = {
     "revenue_growth", "profit_growth", "gross_margin", "net_margin", "cash_profit_ratio",
     "debt_ratio", "current_ratio", "quick_ratio", "ar_turnover_days", "inventory_turnover_days",
+    "ar_turnover", "inventory_turnover", "non_current_assets_ratio", "non_current_liabilities_ratio",
     "available_cash", "cash_short_debt_ratio", "interest_bearing_debt_capitalization",
     "receivables_revenue_ratio", "operating_cashflow_debt_ratio",
     "dscr", "guarantee_to_equity", "contingent_ratio", "collateral_coverage",
@@ -175,16 +176,26 @@ class NarrativeContract(BaseModel):
 
 # 主张边界句：**改写模式**保持原措辞（模型只能在确定性草稿范围内改善表达）；
 # **直接撰写模式**换成真生成边界——允许自主组织与表达，但事实/数字/主体/年度/评级
-# 仍只能来自系统材料，系统块仍须逐字保留（修订稿 §2、§3.2）。
+# 仍只能来自系统材料（修订稿 §2、§3.2）。
 REWRITE_BOUNDARY_SENTENCE = (
     "确定性草稿是允许主张的唯一边界；只能改善表达，不得增加、删除或改变事实、数字、规则状态和风险状态。"
 )
+# Prompt 契约编译版本（三项遗留修复方案 §二）：4 = 系统表格由服务端拼接、模型只回正文。
+PROMPT_CONTRACT_VERSION = "4"
 GENERATE_BOUNDARY_SENTENCE = (
     "本章为**直接撰写**模式：请基于系统事实、指标、规则核验结果、证据原文与冲突披露自主组织并撰写完整分析正文；"
     "允许自由组织与表达，但只能陈述上述材料已支持的内容，不得引入材料中没有的数字、主体、年度或评级，"
-    "不得自行计算或换算金额、比例、覆盖率、偿债指标或评级差异；系统数据表、冲突披露块与来源边界块必须逐字保留，"
-    "表格一律由系统附入、不得自行绘制；冲突事实必须并列，缺失信息必须写“材料不足”；"
+    "不得自行计算或换算金额、比例、覆盖率、偿债指标或评级差异；系统表格、冲突披露块与来源边界块由服务端在正文后"
+    "原样附加——只返回分析正文和引用ID，不要输出、复制或重写系统表格，正文不重复逐行列示；"
+    "冲突事实必须并列，缺失信息必须写“材料不足”；"
     "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议。"
+)
+# 旧编译句迁移（三项遗留修复方案 §二）：只替换系统自动编译的旧矛盾句——
+# "系统数据表…必须逐字保留"与"表格一律由系统附入、不得自行绘制"并存，诱导模型把 24k
+# 的表格块抄进正文。用户自定义的业务目标/结构/篇幅不在替换范围内（只删这两句本身）。
+LEGACY_BOUNDARY_SENTENCES = (
+    "系统数据表、冲突披露块与来源边界块必须逐字保留，表格一律由系统附入、不得自行绘制；",
+    "系统数据表、冲突披露块与来源边界块必须逐字保留；",
 )
 
 

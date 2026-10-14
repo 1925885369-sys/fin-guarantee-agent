@@ -129,7 +129,13 @@ def test_reference_numbers_are_not_treated_as_data() -> None:
     就会把 ``01`` 当成一个新数字去证据里找——找不到，于是**正常引用被判成
     「无证据声明」**，交付哈希也随之失配。实测踩过：写入后重新校验，
     ``validated_content_sha256`` 再也绑不回正文。
+
+    这里同时守住两条取数路径：``p0._numbers``（主张分类）与
+    ``chapter_guard._number_mentions``（数字绑定/归属核对）。只修前者不够——
+    记录绑定判定消费的是后者，"01" 会以「值 1、无单位」的形态进入数字判定，
+    在该章冻结记录里查无同值记录后整句判 unsupported。
     """
+    from backend.app.chapter_guard import _number_mentions
     from backend.app.delivery_wording import strip_references
     from backend.app.p0 import _numbers
     from backend.app.workflow import _numbers_supported
@@ -137,6 +143,11 @@ def test_reference_numbers_are_not_treated_as_data() -> None:
     assert strip_references("据发行文件〔资料01〕第 29 页披露") == "据发行文件披露"
     assert _numbers("据发行文件〔资料01〕第 29 页披露") == []
     assert _numbers("发行文件〔资料01〕披露营业收入 12,000 万元") == [12000.0]
+    assert _number_mentions("据发行文件〔资料01〕第 29 页披露") == []
+    assert [
+        item["normalized_value"] for item in
+        _number_mentions("据发行文件〔资料01〕第 9 页披露营业收入 100 万元。")
+    ] == ["100"]
     assert _numbers_supported(
         "据发行文件〔资料01〕第 9 页披露营业收入 100 万元。",
         "营业收入100万元",

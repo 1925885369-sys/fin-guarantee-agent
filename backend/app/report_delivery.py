@@ -15,10 +15,11 @@
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from .chapter_guard import SOURCE_ATTRIBUTION_BLOCK, assess_chapter_length, count_report_chars
-from .database import connect, json_dump, now_iso, row, rows
+from .database import connect, json_dump, json_load, now_iso, row, rows
 
 CONTENT_ORIGINS = ("model", "deterministic", "human", "unknown")
 FALLBACK_STAGES = ("chapter_validation", "report_support", "none")
@@ -29,6 +30,130 @@ DELIVERY_STATUSES = ("pending", "eligible", "needs_review", "not_checked")
 def content_sha256(content: str) -> str:
     import hashlib
     return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# 章节生成尝试台账（第三点细化方案 §四）
+#
+# `chapter_generation_attempts` 保存每次"生成 → 校验 → 至多一次修复"的完整现场：冻结输入、
+# 首稿与修复稿、分阶段诊断、是否采用与调用用量。`report_sections.accepted_attempt_id` 记录
+# 现正文来自哪次成功，`latest_attempt_id` 记录最后一次尝试（可能失败/待核验/跳过），据此
+# 才能区分"正文可用"与"最近一次尝试失败"。
+# ---------------------------------------------------------------------------
+
+ATTEMPT_STATUSES = ("passed", "needs_review", "failed", "skipped")
+ATTEMPT_REPAIR_TYPES = ("none", "safety", "length", "json")
+
+
+def record_chapter_attempt(*, project_id: str, section_key: str, status: str, stage: str = "",
+                           repair_type: str = "none", adopted: bool = False,
+                           usage: Any = None, diagnostics: dict | None = None,
+                           draft_content: str = "", repair_content: str = "",
+                           assembled_content: str = "", code_fingerprint: str = "",
+                           frozen_input: dict | None = None, expected: dict | None = None,
+                           run_id: str = "", attempt_id: str | None = None) -> str:
+    """写入一次章节生成尝试，返回尝试 ID。
+
+    只负责落库现场，不触碰 `report_sections`（是否采用由 `set_section_attempt` 决定，且必须
+    在正文真正写库之后）；原文（首稿/修复稿）仅供诊断，不进入报告成品。
+
+    三段正文**分列保存、互不冒充**（财务修复计划 §四 line 40）：
+
+    - ``draft_json``   = 模型**原始首稿**（修复前）；
+    - ``repair_json``  = **真实修复响应**——修复调用实际返回的那一版。修复失败时**不得**
+      把返回的原被拒稿写进来充当修复稿（旧实现正是如此，台账因此无法还原真实修复行为）；
+    - ``assembled_json`` = **组装后正文**：补回来源边界块、拼上系统表格、真正落进
+      ``report_sections`` 的那一版。
+    """
+    attempt_id = attempt_id or str(uuid.uuid4())
+    expected = expected or {}
+    usage_payload: dict = {}
+    if usage is not None:
+        usage_payload = usage if isinstance(usage, dict) else dict(getattr(usage, "__dict__", {}) or {})
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO chapter_generation_attempts (id,project_id,section_key,run_id,"
+            "expected_revision,expected_content_sha256,expected_prompt_sha256,expected_materials_version,"
+            "frozen_input_json,draft_json,repair_json,assembled_json,code_fingerprint,"
+            "diagnostics_json,status,stage,repair_type,"
+            "adopted,usage_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                attempt_id, project_id, section_key, run_id,
+                int(expected.get("expected_revision") or 0),
+                str(expected.get("expected_content_sha256") or ""),
+                str(expected.get("expected_prompt_sha256") or ""),
+                str(expected.get("expected_materials_version") or ""),
+                json_dump(frozen_input or {}),
+                json_dump({"content": draft_content or ""}),
+                json_dump({"content": repair_content or ""}),
+                json_dump({"content": assembled_content or ""}),
+                str(code_fingerprint or ""),
+                json_dump(diagnostics or {}),
+                str(status or "skipped"), str(stage or ""), str(repair_type or "none"),
+                1 if adopted else 0,
+                json_dump(usage_payload), now_iso(),
+            ),
+        )
+    return attempt_id
+
+
+def set_section_attempt(project_id: str, section_key: str, attempt_id: str, *, adopted: bool = False) -> None:
+    """更新章节的最新尝试指针；`adopted=True` 时同时把现正文指向这次尝试。
+
+    失败/待核验/跳过一律只动 `latest_attempt_id`，`accepted_attempt_id` 保持上一次成功值，
+    从而"单章再生失败不覆盖旧正文语义"在台账层面也成立。调用方是**采用与否的唯一权威**：
+    写库成功后才以 `adopted=True` 调用；正文最终未落库（例如后置支持失败）时以
+    `adopted=False` 调用，把尝试行上可能已被乐观写入的 adopted 标记纠正回来。
+    """
+    with connect() as conn:
+        conn.execute(
+            "UPDATE report_sections SET latest_attempt_id=? WHERE project_id=? AND section_key=?",
+            (attempt_id, project_id, section_key),
+        )
+        if adopted:
+            conn.execute(
+                "UPDATE report_sections SET accepted_attempt_id=? WHERE project_id=? AND section_key=?",
+                (attempt_id, project_id, section_key),
+            )
+        conn.execute(
+            "UPDATE chapter_generation_attempts SET adopted=? WHERE id=?",
+            (1 if adopted else 0, attempt_id),
+        )
+
+
+def _attempt_needs_review_count(diagnostics: dict) -> int:
+    items = diagnostics.get("needs_review_items")
+    if isinstance(items, list):
+        return len(items)
+    try:
+        return int(diagnostics.get("needs_review_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def latest_attempt(project_id: str, section_key: str) -> dict:
+    """最新一次章节尝试的对外摘要；无记录时返回空占位（兼容历史章节）。"""
+    item = row(
+        "SELECT * FROM chapter_generation_attempts WHERE project_id=? AND section_key=? "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (project_id, section_key),
+    )
+    if not item:
+        return {
+            "status": "", "stage": "", "repair_type": "none", "adopted": False,
+            "needs_review_count": 0, "diagnostics": {}, "attempt_id": "", "created_at": "",
+        }
+    diagnostics = json_load(item.get("diagnostics_json") or "{}") or {}
+    return {
+        "attempt_id": item["id"],
+        "status": item.get("status") or "",
+        "stage": item.get("stage") or "",
+        "repair_type": item.get("repair_type") or "none",
+        "adopted": bool(item.get("adopted")),
+        "needs_review_count": _attempt_needs_review_count(diagnostics),
+        "diagnostics": diagnostics,
+        "created_at": item.get("created_at") or "",
+    }
 
 
 def disclosures_complete(content: str, required_disclosures: list[str] | None) -> bool:
@@ -164,6 +289,61 @@ def delivery_blockers(project_id: str) -> list[str]:
     stale = row("SELECT report_stale FROM projects WHERE id=?", (project_id,))
     if stale and stale["report_stale"]:
         problems.append("报告已过期：材料或事实发生变化，需重新生成")
+    # 修订稿 §3.3：模型生成失败（含一次修复后仍失败）的章节须处理后才能最终交付。
+    # 判据以 **fallback_reason** 为准：`p0.validate_report_support` 会回写兼容字段
+    # `validation_status`（本函数第一步就会跑它），只靠 validation_status='failed' 会被冲掉。
+    # 两类情况不阻断：
+    #   - 「跳过」章节（未配置模型/证据不足/预算耗尽）fallback_reason 为空；
+    #   - 确定性章节单章重生成的占位原因 NO_MODEL_REASON（明文"不是模型回退"）。
+    from .chapter_guard import NO_MODEL_REASON
+
+    failed = row(
+        "SELECT COUNT(*) count FROM report_sections WHERE project_id=? AND ("
+        "(COALESCE(fallback_reason,'') NOT IN ('', ?) AND generation_status!='skipped') "
+        "OR validation_status='failed')",
+        (project_id, NO_MODEL_REASON),
+    )
+    if failed and failed["count"]:
+        problems.append(
+            f"{failed['count']} 个章节的模型生成失败（含一次修复），须重新生成或人工处理后才能交付"
+        )
+    # §一 line 7 / §四 line 38：一次修复后**仅剩未决项**的章节保留模型待核验稿，但
+    # **禁止最终交付**——必须人工处理（复核通过或重新生成）后才能出报告。
+    # 不能只靠上面的 fallback_reason 判据：这类章节的 fallback_reason 是**空的**
+    # （它不是回退，正文就是模型稿），漏判会让待核验稿随报告直接交付出去。
+    pending_review = row(
+        "SELECT COUNT(*) count FROM report_sections WHERE project_id=? "
+        "AND generation_status='model_needs_review'",
+        (project_id,),
+    )
+    if pending_review and pending_review["count"]:
+        problems.append(
+            f"{pending_review['count']} 个章节为模型待核验稿，须人工复核后方可最终交付"
+        )
+    # 修订稿 §二.2 末条：待核验事实计入独立指标并阻止最终交付，不能被"材料不足"四字自动豁免。
+    # δ 线在 quality 上新增 needs_review_claims；未落地时回退到 report_claims 计数，避免漏网。
+    needs_review_claims = quality.get("needs_review_claims")
+    if needs_review_claims is None:
+        pending = row(
+            "SELECT COUNT(*) count FROM report_claims WHERE project_id=? AND support_status='needs_review'",
+            (project_id,),
+        )
+        needs_review_claims = int((pending or {}).get("count") or 0)
+    if needs_review_claims:
+        problems.append(f"存在 {int(needs_review_claims)} 条待核验事实未决，处理后方可最终交付")
+    # 修订稿 §四：最新一次尝试失败且未被后续成功覆盖 → 阻断，避免"最新尝试失败但正文还是旧的
+    # 成功稿"被当成可交付。历史章节 latest_attempt_id 为空，不参与判断。
+    failed_attempt = row(
+        "SELECT COUNT(*) count FROM report_sections s "
+        "JOIN chapter_generation_attempts a ON a.id=s.latest_attempt_id "
+        "WHERE s.project_id=? AND a.status='failed' AND s.accepted_attempt_id!=s.latest_attempt_id",
+        (project_id,),
+    )
+    if failed_attempt and failed_attempt["count"]:
+        problems.append(
+            f"{failed_attempt['count']} 个章节的最新生成尝试失败且未被后续成功覆盖，"
+            "须重新生成或人工处理后才能交付"
+        )
     problems.extend(_wording_problems(project_id))
     problems.extend(_table_problems(project_id))
     return problems
@@ -213,6 +393,8 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
                          length_policy: dict | None = None,
                          diagnostics: dict | None = None,
                          table_records: list[dict] | None = None,
+                         evidence_records: list[dict] | None = None,
+                         table_blocks: list | None = None,
                          prompt_version: str = "", prompt_sha256: str = "", input_hash: str = "",
                          review_status: str = "draft", support_status: str = "pending",
                          title: str = "", section_id: str = "") -> dict:
@@ -278,7 +460,15 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
     if table_records is not None:
         # 冻结结构化允许记录：审计与后置支持校验都读这一份，不再依赖重新取表。
         payload["table_records_json"] = json_dump(table_records)
+    if evidence_records is not None:
+        # 统一冻结记录（fact/table/metric/rule）：章节校验与后置支持校验的唯一记录来源。
+        payload["evidence_records_json"] = json_dump(evidence_records)
     with connect() as conn:
+        # 修订稿 §3.3：正文一旦被重新写入，恢复章节待复核、撤销旧的「最终复核」标记，
+        # 且与正文/状态/哈希**同一事务**。放在 upsert **之前**：人工编辑（update_section）
+        # 在同一请求里显式给出的复核结论由随后的 payload 落定，不被这里回退；而项目级
+        # 最终复核标记因正文变化必须撤销（否则界面继续显示「最终版已就绪」）。
+        reset_section_review(project_id, section_key, conn=conn)
         if existing:
             assignments = ", ".join(f"{key}=?" for key in payload)
             conn.execute(
@@ -294,11 +484,18 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
                 f"INSERT INTO report_sections ({columns}) VALUES ({placeholders})",
                 tuple(payload.values()),
             )
-    if section_key in {"financial", "cashflow", "debt", "rating"} and content_origin in {"model", "deterministic"}:
-        from .report_tables import save_table_snapshot
+        # 表格快照与正文/状态/哈希在**同一事务**冻结（第三点细化方案 §四：禁止提交正文后
+        # 另行保存表格快照）；blocks 来自生成期的一次构建（chapter_context["table_blocks"]），
+        # 与表格正文、结构化记录同源，不再重新查询当前表格。
+        if (table_blocks is not None and section_key in {"financial", "cashflow", "debt", "rating"}
+                and content_origin in {"model", "deterministic"}):
+            from .report_tables import save_table_snapshot
 
-        subject = row("SELECT company_name FROM projects WHERE id=?", (project_id,))
-        save_table_snapshot(project_id, section_key, subject=str((subject or {}).get("company_name") or ""))
+            issuer_row = row("SELECT company_name FROM projects WHERE id=?", (project_id,))
+            save_table_snapshot(
+                project_id, section_key, subject=str((issuer_row or {}).get("company_name") or ""),
+                blocks=list(table_blocks), conn=conn,
+            )
     return {"content_sha256": digest, "length_status": length["length_status"],
             "visible_content_chars": length["visible_content_chars"],
             "disclosure_status": disclosure_status, "delivery_status": delivery_status}

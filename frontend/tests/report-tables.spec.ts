@@ -403,8 +403,11 @@ test("单元格可点击查看证据，段落标注正文来源", async ({ page 
   await expect(drawer).toBeVisible();
   await expect(drawer.locator("blockquote")).toContainText("货币资金 12,000.00 万元");
   await expect(drawer.locator(".drawer-head strong")).toContainText("资料01 · 第12页");
+  // 回归（证据层焦点管理）：打开时焦点进入证据层，关闭后焦点回到触发它的报告页引用值按钮。
+  expect(await drawer.evaluate((box) => Boolean(document.activeElement && box.contains(document.activeElement)))).toBe(true);
   await drawer.getByTitle("关闭").click();
   await expect(drawer).toHaveCount(0);
+  await expect(cell).toBeFocused();
 });
 
 test("没有 blocks 字段时退回正文，不白屏", async ({ page }) => {

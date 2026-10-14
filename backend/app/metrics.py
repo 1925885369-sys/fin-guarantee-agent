@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from decimal import Decimal
 
 from .database import connect, json_dump, json_load, rows
 
@@ -22,11 +23,27 @@ METRIC_NAMES = {
     "quick_ratio": ("速动比率", "倍"),
     "ar_turnover_days": ("应收账款周转天数", "天"),
     "inventory_turnover_days": ("存货周转天数", "天"),
+    # 计划 §三 新增白名单：周转率（次，用期初期末平均余额）与结构占比。
+    # 名称必须与 METRIC_NAMES 一致——指标记录按 ``name`` 做中文科目绑定。
+    "ar_turnover": ("应收账款周转率", "次"),
+    "inventory_turnover": ("存货周转率", "次"),
+    "non_current_assets_ratio": ("非流动资产占比", "%"),
+    "non_current_liabilities_ratio": ("非流动负债占比", "%"),
     "dscr": ("债务偿付覆盖率", "倍"),
     "guarantee_to_equity": ("担保申请额/净资产", "%"),
     "contingent_ratio": ("或有负债率", "%"),
     "collateral_coverage": ("抵押净覆盖率", "%"),
 }
+
+
+def _decimal(value) -> Decimal | None:
+    """事实值 → Decimal；不可解析或缺失返回 None（宁可不出指标，也不猜数）。"""
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
 
 
 def _by_key(facts: list[dict]) -> dict[str, dict[str, dict]]:
@@ -133,10 +150,63 @@ def calculate_metrics(facts: list[dict], application_amount: float) -> list[dict
         if len(period) == 4 and period.isdigit() and metric_facts[0]["value"] >= metric_facts[1]["value"]:
             output.append(_metric("available_cash", period, metric_facts[0]["value"] - metric_facts[1]["value"], "货币资金-受限资金", metric_facts))
 
-    group = _common(grouped, ["current_assets", "inventory", "current_liabilities"])
-    if group and group[0][1][2]["value"]:
-        period, metric_facts = group[0]
-        output.append(_metric("quick_ratio", period, (metric_facts[0]["value"] - metric_facts[1]["value"]) / metric_facts[2]["value"], "(流动资产-存货)/流动负债", metric_facts))
+    # 三年速动比率（计划 §三）：原实现只出最新一期，正文写"速动比率三年均低于1倍"时
+    # 只有 2025 有记录，另外两年无处可依。
+    for period, metric_facts in reversed(_common(
+            grouped, ["current_assets", "inventory", "current_liabilities"], count=3)):
+        if len(period) != 4 or not period.isdigit():
+            continue
+        if metric_facts[2]["value"]:
+            output.append(_metric("quick_ratio", period,
+                                  (metric_facts[0]["value"] - metric_facts[1]["value"]) / metric_facts[2]["value"],
+                                  "(流动资产-存货)/流动负债", metric_facts))
+
+    # 周转率（计划 §三）：营业收入／平均应收账款、营业成本／平均存货。
+    # 平均余额＝（期初＋期末）/2；**缺期初数据不计算**，不用期末余额替代。
+    # 用 Decimal 计算，避免二进制浮点在"贴不贴边"上抖动。
+    for metric_key, flow_key, balance_key, formula in (
+        ("ar_turnover", "revenue", "accounts_receivable", "营业收入/平均应收账款"),
+        ("inventory_turnover", "cost_of_goods_sold", "inventory", "营业成本/平均存货"),
+    ):
+        flow_by_period = grouped.get(flow_key, {})
+        balance_by_period = grouped.get(balance_key, {})
+        for period in sorted(
+                (item for item in flow_by_period if len(item) == 4 and item.isdigit()), reverse=True)[:3]:
+            opening = balance_by_period.get(str(int(period) - 1))
+            closing = balance_by_period.get(period)
+            flow = flow_by_period.get(period)
+            if not (opening and closing and flow):
+                continue
+            flow_value = _decimal(flow["value"])
+            opening_value = _decimal(opening["value"])
+            closing_value = _decimal(closing["value"])
+            if flow_value is None or opening_value is None or closing_value is None:
+                continue
+            average = (opening_value + closing_value) / 2
+            if average == 0:
+                continue
+            output.append(_metric(metric_key, period, float(flow_value / average),
+                                  formula, [flow, opening, closing]))
+
+    # 结构占比（计划 §三）：非流动资产／资产总计、非流动负债／负债合计。
+    # 分子由同一份合计减去流动部分得到（资产总计−流动资产合计），不引入外部数字；
+    # 公式里显式写出派生关系，输入事实 ID 同时冻结合计与流动项。
+    for metric_key, total_key, flow_key, formula in (
+        ("non_current_assets_ratio", "total_assets", "current_assets",
+         "非流动资产/资产总计（非流动资产=资产总计-流动资产合计）"),
+        ("non_current_liabilities_ratio", "total_liabilities", "current_liabilities",
+         "非流动负债/负债合计（非流动负债=负债合计-流动负债合计）"),
+    ):
+        for period, metric_facts in reversed(_common(grouped, [total_key, flow_key], count=3)):
+            if len(period) != 4 or not period.isdigit():
+                continue
+            total_value = _decimal(metric_facts[0]["value"])
+            flow_value = _decimal(metric_facts[1]["value"])
+            if total_value is None or flow_value is None or total_value == 0:
+                continue
+            output.append(_metric(metric_key, period,
+                                  float((total_value - flow_value) / total_value * 100),
+                                  formula, metric_facts))
 
     group = _common(grouped, ["accounts_receivable", "revenue"])
     if group and group[0][1][1]["value"]:

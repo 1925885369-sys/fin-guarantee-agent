@@ -16,6 +16,7 @@ import uuid
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from decimal import Decimal
 
 from .database import connect, now_iso, rows
@@ -533,17 +534,23 @@ def table_blocks_hash(blocks: list[TableBlock]) -> str:
 
 
 def save_table_snapshot(project_id: str, chapter_key: str, *, subject: str,
-                        blocks: list[TableBlock] | None = None) -> dict:
+                        blocks: list[TableBlock] | None = None, conn=None) -> dict:
+    """冻结某章表格快照。传入 ``conn`` 时并入调用方事务——写入端要求快照与正文**同一事务**
+    （第三点细化方案 §四：禁止提交正文后另行保存表格快照）。"""
     current = blocks if blocks is not None else _current_chapter_table_blocks(project_id, chapter_key, subject=subject)
     digest = table_blocks_hash(current)
-    with connect() as conn:
-        conn.execute(
-            "INSERT INTO report_table_snapshots(project_id,chapter_key,blocks_json,input_hash,rule_version,updated_at) "
-            "VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,chapter_key) DO UPDATE SET "
-            "blocks_json=excluded.blocks_json,input_hash=excluded.input_hash,rule_version=excluded.rule_version,updated_at=excluded.updated_at",
-            (project_id, chapter_key, json.dumps([item.to_dict() for item in current], ensure_ascii=False),
-             digest, TABLE_RULE_VERSION, now_iso()),
-        )
+    statement = (
+        "INSERT INTO report_table_snapshots(project_id,chapter_key,blocks_json,input_hash,rule_version,updated_at) "
+        "VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,chapter_key) DO UPDATE SET "
+        "blocks_json=excluded.blocks_json,input_hash=excluded.input_hash,rule_version=excluded.rule_version,updated_at=excluded.updated_at"
+    )
+    params = (project_id, chapter_key, json.dumps([item.to_dict() for item in current], ensure_ascii=False),
+              digest, TABLE_RULE_VERSION, now_iso())
+    if conn is not None:
+        conn.execute(statement, params)
+    else:
+        with connect() as owned:
+            owned.execute(statement, params)
     return {"input_hash": digest, "rule_version": TABLE_RULE_VERSION, "blocks": current}
 
 
@@ -577,6 +584,70 @@ def chapter_table_blocks(project_id: str, chapter_key: str, *, subject: str) -> 
     return _current_chapter_table_blocks(project_id, chapter_key, subject=subject)
 
 
+def render_system_table_markdown(chapter_key: str, blocks: list[TableBlock]) -> str:
+    """把**同一份** ``blocks`` 渲染成系统表格 Markdown 正文（三件套之一）。
+
+    与 :func:`chapter_guard._system_table_block` 现在的拼装方式保持一致：标题
+    ``SYSTEM_TABLE_HEADING`` + 逐表 :func:`render_table_block`，以空行分隔。
+    非表格章或空表返回空串。
+    """
+    if chapter_key not in TABLE_CHAPTERS or not blocks:
+        return ""
+    rendered = [
+        render_table_block(block, index=index, total=len(blocks))
+        for index, block in enumerate(blocks, 1)
+    ]
+    return "\n\n".join([SYSTEM_TABLE_HEADING, *rendered])
+
+
+@dataclass(frozen=True)
+class ChapterTables:
+    """一次构建产出的**三件套**：表格正文 + 结构化记录 + 表格快照。
+
+    三个出口共用同一份 ``blocks``，禁止分别重新查询当前表格（第三点细化方案 §二.1）。
+    """
+
+    project_id: str
+    chapter_key: str
+    subject: str
+    blocks: tuple[TableBlock, ...]
+    markdown: str
+    records: tuple[dict, ...]
+
+    @property
+    def snapshot(self) -> dict:
+        """``save_table_snapshot`` 落库所需的快照 payload（blocks 列表 + 哈希 + 规则版本）。"""
+        data = list(self.blocks)
+        return {
+            "blocks": data,
+            "input_hash": table_blocks_hash(data),
+            "rule_version": TABLE_RULE_VERSION,
+        }
+
+
+def build_chapter_tables(project_id: str, chapter_key: str, *, subject: str,
+                         current: bool = False) -> ChapterTables:
+    """**一次**取表，同时产出表格正文、结构化记录与表格快照（三件套单一来源）。
+
+    同一份 ``blocks`` 同时喂给 :func:`render_system_table_markdown`、
+    :func:`table_evidence.records_from_blocks` 与 :attr:`ChapterTables.snapshot`，
+    杜绝「三个出口各自重查」导致的不一致（第三点细化方案 §二.1）。
+
+    ``current=True``：生成期口径——取**当前抽取表**（与表格正文的既有行为一致），随后由
+    写入端在同一事务内冻结快照；``False``：快照优先（读取/导出复用冻结版本）。
+    """
+    from .table_evidence import records_from_blocks
+
+    blocks = (_current_chapter_table_blocks(project_id, chapter_key, subject=subject) if current
+              else chapter_table_blocks(project_id, chapter_key, subject=subject))
+    markdown = render_system_table_markdown(chapter_key, blocks)
+    records = records_from_blocks(blocks, project_id=project_id)
+    return ChapterTables(
+        project_id=project_id, chapter_key=chapter_key, subject=subject,
+        blocks=tuple(blocks), markdown=markdown, records=tuple(records),
+    )
+
+
 def system_table_markdown(project_id: str, chapter_key: str, *, subject: str,
                           current: bool = False) -> str:
     """某一章的系统表格块。返回空串表示该章不输出系统表格。"""
@@ -584,13 +655,7 @@ def system_table_markdown(project_id: str, chapter_key: str, *, subject: str,
         return ""
     blocks = (_current_chapter_table_blocks(project_id, chapter_key, subject=subject) if current
               else chapter_table_blocks(project_id, chapter_key, subject=subject))
-    if not blocks:
-        return ""
-    rendered = [
-        render_table_block(block, index=index, total=len(blocks))
-        for index, block in enumerate(blocks, 1)
-    ]
-    return "\n\n".join([SYSTEM_TABLE_HEADING, *rendered])
+    return render_system_table_markdown(chapter_key, blocks)
 
 
 # ---------------------------------------------------------------------------
