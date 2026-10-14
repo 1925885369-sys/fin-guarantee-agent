@@ -4,6 +4,8 @@
 
 这是个人作品集项目。默认六套企业和材料为虚构案例；北投、中邮真实公开材料仅在本地作适配参考，原始 PDF 不包含在仓库中。
 
+> **持续开发中**：仓库仍在活跃迭代，功能与文档会持续变化。GitHub CI 只验证基础回归（后端冒烟测试、发布文件检查）与前端依赖安装、类型检查、构建，**不代表完整业务验收通过**。推荐工具版本：Node.js **24.11.1** 与 npm **11.6.2**；`frontend/package.json` 已固定全部直接依赖版本并声明 `packageManager`，请勿改回 `latest`。
+
 ## 业务流程
 
 ```text
@@ -28,7 +30,7 @@
 
 ## 本地启动
 
-要求 Python **3.12**、Node.js **22.12+**（推荐 24 LTS）和 Git。密钥只提供给后端；`.env.example` 是配置说明，当前启动脚本不会自动读取 `.env`。
+要求 Python **3.12**、Node.js **24.11.1** 与 npm **11.6.2**（推荐组合，CI 已按此固定）和 Git。密钥只提供给后端；`.env.example` 是配置说明，当前启动脚本不会自动读取 `.env`。
 
 ### Windows PowerShell
 
@@ -106,13 +108,14 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 ## 验证与评测口径
 
-GitHub CI 执行基础后端回归、发布文件检查及前端构建，不需要真实 PDF、模型密钥或向量模型。这是基础检查，不等于完整业务验收。
+GitHub CI 执行基础后端回归、发布文件检查，以及前端在 Ubuntu 与 Windows 双平台的 `npm ci`、类型检查与构建，不需要真实 PDF、模型密钥或向量模型。这是基础检查，**不等于完整业务验收通过**。
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/check_public_release.py --output .release/public-release-audit.json
 .\.venv\Scripts\python.exe -m pytest tests/test_public_release.py tests/test_parsers.py tests/test_fact_extraction_guards.py tests/test_table_block.py tests/test_llm.py tests/test_project_boundaries.py -q
 cd frontend
 npm.cmd ci
+npm.cmd run typecheck
 npm.cmd run build
 ```
 

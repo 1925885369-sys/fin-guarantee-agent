@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "npm@11.6.2",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build --configLoader runner",
@@ -11,16 +12,16 @@
     "record:demo": "node scripts/record-demo.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "lucide-react": "latest"
+    "@vitejs/plugin-react": "6.0.5",
+    "vite": "8.1.5",
+    "typescript": "7.0.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "lucide-react": "1.28.0"
   },
   "devDependencies": {
-    "@playwright/test": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@playwright/test": "1.62.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3"
   }
 }
