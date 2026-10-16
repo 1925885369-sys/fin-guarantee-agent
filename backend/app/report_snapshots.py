@@ -47,6 +47,21 @@ def _decode_sections(items: list[dict]) -> list[dict]:
     return items
 
 
+def _outline_snapshot(project_id: str) -> dict:
+    """生成时生效的目录快照（P1-2/P1-5）：历史报告按生成时目录展示。
+
+    走 ``normalized_outline``（与 ``outline_for_grouping`` 同一入口）：快照里的目录标题
+    也做成品用词规范化——历史回看的章节标题与当时导出的 MD/Word 必须逐字一致（P0-2）。
+    目录模块不可读（旧库/隔离测试）时返回空表——快照其余部分照常冻结，不影响旧行为。
+    """
+    try:
+        from .report_outline import normalized_outline
+
+        return normalized_outline(project_id) or {}
+    except Exception:
+        return {}
+
+
 def build_snapshot_payload(project_id: str) -> dict:
     """组装一次完整报告的**可冻结**表示。
 
@@ -70,7 +85,9 @@ def build_snapshot_payload(project_id: str) -> dict:
     # 先解码就会让 _citation_records 拿到 list。所以这里必须深拷贝分家。
     sections = _decode_sections([dict(item) for item in raw_sections])
 
-    labels = section_labels(sections)
+    # 生成时目录快照（P1-4）：分组/编号与标题装饰用同一份冻结目录，历史报告不可变。
+    outline_snapshot = _outline_snapshot(project_id)
+    labels = section_labels(sections, outline=outline_snapshot or None)
     subject = _project_subject(project_id)
     state = report_state(project_id)
     for section in sections:
@@ -99,11 +116,13 @@ def build_snapshot_payload(project_id: str) -> dict:
 
     return {
         "sections": sections,
-        "groups": grouped_sections(sections),
+        "groups": grouped_sections(sections, outline=outline_snapshot or None),
         "citations": records,
         "open_items": list(open_lines),
         "quality": report_quality(project_id),
         "material_labels": material_numbers(project_id),
+        # 生成时目录快照（P1-2/P1-5）：网页/Markdown/Word/历史回看共用冻结目录。
+        "outline": _outline_snapshot(project_id),
         "frozen_at": now_iso(),
     }
 

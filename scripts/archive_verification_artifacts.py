@@ -77,6 +77,8 @@ def main() -> int:
     parser.add_argument("--junit", default="", help="现成 JUnit XML 路径（与 --run-tests 二选一）")
     parser.add_argument("--frontend", default="", help="前端交互报告目录（如 frontend/test-results）")
     parser.add_argument("--build-log", default="", help="前端构建日志文件路径")
+    parser.add_argument("--extra", action="append", default=[],
+                        help="附加归档文件（可多次传入），如 e2e 运行日志")
     parser.add_argument("--out", default="", help="输出目录（默认 acceptance_output/verification-<时间戳>）")
     args = parser.parse_args()
 
@@ -151,6 +153,17 @@ def main() -> int:
         else:
             failed = True
             manifest["warnings"].append(f"构建日志不存在：{source}")
+
+    # 4) 附加文件（e2e 运行日志等）
+    for extra in args.extra or []:
+        source = Path(extra)
+        if source.is_file():
+            destination = out_dir / source.name
+            shutil.copy2(source, destination)
+            _record_artifact(manifest, destination)
+        else:
+            failed = True
+            manifest["warnings"].append(f"附件不存在：{source}")
 
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")

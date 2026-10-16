@@ -85,6 +85,14 @@ def section_blocks(project_id: str, section: dict, *, subject: str) -> list[dict
         blocks = chapter_table_blocks(project_id, str(section.get("section_key") or ""), subject=subject)
     except Exception:
         blocks = []
+    # 成品用词规范化（旧计划剩余项 P0-2）：网页、Markdown、Word 三个出口都从冻结快照
+    # 重新渲染表格，快照里的表名／列标签／单元格来自材料原文——只在写入侧规范正文不够。
+    # 统一在此规范化（三出口共用本函数），冻结快照与证据存储保持原称。
+    if blocks:
+        from .delivery_wording import material_numbers, normalize_table_block
+
+        _numbers = material_numbers(project_id)
+        blocks = [normalize_table_block(block, _numbers) for block in blocks]
 
     notes = {note for block in blocks for note in block.notes}
     captions = {block.title for block in blocks}

@@ -37,6 +37,7 @@ docs/assets/*after-fix*.json
 .workbuddy/
 .release/
 replay/
+.probe_*
 scripts/_debug_*.py
 scripts/_replay_*.py
 scripts/replay_*.py

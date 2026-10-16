@@ -12,7 +12,7 @@ from rank_bm25 import BM25Okapi
 
 from .chapter_prompts import (
     CONTEXT_SCHEMA_VERSION, PROMPT_CONTRACT_VERSION, chapter_prompt, chapter_prompt_is_overridden,
-    effective_chapter_config, prompt_config_payload,
+    chapter_uses_llm, effective_chapter_config, prompt_config_payload,
 )
 from .database import json_load, row, rows
 from .professional import analysis_fact_rows
@@ -301,9 +301,30 @@ def _number_mentions(content: str) -> list[dict]:
     text, _, _ = _strip_format_numbers(content)
     # 期限短语不是独立取值（收口方案 §一）："未来N个月/未来N~M个月" 是展望期限，其数字
     # 不作为金额或指标取值核验（北投 financial 缺口句 "未来12个月到期债务" 实测）。
+    # 2026-10-15 复核统一为**通用"数字+个月"**：期限/界限/期间表述（"超过12个月""
+    # 账龄12个月以内"）在支持级都无对账对象；期限值本身材料多以"年"表述，由"X年"
+    # 路径核对（华辰 guarantee #9/#18 "估值基准日距申报日超过12个月" 实测）。
     duration_spans = [
         (found.start(), found.end())
-        for found in re.finditer(r"未来\s*\d+\s*(?:[~～至到—–―~\-]\s*\d+\s*)?个月", text)
+        for pattern in (
+            r"\d+\s*(?:[~～至到—–―~\-]\s*\d+\s*)?个月",
+            r"\d+\s*[~～至到—–―\-]\s*\d+\s*月",
+            # 专名编号（"3号线一期""22号线"）不是取值：地铁线路名被读成数字会凭空
+            # 制造"查无记录的数字"（2026-10-15 北投 operations #4 实测）。
+            r"\d+\s*号线",
+            # 月份单点/月末（"6月""9月末""暖冬奇妙月"旁的活动时间）是时间表达，
+            # 数字部分不参与取值核验。
+            r"(?<![\d个])\d{1,2}\s*月末?",
+            # 字母前缀编号（"BS4/6 商办楼""BS5/8 组团"、评级模型号"V4.1.202606"）——
+            # 专名/型号的一部分，不是业务取值（2026-10-15 北投 operations #15、
+            # 中邮 rating #3 实测）。只认**紧邻**字母前缀（"EPS 0.5"等带空格的财务
+            # 缩写不受影响；"5G""3A"等数字在前的形态也不在此列）。
+            r"[A-Za-z]{1,4}\d+(?:[./][\d.]+)*",
+            # 括注式期限（"一年以内（含1年）合计口径"）：与期限档同属分类表述
+            # （中邮 debt #7 实测"含1年"被当成查无记录的数字）。
+            r"含\s*\d+(?:\.\d+)?\s*(?:年|个月)",
+        )
+        for found in re.finditer(pattern, text)
     ]
     mentions = []
     for match in NUMBER_WITH_UNIT_RE.finditer(text):
@@ -314,7 +335,10 @@ def _number_mentions(content: str) -> list[dict]:
         raw_token = f"{sign or ''}{raw}"
         unit = UNIT_ALIASES.get(unit, unit)
         normalized, canonical_unit, converted = _canonical_measurement(raw_token, unit)
-        if unit in {"", "年"} and re.fullmatch(r"(?:19|20)\d{2}", normalized):
+        if unit in {"", "年"} and re.fullmatch(r"-?(?:19|20)\d{2}", normalized):
+            # 年份剔除；负号形态来自**年份区间**写法（"2023年-2025年度公司营业收入…"），
+            # "‑2025" 不是负数取值（2026-10-15 中邮 operations #7 实测：区间第二年被
+            # 当成查无记录的数字、拖垮整句）。
             continue
         # 债务期限档/协议存续期（"1年以内""1年以上""N年内""N年期"）的 N 是期限分类，
         # 不是取值：直接在提取层剔除该数字（文本本身不改，标签比对不受影响）。北投 debt
@@ -498,6 +522,26 @@ def _normalize_label_numerals(text: str) -> str:
     )
 
 
+# 科目名里的**主体噪声词**（2026-10-16 中邮 operations 31.36% 实测）：记录标签常带
+# "公司/本公司/发行人"（"占**公司**主营业务收入的比例"），正文写同一科目时省略
+# （"投资交易业务收入占主营业务收入的比例分别为31.36%…"）——不去噪则包含判定失败，
+# 科目正确的比率被硬拒。只剥科目**名内**的这组修饰词；期间/主体/口径等维度照旧。
+_ENTITY_NOISE_RE = re.compile(r"(?:发行人|本公司|本集团|公司(?!债券|债))")
+
+
+def _strip_entity_noise(label: str) -> str:
+    return _ENTITY_NOISE_RE.sub("", str(label or ""))
+
+
+# **期间桶标签**（"1年以内/1年以上/12个月以内/一年以内（含1年）"）：到期分布表等
+# 把列头年段抽成了行标签，进词表会把"科目+双桶并列"写法（"银行贷款1年以内131.15亿元、
+# 1年以上3,287.00亿元"）的窗口填成桶名、造出假 label_mismatch（2026-10-16 北投 debt
+# 实测）。桶是**期间维度**、不是科目，一律不进科目词表。
+_PERIOD_BUCKET_LABEL_RE = re.compile(
+    r"^(?:\d{1,3}|[一二三四五六七八九十]{1,3})(?:年|个月|月)(?:以内|以上|以下|内)(?:（[^）]{0,12}）)?$"
+)
+
+
 def _labels_compatible(written_label: str, record_label: str) -> bool:
     """科目名兼容：包含关系，或同属现金流登记表的同一类别。
 
@@ -509,7 +553,25 @@ def _labels_compatible(written_label: str, record_label: str) -> bool:
         return False
     written_label = _normalize_label_numerals(written_label)
     record_label = _normalize_label_numerals(record_label)
+    # PDF 回流会在记录 label 里留**换行/空白**（"卖出回购金融\n资产款"），正文却是连续
+    # 串（"卖出回购金融资产款"）→ 包含判定失败造出假 label_mismatch（中邮 debt #9
+    # 70.75% 实测）。两侧先去内部空白再判。**不改写正文**，仅比对口径。
+    written_label = re.sub(r"[\s\u3000]+", "", written_label)
+    record_label = re.sub(r"[\s\u3000]+", "", record_label)
+    # "总计"≡"总额"（"资产总计"/"资产总额"是同一行的两种写法）：统一为"总额"再判包含
+    # （2026-10-16 中邮 financial 母公司资产总额 2,729,368.97 万元实测：记录"资产总计"、
+    # 正文写"资产总额"）。只归一"总计"，**不动"合计"**——"合计"行有专门的"归属不明→
+    # 待人工"口径。
+    written_label = written_label.replace("总计", "总额")
+    record_label = record_label.replace("总计", "总额")
     if written_label in record_label or record_label in written_label:
+        return True
+    # 主体噪声词两侧去噪后再判包含（"占公司主营业务收入的比例" ≡ "占主营业务收入的比例"）。
+    stripped_written = _strip_entity_noise(written_label)
+    stripped_record = _strip_entity_noise(record_label)
+    if stripped_written and stripped_record and (
+        stripped_written in stripped_record or stripped_record in stripped_written
+    ):
         return True
     written_category = _cash_flow_category(written_label)
     record_category = _cash_flow_category(record_label)
@@ -828,12 +890,78 @@ def _materials_fingerprint(project_id: str) -> str:
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
+def _outline_chapter_config(project_id: str, chapter_key: str) -> dict:
+    """生效目录（P1）中本章的配置：目录章节元数据 + 启用小节 + 检索约束。
+
+    内置章节按 ``template_key`` 匹配；自定义章节（section_key=chapter_id）按
+    ``chapter_id`` 匹配（P1-4）。目录不可读（旧库/隔离测试）或章节不启用模型时
+    返回空结构——行为与无目录时完全一致。
+    """
+    empty = {
+        "chapter": None, "subsections": [], "outline_version": "",
+        "material_roles": [], "document_ids": [],
+    }
+    try:
+        if not chapter_uses_llm(chapter_key):
+            return empty
+        from .report_outline_store import effective_outline
+
+        outline = effective_outline(project_id)
+    except Exception:
+        return empty
+    for part in outline.get("parts") or []:
+        for chapter in part.get("chapters") or []:
+            is_match = (
+                bool(chapter.get("template_key"))
+                and str(chapter.get("template_key")) == chapter_key
+            ) or (
+                not chapter.get("template_key")
+                and str(chapter.get("chapter_id") or "") == chapter_key
+            )
+            if not is_match:
+                continue
+            subsections = [
+                {
+                    "subsection_id": str(item.get("subsection_id") or "").strip(),
+                    "title": str(item.get("title") or "").strip(),
+                    "prompt": str(item.get("prompt") or "").strip(),
+                }
+                for item in (chapter.get("subsections") or [])
+                if item.get("enabled", True)
+                and str(item.get("title") or "").strip()
+                and str(item.get("subsection_id") or "").strip()
+            ]
+            return {
+                "chapter": chapter,
+                "subsections": subsections,
+                "outline_version": str(outline.get("outline_version") or ""),
+                "material_roles": [
+                    str(role) for role in (chapter.get("material_roles") or []) if str(role).strip()
+                ][:20],
+                "document_ids": [
+                    str(doc) for doc in (chapter.get("document_ids") or []) if str(doc).strip()
+                ][:30],
+            }
+    return empty
+
+
 def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_ids: list[str] | None = None) -> dict:
     # The effective config (project > global > YAML) is what the model is told and
     # what the validator measures against; reading the factory YAML here made an
     # edited paragraph/prose range a false rejection.
     config = effective_chapter_config(chapter_key, project_id)
     contract = config["input_contract"]
+    # P1-2/P1-4：生效目录中本章的小节/检索约束——目录/小节 Prompt 变更即视为"模型
+    # 输入已变"（进入 input_hash、尝试台账与快照，见下方 payload 组装）。
+    outline_cfg = _outline_chapter_config(project_id, chapter_key)
+    outline_subsections = outline_cfg["subsections"]
+    outline_version = outline_cfg["outline_version"]
+    outline_sha256 = (
+        hashlib.sha256(
+            json.dumps(outline_subsections, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if outline_subsections else ""
+    )
     fact_keys = set(contract["fact_keys"])
     rule_keys = set(contract["rule_keys"])
     source_kinds = set(contract["source_kinds"])
@@ -912,11 +1040,28 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
         | {sid for item in checks for sid in item.get("source_ids") or []}
         | set(conflict_source_ids)
     )
+    # P1-4：目录章节的标题/章级要求与小节任务进检索查询——自定义章节、配置了小节
+    # Prompt 或材料筛选时生效；默认内置章节（小节 Prompt 全空、无筛选）保持原查询
+    # 不变（行为兼容，回放基线不漂移）。
+    outline_query_bits: list[str] = []
+    if outline_cfg["chapter"] and (
+        any(item.get("prompt") for item in outline_subsections)
+        or outline_cfg["material_roles"]
+        or outline_cfg["document_ids"]
+        or not outline_cfg["chapter"].get("template_key")
+    ):
+        outline_query_bits = [
+            str(outline_cfg["chapter"].get("title") or ""),
+            str(outline_cfg["chapter"].get("prompt") or ""),
+            *[str(item.get("title") or "") for item in outline_subsections],
+            *[str(item.get("prompt") or "") for item in outline_subsections],
+        ]
     evidence_query = " ".join([
         *[str(item.get("name") or item.get("fact_key") or "") for item in selected_facts],
         *[str(item.get("metric_key") or "") for item in metrics],
         *[str(item.get("title") or item.get("rule_key") or "") for item in checks],
         str(config.get("goal") or ""), " ".join(config.get("rules") or []),
+        *outline_query_bits,
     ])
     from .retrieval import retrieve_chunks
 
@@ -936,6 +1081,9 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
         evidence_query or str(config.get("goal") or ""),
         top_k=max(30, max_items * 3),
         allowed_kinds=source_kinds or None,
+        # P1-4：目录配置的材料角色/文件白名单（空 = 默认检索本项目全部已解析材料）。
+        allowed_roles=set(outline_cfg["material_roles"]) or None,
+        document_ids=set(outline_cfg["document_ids"]) or None,
         priority_source_ids=priority_order,
     )
     source_by_id = {str(item["id"]): item for item in source_rows}
@@ -1041,6 +1189,11 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
         # Prompt 契约编译版本（三项遗留修复方案 §二）：接口与审计用于判断"库里 Prompt 是否
         # 早于当前编译器"；旧句迁移在 `llm._report_request` 里幂等完成。
         "prompt_contract_version": PROMPT_CONTRACT_VERSION,
+        # 生效目录（P1-2）：目录版本 + 小节配置哈希 + 参与生成的小节清单。
+        # 无小节时全部为空/空表，旧行为不受影响。
+        "outline_version": outline_version,
+        "outline_sha256": outline_sha256,
+        "subsections": outline_subsections,
         # 系统表格快照哈希：请求只下发摘要，哈希用于审计"本章分析基于哪一版表格"。
         "table_snapshot_hash": (
             hashlib.sha256(system_table_block.encode("utf-8")).hexdigest() if system_table_block else ""
@@ -1308,6 +1461,14 @@ def assess_chapter_length(content: str, context: dict) -> dict:
 # 判定原则是**宁可漏报也不误报**：没写归属词、记录缺字段、口径未注明都不报错——那属于
 # 待核验，不属于错误。窗口只取命中位置之前的一小段：归属词就写在数字前面。
 SUBJECT_BINDING_WINDOW = 16
+
+# 所写科目的**标签全集**窗口（`written_labels` 提取）与归属线索窗口同宽。曾试放宽到
+# 24 治系列句后位值，但回放出现"written 从空变非空 → 跳过滤变判冲突"的恶化回归
+# （needs_review→rejected，stage1o 14 处差异），改为**系列枚举头结构继承**（见
+# `_record_binding` 内的 head 继承段）：只在窗口左侧被前一个枚举值占据时继承
+# "分别"之前的枚举头，窗口本身保持 16。
+# `p0._mentions_ambiguous_attribution` 的"归属线索"窗口同为 16（语义同宽：宁可漏报）。
+SUBJECT_LABEL_WINDOW = 16
 # 年份令牌要求**左侧非数字、非连字符**：±20 字窗口会把"2023—2025"截成"3—2025"，
 # 裸 ``(?:19|20)\d{2}`` 便在残句里读到 2025，把本属 2023 的数字判成期间错（中邮实测）。
 # 左侧边界让截断残片无法冒充完整年份；同时把上下文窗口放宽到 ±40，减少截断本身。
@@ -1340,9 +1501,33 @@ ATTRIBUTION_REASON_MESSAGES = {
 # label_mismatch（北投 8.32%/3.8% 实测；对照实验：整句改成"存货占比"后冲突 1→0）。
 # 命中即把"占/在"之前的分子名也纳入候选科目。
 RATIO_NUMERATOR_RE = re.compile(
-    r"([\u4e00-\u9fffA-Za-z0-9（）()、和与及]{1,24}?)"
-    r"\s*(?:占|在)[\u4e00-\u9fffA-Za-z0-9（）()]{1,16}?"
-    r"(?:的)?(?:比例|比重|占比|份额)"
+    # `group(1)`＝"占/在"**之前**写出的分子名（可空：分子名就在本分句开头，如"占有息债务
+    # 总余额的比例为71.75%"——`{0,24}` 才能匹配这种"占"在句首的写法，旧式 `{1,24}` 漏掉它，
+    # 导致分子取不到、回落到 16 字窗口把**前一分句**的科目错配给本比率，造出假 label_mismatch
+    # （中邮 debt #8 的 71.75% 实测））。
+    # 左边界：`group(1)` 不得从**数字中间**或**单位尾巴**起头。否则 "678,040.93万元、占比63.71%"
+    # 会被切成 "93万元、占比"（group(1)="93万元、"）或 "元、占比"（group(1)="元、"），
+    # 垃圾标签混进候选集，把正确的分子挤出（负例 ⑱ 实测）。
+    # ① 首位不是数字/千分位/小数点；② 左侧非数字/千分位/小数点；③ "单位+顿号"尾巴由
+    # `_RATIO_LEAD_UNIT_TAIL_RE` 在取到候选后剔除。
+    r"(?<![0-9.,])"
+    r"([\u4e00-\u9fffA-Za-z（）()、和与及][\u4e00-\u9fffA-Za-z0-9（）()、和与及]{0,23}?)?"
+    # 标记二式：`占比`/`比例`/`比重`/`份额` **独立成词**（"…386,298.82万元、占比36.29%"）——
+    # 此时 `占` 直接接 `比`（`占比` 整体即标记），不满足"占 + 填充 + 占比"的旧式。旧式漏掉这类
+    # 短标记，导致大额数字（13 字）把 16 字窗口里的科目名挤出后**无回指可依**，造出假
+    # label_mismatch（北投 debt #21 的 36.29% 实测）。独立式**只认**"占比"（不与"占"式混淆）。
+    r"\s*(?:占[\u4e00-\u9fffA-Za-z0-9（）()]{1,16}?(?:的)?(?:比例|比重|份额)|占比)"
+)
+# 取到候选后，若它以"数值+单位"的尾巴（"万元、""亿元、"）结尾，说明匹配从单位处起头，
+# 该候选是垃圾（不是科目名）——剥掉。剥空即本分句没写出分子，交给后续路径。
+_RATIO_LEAD_UNIT_TAIL_RE = re.compile(
+    r"^(?:[0-9][0-9,.]*\s*)?(?:万元|亿元|元|万|亿|%|‰)\s*[、，,]?$"
+)
+# `group(1)` 为空（分子名写在"占"之后）时，从标记里取填充："占有息债务总余额的比例"
+# → 填充"有息债务总余额"，复原为 "占有息债务总余额比例"（与 `_NAMED_VALUE_RE` 的
+# head+"比例" 记录 label 同形）。
+RATIO_NUMERATOR_MARKER_FILL_RE = re.compile(
+    r"占([\u4e00-\u9fffA-Za-z0-9（）()]{1,16}?)(?:的)?(?:比例|比重|份额)"
 )
 # 分母侧的收尾词：分子名不能越过这些词继续向左吞并（"资产端，货币资金…占总资产比重"）。
 RATIO_NUMERATOR_STOP_RE = re.compile(r"[，。；;：:！？!?\n（(]")
@@ -1390,6 +1575,7 @@ def _cut_ratio_left(text: str) -> str:
         if (position := text.find(marker)) >= 0
     ]
     return text[: min(positions)] if positions else text
+
 
 
 def _ratio_numerator_candidate(chunk: str) -> str | None:
@@ -1470,7 +1656,33 @@ def _ratio_numerator_labels(clause: str, preceding: str = "") -> set[str]:
                 return
 
     for match in RATIO_NUMERATOR_RE.finditer(clause):
-        raw = match.group(1).strip()
+        # `group(1)` 为 None：分子名没有写在"占"之前，而是**内嵌在标记里**
+        # （"占有息债务总余额的比例为71.75%"——`占`在句首，分子是标记填充"有息债务总余额"）。
+        # 取标记填充 + "占" 组成分子名（记录 label 是 "占有息债务总余额比例"，由
+        # `_NAMED_VALUE_RE` 的 head+"比例" 构成）。
+        # **只认紧接取值谓词**（"为/达/是/降至…"，可后接数字或正处分句末尾——绑定窗口会
+        # 在数字处截断，故 "…的比例为" 结尾也算）的写法：结构承接句
+        # （"…，占总资产比重**维持在**84%左右"——分子在前一分句）**不**在此列，仍走回指
+        # （北投 financial 结构承接用例；否则本句会错认"占总资产比例"为分子）。
+        raw = match.group(1)
+        if raw is None:
+            filler = RATIO_NUMERATOR_MARKER_FILL_RE.search(match.group(0))
+            tail = clause[match.end():].strip()
+            takes_value = bool(
+                re.match(r"(?:为|达|达到|占|是|降至|升至|降为|升为)\s*-?\d", tail)
+            ) or tail in {"为", "达", "达到", "是", "占", "降至", "升至", "降为", "升为"}
+            if filler and filler.group(1) and takes_value:
+                labels.add(f"占{filler.group(1)}比例")
+                found_local = True
+                # 标记填充只是一种可能的分子归属：填充词也可能**正是分母**、真正的分子是
+                # **前一分句的主语**（"卖出回购金融资产款为72.92亿元，占有息债务总余额的
+                # 比例为70.75%"——填充"有息债务总余额"是分母）。同时回指前文给出第二个
+                # 候选（仍须与记录 label 比对，不会凭空放行）；2026-10-16 中邮 debt 70.75% 实测。
+                _backreference()
+            else:
+                _backreference()
+            continue
+        raw = raw.strip()
         if not raw:
             continue
         # 向左不能越过分句标点；再剥掉常见的连接词尾巴（"…的""…端"）。
@@ -1478,14 +1690,16 @@ def _ratio_numerator_labels(clause: str, preceding: str = "") -> set[str]:
         for tail in ("的", "端", "中", "内"):
             if raw.endswith(tail) and len(raw) > len(tail):
                 raw = raw[: -len(tail)]
-        if not raw:
-            continue
         # 剥掉材料/叙述前缀（"募集说明书披露其" → "其"）。剥空＝分子未在本分句写出；
         # 残留代词＝分子是代词。两种情况都回指前文。
         stripped = RATIO_NUMERATOR_PREFIX_RE.sub("", raw).strip()
         # 年份/数字壳不是科目名："2023年存货" → "存货"；"2025年末" 剥空 → 本分句没有
         # 写出科目名（交给本分句候选/回指路径）。北投 financial "0.14% 应收账款占比" 实测。
         stripped = _RATIO_LEAD_SHELL_RE.sub("", stripped).strip()
+        # 匹配从"数值+单位"尾巴处起头的垃圾候选（"93万元、""元、"）不是科目名——丢弃，
+        # 让它走本分句候选/回指路径（否则垃圾标签会挤掉真分子，负例 ⑱ 实测）。
+        if _RATIO_LEAD_UNIT_TAIL_RE.fullmatch(stripped):
+            continue
         if (
             not stripped
             or RATIO_PRONOUN_RE.fullmatch(stripped)
@@ -1504,11 +1718,55 @@ def _ratio_numerator_labels(clause: str, preceding: str = "") -> set[str]:
     # 取不到才回指前文。此序保证本句已写的科目名优先——"营业毛利率"不继承上一句
     # "净利率"（北投财务实测：-45.98%/-83.96%/-59.54% 三条同因误退）。
     if not found_local and not labels:
-        local_candidate = _ratio_numerator_candidate(_cut_ratio_left(clause))
-        if local_candidate:
-            labels.add(local_candidate)
+        # 「金额 + 、占比」形态（"…信用借款386,298.82万元、占比36.29%"）：分子在**金额
+        # 左侧同一分句**里（顿号不断句，`_backreference` 够不到；16 字窗口又被大额数字挤
+        # 空）。取**紧邻本比率**（最后一个"占"）左侧、位于金额之前的科目名——同分句有多个
+        # 并列项时（"保证借款678,040.93万元、占比63.71%和信用借款386,298.82万元、占比"）
+        # 才需要"最后一个"；仍须与记录 label 比对才放行（北投 debt #21 实测）。
+        amount_marker = list(re.finditer(
+            r"([\u4e00-\u9fff]{2,20})[0-9][0-9,.]*\s*(?:亿元|万元|元)\s*[、，,]\s*占比",
+            clause))
+        if amount_marker:
+            labels.add(amount_marker[-1].group(1))
         else:
-            _backreference()
+            local_candidate = _ratio_numerator_candidate(_cut_ratio_left(clause))
+            if local_candidate:
+                labels.add(local_candidate)
+            else:
+                _backreference()
+    return labels
+
+
+# 覆盖率/覆盖倍数/占比结构的**谓词短语**（2026-10-16 第三轮试跑复核新增）：数字前窗口里
+# "X对Y的覆盖倍数/覆盖率""占Y的比例"是该数值在正文中的**正名**——记录 label 可能是这条
+# 短语本身（指标记录"对本期债项发行规模的覆盖倍数"）、它的子串别名（"短期债务的覆盖"）
+# 或公式输入（规则记录 formula"偿债现金流/到期本金"里的"到期本金"）。原实现只把窗口切成
+# 词表词（常只剩分子"可用现金/所有者权益"或分母"有息债务总余额"），谓词短语被丢掉 →
+# 假 label_mismatch（华辰 debt 0.29 倍/45.0%、中邮 financial 596.66 倍实测）。
+# 短语并入 written_labels 后仍走与记录 label/别名/公式的**同一包含比对**，且受
+# "X外/除X外"排除语境约束，不会凭空放行。
+_COVERAGE_PHRASE_RE = re.compile(
+    r"(?P<phrase>[\u4e00-\u9fff（）()、]{2,40}?"
+    r"(?:对[\u4e00-\u9fff（）()]{2,24}?)?的?(?:覆盖倍数|覆盖率|覆盖比例|覆盖|占比|比例|比重|比率))"
+)
+
+
+def _coverage_phrase_labels(clause: str) -> set[str]:
+    """从数字所在分句取覆盖/占比结构的谓词短语（含去"的"变体）。"""
+    labels: set[str] = set()
+    text = str(clause or "")
+    for match in _COVERAGE_PHRASE_RE.finditer(text):
+        phrase = match.group("phrase").strip().lstrip("、")
+        # 年份尾巴（"2025年偿债覆盖倍数"——数字不在字符类里，短语会以"年"起头）：
+        # 只在短语左侧紧邻数字时剥掉"年/年末"，避免误伤"年化收益率"这类真以"年"开头的名字。
+        start = match.start("phrase")
+        if start > 0 and text[start - 1].isdigit() and phrase.startswith("年"):
+            phrase = re.sub(r"^年(?:末|底)?", "", phrase)
+        if len(phrase) < 4:
+            continue
+        labels.add(phrase)
+        if "的" in phrase:
+            labels.add(phrase.replace("的", ""))
     return labels
 
 
@@ -1559,6 +1817,10 @@ def _sentence_scope(wide_prefix: str) -> str:
 
 
 _SERIES_TRIGGER_RE = re.compile(r"(?:分别|依次|各|均)为")
+# 枚举头触发词（`written_labels` 后位值继承用）：比 `_SERIES_TRIGGER_RE` 更宽，含
+# "占比为/比例为/比重为"（不要求前置"分别"），2026-10-16 北投 operations #13 实测。
+_SERIES_HEAD_TRIGGER_RE = re.compile(r"(?:分别|依次|均|各|占比|比例|比重)\s*为")
+
 # 后缀必须**长词在前**（"年末/年度" 先于 "年"）：否则 "2023年末" 只吃到 "年"、
 # 残留的 "末" 会让年份之间的连接符检查失败（实测踩过）。
 _SERIES_YEAR_RE = re.compile(r"(20\d{2})(?:年度|年末|年底|年)?")
@@ -1566,12 +1828,21 @@ _SERIES_YEAR_RE = re.compile(r"(20\d{2})(?:年度|年末|年底|年)?")
 _SERIES_CONNECTOR_RE = re.compile(r"(?:以及|[、，,]|和|及|与|至|到|~|～|—|–|―|-|\s)+")
 _SERIES_RANGE_SEP_RE = re.compile(r"[至到~～—–―-]")
 # 触发词后、数字前的"值枚举段"白名单：数字 / 小数与千分位 / 百分号 / 单位 / 连接符。
-_SERIES_VALUE_SEPARATOR_RE = re.compile(r"(?:以及|[、，,]|和|及|与)")
+_SERIES_VALUE_SEPARATOR_RE = re.compile(r"(?:以及|、|和|及|与|(?<!\d)[，,]|[，,](?!\d))")
+# 值分隔符计数必须**排除千分位逗号**：'204,709.77万元、307,496.94万元' 里的 ASCII 逗号若被
+# 当成分隔符，"第 k 个值"的序号整体 +1——中邮 debt 实测：第二个值被绑到 2025（应为 2024），
+# 与记录造出假 period_mismatch。逗号**两侧同时**是数字时视为千分位，不计入分隔符。
 _SERIES_VALUE_NOISE_RE = re.compile(
     r"(?:[0-9０-９]|\.|,|，|%|％|‰|万元|亿元|个百分点|个月|季度|年末|年度|元|万|亿|倍|月|年|季"
     r"|天|日|次|股|笔|项|家|人|以及|、|和|及|与|-|−|\s)+"
 )
-_SERIES_TAIL_RE = re.compile(r"[\s\u3000]*(?:年度|年末|年底|年)?[\s\u3000]*")
+_SERIES_TAIL_RE = re.compile(
+    # 年份序列与触发词之间允许**科目名尾缀**（"2023年至2025年各年末长期借款分别为…"）——
+    # 科目名不含数字（含数字即比较基准等干扰文本，如"较2022年"，继续不绑定）。
+    # 2026-10-15 北投 debt #3 实测：TAIL 只认"年末/年"时，"各年末长期借款"使序列
+    # 判定直接落空，首值退化取到窗口最后年份（2025）造出 period_mismatch。
+    r"[\s\u3000]*(?:各)?(?:年度|年末|年底|年)?[\s\u3000]*[\u4e00-\u9fffA-Za-z（）()]{0,24}[\s\u3000]*"
+)
 
 
 def _series_years(before: str) -> list[str]:
@@ -1635,18 +1906,44 @@ def _record_matches_mention(item: dict, record: dict, *, any_unit: bool = False)
     非裸数字要求单位也一致；裸数字（``any_unit``）忽略单位，改由调用方核验单位唯一性。
     记录侧精度取**记录原始 ``value`` 字符串的小数位**（第三点细化方案 §二.2：
     "展示精度由记录的原始精度…明确给出"），而非换算后的位数。
+
+    **单位未注明的披露记录**（来自引文）额外按金额量纲（万元/亿元/元）折算后比对：
+    引文的单位常印在页眉/表头、不在引文窗口内（⑥ 空格分列表格行实测），而正文会带
+    单位书写——"公司信用类债券158.66亿元" 与记录 "信用类债券 158.66（单位空）" 本
+    应同源，只按记录空单位比较会漏掉这条候选、转而绑到同值的别表记录并造出假
+    label_mismatch（2026-10-16 北投 debt 158.66 亿实测）。只扩 **disclosure** 记录
+    （与 ``evidence_number_keys`` 同口径）；fact/metric 的裸数字不在此列（"配置/指标
+    JSON 裸数字不得为正文数值背书"）。
     """
     record_value, record_unit, _ = _canonical_measurement(
         record.get("value"), str(record.get("unit") or "")
     )
-    if not any_unit and record_unit != item["normalized_unit"]:
+    # 记录单位**未注明**（""）时不做单位否决：值相同即进入候选，交由各维度判定
+    # （"宁可漏报也不误报"）。规则结果值等记录常拿不到单位线索（"关联方异常金额"
+    # ——华辰 governance 1,200 实测：unit="" 的 rule 记录被排除后，正文正确写
+    # "关联方异常金额"反而对同值 fact 记录判 label_mismatch）。
+    if not any_unit and record_unit and record_unit != item["normalized_unit"]:
         return False
     try:
         left = Decimal(str(item["normalized_value"]))
-        right = Decimal(str(record_value))
     except (InvalidOperation, ValueError):
         return False
     record_places = _decimal_places(record.get("value"))
+    if not any_unit and not record_unit and str(record.get("record_type") or "") == "disclosure":
+        for money_unit in MONEY_UNIT_FACTORS:
+            scaled_value, scaled_unit, _ = _canonical_measurement(str(record.get("value")), money_unit)
+            if scaled_unit != str(item.get("normalized_unit") or ""):
+                continue
+            try:
+                scaled = Decimal(str(scaled_value))
+            except (InvalidOperation, ValueError):
+                continue
+            if _values_match(left, int(item.get("precision") or 0), scaled, record_places):
+                return True
+    try:
+        right = Decimal(str(record_value))
+    except (InvalidOperation, ValueError):
+        return False
     return _values_match(left, int(item.get("precision") or 0), right, record_places)
 
 
@@ -1825,6 +2122,28 @@ def _verify_comparison_bound(item: dict, prefix: str, written_labels: set[str],
     return False, f"所写科目的记录并非全部满足「{operator}{item['raw']}」"
 
 
+def _label_excluded_by_wai(text: str, label: str) -> bool:
+    """``text`` 中 ``label`` 的**全部出现**都紧跟"外/以外/之外"（排除语境）时返回 True。
+
+    "X外/除X外"里 X 是**被排除**的对象，不是所写科目。中邮 debt 实测：
+    "银行借款与公司债券外其他公司信用类债券余额之和…占有息负债余额的比例为14.00%"
+    ——被排除的"公司债券"当科目后，与记录行"债务融资工具"造出假 label_mismatch。
+    没有任何出现 → False（调用方按原有语义处理）。
+    """
+    found = False
+    start = 0
+    while True:
+        position = text.find(label, start)
+        if position < 0:
+            break
+        found = True
+        following = text[position + len(label): position + len(label) + 2]
+        if not following.startswith(("外", "以外", "之外")):
+            return False
+        start = position + len(label)
+    return found
+
+
 def _record_binding(
     mentions: list[dict], records: list[dict], registry: dict[str, str] | None,
     content: str, allowed_entries: set[tuple[str, str]],
@@ -1848,6 +2167,9 @@ def _record_binding(
     # 让科目正确的数字被判 label_mismatch（北投 debt 实测）。
     # 表格行的「其中：」前缀不是科目的一部分：正文写"债券融资中，公司债券206,400万元"
     # 时窗口里只有"公司债券"，若词表键仍是"其中：公司债券"就配不上（北投 debt 实测）。
+    # 期间桶标签（"1年以内/1年以上"）**保留在词表**——"一年以上到期的有息债务占…94.85%"
+    # 里桶就是科目；只有确认"候选记录都不是桶标签"时才在候选标签里剪掉它
+    # （见下方 `_PERIOD_BUCKET_LABEL_RE` 的候选感知剪枝）。
     vocabulary: set[str] = set()
     for record in records:
         label = _LABEL_PREFIX_RE.sub("", str(record.get("label") or "").strip())
@@ -1932,10 +2254,80 @@ def _record_binding(
         label_clause = _normalize_label_numerals(label_clause)
         # 本句范围（自上一句界起、到数字为止）：并列期间顺序绑定用。
         sentence_scope = _sentence_scope(str(item.get("wide_prefix") or ""))
+        # "X外/除X外"里 X 是**被排除**的对象：该标签的所有出现都处于排除语境时不作候选
+        # （中邮 debt 14.00% 实测——被排除的"公司债券"当科目造出假 label_mismatch）。
+        label_window = label_clause[-SUBJECT_LABEL_WINDOW:]
+        # 主体噪声词去噪后的窗口（与 `_labels_compatible` 同口径）：记录标签带"公司"、
+        # 正文省略时，窗口里只有去噪形（"占主营业务收入的比例"），原样包含判定会漏掉
+        # 该标签、让科目正确的比率拿不到候选（2026-10-16 中邮 operations 31.36% 实测）。
+        stripped_window = _strip_entity_noise(label_window)
         written_labels = {
             label for label in vocabulary
-            if label and _normalize_label_numerals(label) in label_clause[-SUBJECT_BINDING_WINDOW:]
+            if label and (
+                _normalize_label_numerals(label) in label_window
+                or (
+                    _strip_entity_noise(_normalize_label_numerals(label))
+                    and _strip_entity_noise(_normalize_label_numerals(label)) in stripped_window
+                )
+            )
+            and not _label_excluded_by_wai(label_window, _normalize_label_numerals(label))
         }
+        # **期间桶标签的候选感知剪枝**（2026-10-16 北投 debt 实测）：桶标签保留在词表
+        # （"一年以上到期的有息债务占…94.85%"里桶就是科目，必须能配）；但当**候选记录
+        # 既不是桶标签、也不是合计/小计行**时（"银行贷款1年以内131.15亿元、1年以上
+        # 3,287.00亿元"——桶只是维度、真正科目是"银行贷款"），桶名只会污染所写科目集合、
+        # 把数值正确的句子判成 label_mismatch。此时从候选标签里剪掉桶名。
+        # 候选是**合计行**时不剪：那时"写子项（1年以内）无法与总行直接比对"仍走
+        # 既有"归属不明→待人工"口径（回放样本 dc3ad741 的 385.63 实测）。
+        if written_labels and not any(
+            _PERIOD_BUCKET_LABEL_RE.match(str(record.get("label") or "").strip())
+            or str(record.get("label") or "").strip() in GENERIC_TOTAL_LABELS
+            for record in candidates
+        ):
+            written_labels = {
+                label for label in written_labels
+                if not _PERIOD_BUCKET_LABEL_RE.match(_normalize_label_numerals(label))
+            }
+        # 系列句**后位值**的枚举头继承：label_window 左侧被前一个枚举值占据时
+        # （"…分别为5.91%、6.00%和6.33%"的 6.00%/6.33%，前文只剩"5.91%、"），
+        # 科目应继承**本句（分句）内**最近一个"分别"之前的枚举头短语（"占资产总额的
+        # 比例"）——纯窗口放宽追不上枚举长度，改为结构继承（2026-10-15 北投
+        # governance #5 实测：5.91% 绑定成功、6.00%/6.33% 被切挂）。
+        # - 文本源用 ``wide_prefix`` 的**末分句**（160 字宽前缀里的最后一段，完整且
+        #   不跨"，"）：`context` 的 20 字截断版会把枚举头首词也切掉（"占资…"）。
+        # - 只在末分句内含"分别"时继承：跨分句的 rfind 会抓到无关系列的"分别"（回放
+        #   样本"对应营业毛利率为-45.98%、-83.96%和-59.54%"——本句无"分别"，跨句抓到
+        #   上一段"营业成本分别为…"的枚举头，制造 label_mismatch 硬冲突——stage1o/p
+        #   回放 14 处差异的根因）。
+        if re.search(r"(?:[、，,]|和|及)\s*$", label_clause):
+            wide_parts = _CLAUSE_SPLIT_RE.split(str(item.get("wide_prefix") or ""))
+            clause_full = wide_parts[-1] if wide_parts else label_clause
+            # 枚举触发词：既有"分别"，2026-10-16 复验扩展"占比为/比例为/比重为/依次为/均为"
+            # （"占经营活动现金流出的比例为10.11%、19.26%和14.76%"——后位值 19.26%/14.76%
+            # 的 label 窗口被前值占据，须继承"占经营活动现金流出"这一枚举头；北投
+            # operations #13 实测 label_mismatch）。仍限**末分句**内、取**最右**触发词。
+            head_match = None
+            for found in _SERIES_HEAD_TRIGGER_RE.finditer(clause_full):
+                head_match = found
+            if head_match is not None:
+                head_pos = head_match.start()
+                head_text = _normalize_label_numerals(clause_full[max(0, head_pos - 32):head_pos])
+                # 主体噪声词去噪后的头文本（与 `_labels_compatible` 同口径）：后位值的
+                # 枚举头里正文省略"公司"时，记录标签仍带"公司"（"占公司主营业务收入的
+                # 比例"），原样包含判定漏掉该标签（2026-10-16 中邮 operations 29.31%/
+                # 35.35% 实测）。
+                stripped_head = _strip_entity_noise(head_text)
+                written_labels.update(
+                    label for label in vocabulary
+                    if label and (
+                        _normalize_label_numerals(label) in head_text
+                        or (
+                            _strip_entity_noise(_normalize_label_numerals(label))
+                            and _strip_entity_noise(_normalize_label_numerals(label)) in stripped_head
+                        )
+                    )
+                    and not _label_excluded_by_wai(head_text, _normalize_label_numerals(label))
+                )
         # 比率陈述：数字紧跟在**分母**后面（"存货占资产总额比重分别为8.32%"），窗口只扫到
         # "资产总额"，而记录 label 记的是分子"存货"。此时把"占/在"之前的分子名并进候选，
         # 让科目正确的比率能绑定到自己的记录（北投财务 3.8%/8.32% 实测误退）。
@@ -1955,8 +2347,22 @@ def _record_binding(
             preceding = str(item.get("wide_prefix") or "")
             for numerator in _ratio_numerator_labels(wide_clause, preceding):
                 for label in vocabulary:
-                    if _labels_compatible(numerator, label):
+                    # 分子里处于"X外/除X外"排除语境的标签同样不作候选（中邮 debt 14.00%
+                    # 实测：分子"银行借款与公司债券外其他公司信用类债券余额之和"里的
+                    # "公司债券"被"外"排除，不是所写科目）。
+                    if _labels_compatible(numerator, label) and not _label_excluded_by_wai(numerator, label):
                         written_labels.add(label)
+        # 覆盖/占比结构的**谓词短语**（2026-10-16 第三轮复核，见 `_coverage_phrase_labels`）：
+        # 只对比率型数值（%/倍）生效。**只放宽、不收紧**——短语参与"与记录 label/别名/
+        # 公式的包含比对"（`match_labels`），但不计入"是否有正文所写科目"的闸门
+        # （`written_labels`）：短语配不上任何记录时不得反过来制造冲突（§㉓d 负例：
+        # "占有息负债余额的比例为14.00%"的短语没有对应记录，仍应按无科目处理、不报冲突）。
+        match_labels = written_labels
+        if str(item.get("normalized_unit") or "") in {"%", "倍"} and label_clause:
+            match_labels = written_labels | {
+                phrase for phrase in _coverage_phrase_labels(label_clause)
+                if not _label_excluded_by_wai(label_clause, phrase)
+            }
         # 期间绑定：先试**并列期间顺序绑定**（"2023年至2025年分别为A、B、C" 按序号对年），
         # 不适用时退回既有的单年窗口逻辑。
         written_year = _ordered_series_year(sentence_scope) or _written_period(prefix)
@@ -1978,14 +2384,21 @@ def _record_binding(
             def _label_compatible(record: dict) -> bool:
                 if any(
                     _labels_compatible(label, str(record.get("label") or ""))
-                    for label in written_labels
+                    for label in match_labels
                 ):
                     return True
                 # 阈值记录的 label 是英文 slug（"杠杆与流动性 current_ratio"），中文科目名
                 # 存在 ``aliases`` 里：正文写的中文科目名与之比对（见 evidence_records
                 # ``_threshold_aliases``）。
                 for alias in record.get("aliases") or []:
-                    if any(_labels_compatible(label, str(alias)) for label in written_labels):
+                    if any(_labels_compatible(label, str(alias)) for label in match_labels):
+                        return True
+                # 指标记录的**叙述别名**（随记录冻结为 ``label_aliases``）：正文把指标写成
+                # 说明性短语（"可用资金对未来12个月到期债务的覆盖"）时，规范名（"现金短债覆盖"）
+                # 配不上会造假 label_mismatch。与 ``aliases`` 同一处理——别名是记录自带的归属
+                # 声明，命中即视为同一归属（华辰 financial #28 的 0.29 倍实测）。
+                for alias in record.get("label_aliases") or []:
+                    if any(_labels_compatible(label, str(alias)) for label in match_labels):
                         return True
                 # 规则记录的**公式**同样声明了输入科目（"经营现金流/利息支出"）：正文写
                 # "经营现金流对利息支出的覆盖倍数为1.71倍"时，写的正是公式里的输入项。
@@ -1995,7 +2408,7 @@ def _record_binding(
                     for part in re.split(r"[/÷+\-×*，,、；;（）()\s]+", formula):
                         part = part.strip()
                         if part and any(
-                            _labels_compatible(label, part) for label in written_labels
+                            _labels_compatible(label, part) for label in match_labels
                         ):
                             return True
                 # 指标/规则记录沿**计算链路**认账：正文写的是输入事实的科目名
@@ -2012,7 +2425,7 @@ def _record_binding(
                         continue
                     if any(
                         _labels_compatible(label, str(other.get("label") or ""))
-                        for label in written_labels
+                        for label in match_labels
                     ):
                         return True
                 return False

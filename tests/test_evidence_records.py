@@ -585,3 +585,323 @@ def test_support_binding_turns_direct_with_disclosure_records():
     other = "募集说明书披露2024年末存货较2023年末增加999.99亿元。"
     assert _numeric_binding_status(
         "", records, other, _number_mentions(other), "numeric_fact") == "unsupported"
+
+
+def test_rule_value_records_carry_chinese_ratio_units():
+    """规则结果值的中文科目名要能恢复单位（2026-10-15 回退章定向复核）。
+
+    原实现只认英文键（pct/ratio）→ "到期集中度" 等单位线索为空 → 记录 unit=""，
+    正文"66.1%"永远匹配不上"66.129…"（华辰 debt/governance 回退的判定侧根因）。
+    """
+    from backend.app.chapter_guard import _allowed_number_index, _mention_allowed
+    from backend.app.evidence_records import _rule_records, number_unit_hint
+    from backend.app.p0 import _number_mentions
+
+    # 中文比率类词表（本次修复）+ 不误伤裸"率"（周转率=次、资产负债率=% 同一后缀）。
+    assert number_unit_hint("到期集中度") == "%"
+    assert number_unit_hint("其他应收/净资产") == "%"
+    assert number_unit_hint("逾期应收占比") == "%"
+    assert number_unit_hint("due_12m_pct") == "%"
+    assert number_unit_hint("周转率") == ""
+
+    check = {
+        "rule_key": "debt_maturity", "title": "一年内到期债务集中度", "status": "warning",
+        "result_value": 66.12903225806451,
+        "values": [{"label": "到期集中度", "value": 66.12903225806451}],
+        "thresholds": {"due_12m_pct": 50.0}, "formula": "", "source_ids": ["source-1"],
+    }
+    records = _rule_records([check])
+    by_label = {item["label"]: item for item in records}
+    assert by_label["到期集中度"]["unit"] == "%"
+    index = _allowed_number_index(evidence_number_keys(supportable_records(records)))
+    mentions = _number_mentions("一年内到期债务占有息负债的比例为66.1%，超过50%的阈值，构成到期集中度提示。")
+    assert mentions and all(_mention_allowed(item, index) for item in mentions)
+
+
+def test_disclosure_records_extract_series_and_colon_forms():
+    """系列句（"分别为…"）与冒号式单值（2026-10-15 回退章复核新增）。
+
+    实测锚点：北投 cashflow 投资现金流系列、中邮 debt 有息负债系列、华辰 guarantee
+    反担保折后价值——均为"引文有、记录无"的记录覆盖缺口。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    evidence = [{
+        "quote": "最近三年，发行人投资活动现金流净额分别为-497.09亿元、-444.38亿元和-331.00亿元。"
+                 "反担保折后价值：16,000万元。",
+        "source_id": "s-1",
+    }]
+    records = build_evidence_records(evidence=evidence)
+    series = [item for item in records if item["label"] == "投资活动现金流净额"]
+    # 值经 Decimal 归一（尾零去除："-331.00" → "-331"）；数值等价性由匹配层保证。
+    assert {item["value"] for item in series} == {"-497.09", "-444.38", "-331"}
+    assert all(item["unit"] == "亿元" for item in series)
+    colon = [item for item in records if "反担保折后价值" in item["label"]]
+    assert colon and colon[0]["value"] == "16000" and colon[0]["unit"] == "万元"
+
+
+def test_disclosure_series_requires_label_and_at_least_two_values():
+    """反例：无前缀科目名 / 单值 / 冒号后非数值——不得凭空造记录。"""
+    from backend.app.evidence_records import build_evidence_records
+
+    assert not [r for r in build_evidence_records(
+        evidence=[{"quote": "分别为10亿元。", "source_id": "s-1"}]) if r.get("unit") == "亿元"]
+    assert not [r for r in build_evidence_records(
+        evidence=[{"quote": "注：材料不足，详见后文说明。", "source_id": "s-1"}])]
+
+
+def test_disclosure_series_accepts_omitted_wei():
+    """"分别X、Y、Z"（省略"为"）也是系列句（2026-10-15 北投 operations #7 实测引文）。"""
+    from backend.app.evidence_records import build_evidence_records
+
+    records = build_evidence_records(evidence=[{
+        "quote": "最近三年，发行人经营性活动产生的现金流出分别506.61亿元、479.38亿元和375.19亿元。",
+        "source_id": "s-1",
+    }])
+    hit = [item for item in records if item["label"] == "经营性活动产生的现金流出"]
+    assert {item["value"] for item in hit} == {"506.61", "479.38", "375.19"}
+
+
+def test_disclosure_series_accepts_ratio_trigger():
+    """"…的比例为A、B和C"（触发词"比例为"而非"分别为"）也是系列句。
+
+    正例：北投 operations #13 第二段（"占经营活动现金流出的比例为10.11%、19.26%和14.76%"）。
+    负例：仅有"为"、无数值枚举，或触发词后是普通叙述——不得登记。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    records = build_evidence_records(evidence=[{
+        "quote": "最近三年，发行人支付其他与经营活动有关的现金分别为51.22亿元、92.32亿元及"
+                 "55.36亿元，占经营活动现金流出的比例为10.11%、19.26%和14.76%。",
+        "source_id": "s-1",
+    }])
+    pct = [item for item in records if item["value"] in {"10.11", "19.26", "14.76"}]
+    assert len(pct) == 3
+    assert all(item["unit"] == "%" for item in pct)
+    assert all("经营活动现金流出" in item["label"] for item in pct)
+    # 负例：无枚举触发词不得登记（"净利润为5.8%"是单值，交命名值句处理）。
+    only = build_evidence_records(evidence=[{
+        "quote": "报告期内公司净利润为5.80%，较上年有所下降。", "source_id": "s-1"}])
+    assert not [item for item in only if item["value"] == "5.80" and item["unit"] == "%"]
+
+
+def test_disclosure_space_separated_table_rows():
+    """⑥ 空格分列表格行（"科目 值1 值2 值3"，无 Markdown 管道）也抽成记录。
+
+    正例：北投 operations 现金流量表（万元系列）；单位缺省置空、状态 needs_review。
+    负例：单行"标签+数字"、或纯叙述句（数字带单位文本）——不得当表格。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = (
+        "经营活动现金流出小计 3,751,868.91 4,793,811.23 5,066,119.59\n"
+        "经营活动产生的现金流量净额 1,749,719.14 903,091.39 433,985.81\n"
+        "筹资活动产生的现金流量净额 1,929,972.88 3,600,228.38 5,605,248.30\n"
+        "最近三年，公司经营性活动产生的现金流入分别为550.01 亿元、569.69 亿元和"
+        "550.16 亿元。"
+    )
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    net = [item for item in records if item["label"] == "经营活动产生的现金流量净额"]
+    assert {item["value"] for item in net} == {"1749719.14", "903091.39", "433985.81"}
+    assert all(item["unit"] == "" and item["status"] == "needs_review" for item in net)
+    # 负例：只有一行"标签+数字串"不成表；纯叙述句（数字带"亿元"文本）不被当表格。
+    single = build_evidence_records(evidence=[{
+        "quote": "经营活动产生的现金流量净额 1,749,719.14 903,091.39 433,985.81",
+        "source_id": "s-1"}])
+    assert not [item for item in single if item["label"].startswith("经营活动产生的现金流量净额")]
+    prose = build_evidence_records(evidence=[{
+        "quote": "最近三年经营性活动产生的现金流入分别为550.01 亿元、569.69 亿元和550.16 亿元。",
+        "source_id": "s-1"}])
+    assert not [item for item in prose if item["status"] == "needs_review"]
+
+
+def test_blank_unit_disclosure_registers_money_and_percent_keys():
+    """空格表格记录（单位缺省）的同值要能为正文的**带单位**数字背书。
+
+    `_mention_allowed` 按单位分桶，空白单位记录若不登记标准单位，"引文里有记录"却仍判
+    missing_record（北投 operations #14 实测）。仅对 **disclosure**（来自引文）补登记；
+    fact/metric 的裸数字不在此列（"配置/指标 JSON 裸数字不得为正文数值背书"）。
+    """
+    from backend.app.evidence_records import _record, evidence_number_keys
+
+    disclosure = _record(
+        record_id="disclosure:x", record_type="disclosure", value="1749719.14",
+        unit="", label="经营活动产生的现金流量净额", status="needs_review")
+    fact = _record(
+        record_id="fact:y", record_type="fact", value="1749719.14",
+        unit="", label="某事实", status="verified")
+    d_keys = evidence_number_keys([disclosure])
+    f_keys = evidence_number_keys([fact])
+    assert ("1749719.14", "万元") in d_keys
+    assert ("1749719.14", "%") in d_keys
+    assert ("1749719.14", "万元") not in f_keys
+
+
+
+def test_year_header_accepts_nianmo_and_section_labels():
+    """表头年份列容"年末/年度/年底"；表内分节标签行（"资产：""负债："）跳过而非中断。
+
+    原 `re.fullmatch(r"(20\\d{2})\\s*年?")` 不认"2025 年末"→整张表 0 记录；分节标签行
+    使 `"|" not in row` 提前 break→同样 0 记录（北投 debt #21、华辰 financial #28 实测）。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = (
+        "合并资产负债表；单位：万元；项目 | 2025 年末 | 2024 年末 | 2023 年末\n"
+        "资产：\n"
+        "货币资金 | 6,820 | 6,206 | 5,592\n"
+        "其中：受限资金 | 818 | 745 | 671\n"
+        "负债：\n"
+        "短期借款 | 11,160 | 10,156 | 9,151\n"
+    )
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    money = [item for item in records if item["label"] == "货币资金"]
+    assert {item["value"]: item["period"] for item in money} == {
+        "6820": "2025", "6206": "2024", "5592": "2023"}
+    assert all(item["status"] == "verified" for item in money)
+    # 分节标签行之后的行仍被登记（"短期借款"在"负债："之后）。
+    assert [item for item in records if item["label"] == "短期借款"]
+    # 负例：含数字的"列"不跳（数据行）——非管道长句仍 break。
+    broken = (
+        "表头 | 2025 年末 | 2024 年末 | 2023 年末\n"
+        "合计 1,234 5,678 9,012\n"
+    )
+    assert not build_evidence_records(evidence=[{"quote": broken, "source_id": "s-1"}])
+
+
+def test_named_value_accepts_zhihe_connector():
+    """③ 命名值句的"名词 + 之和/合计 + 为"形态（"…债券余额之和为20.12亿元"）。
+
+    原连接词集只有 为/的/达/占，漏"之和为"（中邮 debt #4 的 20.12亿元 实测）。
+    负例：无科目名结尾词的裸值句不登记。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = ("银行借款与公司债券外其他公司信用类债券余额之和为20.12亿元，"
+             "占有息负债余额的比例为14.00%。")
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    hit = [item for item in records if item["value"] == "20.12" and item["unit"] == "亿元"]
+    assert hit, records
+    assert "余额" in hit[0]["label"]
+    # 负例：连接词之后没有科目名结尾词（"为20.12亿元"裸值）不得登记。
+    bare = build_evidence_records(evidence=[{
+        "quote": "该等款项之和为20.12亿元。", "source_id": "s-1"}])
+    assert not [item for item in bare if item["value"] == "20.12"]
+
+
+def test_actual_backref_registers_reported_value():
+    """⑦ "年份+实际+值" 回指式单值：科目从同引文唯一命名值句回指，状态 needs_review。
+
+    样本：华辰 operations #15（预测9,000万元 / 2025年实际6,500万元 并列对比）。
+    负例：同引文有**多个**不同科目的命名值句时不启用（回指对象不唯一）。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = ("2026—2029年（债券存续期）预测经营活动现金流量净额9,000万元（属前瞻性信息）；"
+             "该口径与财务表所载2025年实际6,500万元不同期间、不同口径。")
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    hit = [item for item in records if item["value"] == "6500"]
+    assert hit and hit[0]["period"] == "2025" and hit[0]["status"] == "needs_review", records
+    # 负例：两个不同科目的命名值句 → 回指对象不唯一 → 不登记 6,500。
+    ambiguous = ("预测经营活动现金流量净额9,000万元，预测净利润1,200万元；"
+                 "2025年实际6,500万元。")
+    recs2 = build_evidence_records(evidence=[{"quote": ambiguous, "source_id": "s-1"}])
+    assert not [item for item in recs2 if item["value"] == "6500"]
+
+
+def test_metric_label_aliases_frozen_and_bind():
+    """指标记录冻结叙述别名（`label_aliases`），供"说明性短语"绑定。
+
+    样本：华辰 financial #28 的 0.29倍（"可用资金对未来12个月到期债务的覆盖" vs 规范名
+    "现金短债覆盖"）。别名须 ≤ SUBJECT_LABEL_WINDOW（否则永远配不上）。
+    """
+    from backend.app.chapter_guard import SUBJECT_LABEL_WINDOW
+    from backend.app.evidence_records import _metric_records
+    from backend.app.metrics import METRIC_LABEL_ALIASES
+
+    recs = _metric_records([{
+        "metric_key": "cash_short_debt_ratio", "name": "现金短债覆盖", "value": "0.2928",
+        "unit": "倍", "period": "2025", "formula": "(货币资金-受限资金)/一年内到期债务",
+        "input_fact_ids": ["f1", "f2", "f3"], "source_ids": ["s-1"], "status": "ok"}])
+    assert recs and recs[0]["label_aliases"] == list(
+        METRIC_LABEL_ALIASES["cash_short_debt_ratio"])
+    # 所有登记的别名必须在窗口内可命中。
+    for key, aliases in METRIC_LABEL_ALIASES.items():
+        for alias in aliases:
+            assert len(alias) <= SUBJECT_LABEL_WINDOW, (key, alias)
+
+
+def test_disclosure_comparison_back_value_registers_after_value():
+    """⑧ "由 A 提高为 B" 比较句的**后值**抽成记录（2026-10-16 中邮 debt #26 实测）。
+
+    正例：后值 67.30% 落记录（needs_review：科目就近推断），前值 64.45% 由既有形态
+    登记——整句两个数字都能绑定。
+    负例：无比较形态不抽；跨单位（"64.45% → 2.85 个百分点"不是同口径比较）不抽。
+    """
+    from backend.app.evidence_records import _lookup_flat, _quote_comparison_back_facts, build_evidence_records
+
+    quote = ("本期债券发行完成且上述募集资金运用计划予以执行后，发行人合并报表口径的"
+             "资产负债率水平由原先的64.45%提高为67.30%。")
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    # 记录值经 `_number_text` 归一（"67.30" → "67.3"）。
+    after = [item for item in records if item["value"] == "67.3" and item["unit"] == "%"]
+    assert after, "比较句后值未落记录"
+    assert "资产负债率" in after[0]["label"]
+    assert after[0]["status"] == "needs_review"
+    # 负例①：无比较形态。
+    assert _quote_comparison_back_facts(_lookup_flat("资产负债率为64.45%。")) == []
+    # 负例②：跨单位比较不登记（百分点不是 %，不视为同口径前值/后值）。
+    cross = build_evidence_records(evidence=[{
+        "quote": "资产负债率由64.45%上升为2.85个百分点。", "source_id": "s-1"}])
+    assert not [item for item in cross if item["value"] == "2.85"]
+
+
+def test_disclosure_semicolon_series_registers_items():
+    """⑨ 分号分隔的"科目值单位；…"系列抽成记录（2026-10-16 华辰 debt #10 实测）。
+
+    正例：货币资金6,820万元；受限资金818万元；… —— 各落一条 needs_review。
+    负例：单项不构成系列；科目头以披露名词（营业收入…）结尾时交③处理、不重复登记。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = "货币资金6,820万元；受限资金818万元；应收账款12,000万元；其他应收款2,880万元；"
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    picked = {item["label"]: item for item in records if item["status"] == "needs_review"}
+    assert picked.get("货币资金", {}).get("value") == "6820"
+    assert picked.get("受限资金", {}).get("value") == "818"
+    # 负例①：单项不构成系列（末项无分号同样不登记）。
+    single = build_evidence_records(evidence=[{"quote": "货币资金6,820万元；", "source_id": "s-1"}])
+    assert not [item for item in single if item["label"] == "货币资金"]
+    # 负例②：披露名词结尾的科目由 ③ 负责（verified），⑨ 不重复登记 needs_review。
+    named = build_evidence_records(evidence=[{
+        "quote": "营业收入48,000万元；净利润2,800万元；", "source_id": "s-1"}])
+    assert not [item for item in named if item["label"] == "营业收入" and item["status"] == "needs_review"]
+
+
+def test_disclosure_space_row_accepts_percent_marked_labels():
+    """⑥ 空格行标签容「（%）」等百分比记号（2026-10-16 中邮 financial 实测）。
+
+    "资产负债率（%） 44.35 51.33 55.21" —— 标签尾部带"（%）"时原字符类不含 %，
+    整行不匹配、整张母公司财务表 0 记录（-118.17 亿/55.21% 等数字全判无支持）。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = (
+        "净资产收益率（%） 10.12 5.15 -6.55\n"
+        "资产负债率（%） 44.35 51.33 55.21\n"
+    )
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    rates = [item for item in records if item["label"] == "资产负债率"]
+    assert {item["value"] for item in rates} >= {"44.35", "51.33", "55.21"}
+    assert all(item["status"] == "needs_review" for item in rates)
+
+
+def test_disclosure_named_fact_accepts_zhanbi_single_value():
+    """③ 名词表补"占比"：单值占比句"…合计占比为81.61%"落记录（2026-10-16 中邮 financial 实测）。"""
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = "2023－2025年末公司所有者权益呈增长趋势，实收资本和资本公积合计占比为81.61%，权益稳定性很好。"
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    ratio = [item for item in records if item["value"] == "81.61" and item["unit"] == "%"]
+    assert ratio, "单值占比句未落记录"
+    assert "占比" in ratio[0]["label"]

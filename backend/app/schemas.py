@@ -279,6 +279,11 @@ class ReportPromptUpdate(BaseModel):
     # structured configuration, which the server compiles with fixed controls.
     prompt: Optional[str] = Field(default=None, min_length=1, max_length=30000)
     config: Optional[PromptEditableConfig] = None
+    # 乐观并发基准（`PLAN_new_p0_p1.md` P0-1 / `PLAN.md` §四.2）：客户端提交"它读到的
+    # 配置哈希 + 编译契约版本"，任一与库中现状不一致 → 409，客户端重新读取后再保存。
+    # 不传则跳过相应检查（兼容旧客户端）。
+    expected_config_sha256: Optional[str] = Field(default=None, max_length=128)
+    expected_prompt_contract_version: Optional[str] = Field(default=None, max_length=64)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -293,6 +298,28 @@ class ReportPromptPreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     config: PromptEditableConfig
+
+
+class ReportOutlineUpdate(BaseModel):
+    """报告目录保存请求体（docs/report-outline-spec.md §四）。
+
+    ``outline`` 用宽松 dict —— 目录结构由服务端 ``validate_outline`` 做业务校验并给出
+    中文原因（章节/小节 ID 唯一性、template_key 对应关系、标题与条数上限等），比在
+    Pydantic 里逐字段声明更贴近 spec 且消息更明确。并发基准两值可选，不传则跳过并发检查。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    outline: dict
+    expected_outline_version: Optional[str] = Field(default=None, max_length=128)
+    expected_outline_sha256: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("outline")
+    @classmethod
+    def outline_is_object(cls, value: dict) -> dict:
+        if not isinstance(value, dict):
+            raise ValueError("outline 必须是目录 JSON 对象")
+        return value
 
 
 class ReportTableRefresh(BaseModel):
@@ -313,9 +340,22 @@ class RunCreate(BaseModel):
     policy_profile: str = Field(default="", max_length=50)
 
 
+class LlmSubsection(BaseModel):
+    """小节响应条目（P1-2）：有小节配置的章节按小节返回正文与引用。"""
+
+    subsection_id: str
+    content: str = ""
+    citation_ids: list[str] = Field(default_factory=list)
+
+
 class LlmSection(BaseModel):
-    content: str
-    citation_ids: list[str]
+    # ``content``/``citation_ids`` 放宽为带默认值（P1-2）：有小节配置时模型只返回
+    # ``subsections``。空值/缺失的强约束由 ``llm._finalize_report_section`` 承接
+    # （缺失小节 → report_repair_required 走唯一一次结构修复），避免 Pydantic 层
+    # 把合法的小节响应直接判成 schema_error。
+    content: str = ""
+    citation_ids: list[str] = Field(default_factory=list)
+    subsections: list[LlmSubsection] = Field(default_factory=list)
 
 
 class ExtractedFact(BaseModel):

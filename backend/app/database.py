@@ -325,6 +325,28 @@ CREATE TABLE IF NOT EXISTS global_report_prompts (
   structured_json TEXT NOT NULL DEFAULT '', legacy_prompt TEXT NOT NULL DEFAULT '',
   migration_mode TEXT NOT NULL DEFAULT 'structured'
 );
+-- 报告版本化目录（report-outline，docs/report-outline-spec.md §一）：每个 scope 只存**当前版本**一行，
+-- 旧版本靠 audit_events（before/after 摘要）与报告快照留档。project scope 覆盖、global scope 覆盖
+-- 各自一行；`global` 行的 project_id 固定为 ''。`payload_json` 是完整目录 JSON（顺序即顺序）。
+CREATE TABLE IF NOT EXISTS report_outlines (
+  scope TEXT NOT NULL,                 -- 'project' | 'global'
+  project_id TEXT NOT NULL DEFAULT '', -- global 行固定 ''
+  outline_version TEXT NOT NULL,       -- 每次保存生成新 uuid
+  payload_json TEXT NOT NULL,          -- 完整目录 JSON
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (scope, project_id)
+);
+-- 报告采用的目录（P1-1）：区分"配置目录"（report_outlines 当前版本，随时可改）与
+-- "报告采用目录"（整份生成开始时冻结、完成时随报告写入）。单章再生只刷新该章条目；
+-- 二级结构（章节集合/顺序）变化必须整份重新生成（chapters_json 含每章标题与三级小节）。
+CREATE TABLE IF NOT EXISTS report_outline_adoptions (
+  project_id TEXT PRIMARY KEY,
+  outline_version TEXT NOT NULL DEFAULT '',
+  structure_sha256 TEXT NOT NULL DEFAULT '',
+  chapters_json TEXT NOT NULL DEFAULT '[]',
+  run_id TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS citations (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, source_id TEXT NOT NULL,
   document_id TEXT NOT NULL, label TEXT NOT NULL, quote TEXT NOT NULL,

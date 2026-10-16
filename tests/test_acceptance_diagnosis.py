@@ -10,9 +10,9 @@ import json
 from scripts.stage6_acceptance import _classify_failure, _diagnose_fallbacks, _frozen_number_keys
 
 
-def _attempt(status="failed", adopted=False, diagnostics=None):
+def _attempt(status="failed", adopted=False, diagnostics=None, repair_type="none"):
     return {
-        "status": status, "adopted": adopted,
+        "status": status, "adopted": adopted, "repair_type": repair_type,
         "diagnostics_json": json.dumps(diagnostics or {}, ensure_ascii=False),
     }
 
@@ -118,7 +118,7 @@ def test_diagnose_fallbacks_five_buckets_and_unclassified():
         # 首稿被拒 → 修复采用
         "financial": [
             _attempt(diagnostics={"safety_repair_reasons": ["章节包含禁止的承保或审批结论"]}),
-            _attempt(status="passed", adopted=True),
+            _attempt(status="passed", adopted=True, repair_type="safety"),
         ],
         # 模型调用失败（无安全原因）
         "cashflow": [_attempt(status="failed")],
@@ -139,6 +139,34 @@ def test_diagnose_fallbacks_five_buckets_and_unclassified():
     assert all(item["section"] != "cashflow" for item in items["suspected_false_rejection"])
     # 确定性章不参与诊断
     assert all(item["section"] != "operations" for item in items["final_failure"])
+
+
+def test_repaired_branch_uses_this_run_facts_not_stale_attempts():
+    """修复采纳按**本跑**判定：首稿直过不得误标；首拒原因取本跑冻结值而非旧跑文本。
+
+    实测锚点：中邮 rating 2026-10-14 本跑首稿直过（repair_type=none），旧实现却因该章节
+    历史上存在失败尝试，把它标成"修复采纳"并显示 16:09 旧跑的"新主体"原因。
+    """
+    sections = [
+        {"section_key": "financial", "generation_status": "model_passed", "content_origin": "model",
+         "fallback_reason": "", "fallback_stage": "none", "support_validation_status": "",
+         "evidence_records_json": "[]"},
+    ]
+    # ① 本跑首稿直过：即使历史上有失败尝试，也不得进 repaired 桶（更不得计未分类）。
+    out = _diagnose_fallbacks(sections, {"financial": [
+        _attempt(),
+        _attempt(status="passed", adopted=True, repair_type="none"),
+    ]})
+    assert out["fallback_diagnosis"]["repaired_and_adopted"] == 0
+    assert out["unclassified_fallbacks"] == 0
+    # ② 本跑修复采纳：首拒原因优先取本跑冻结值，不用旧跑失败文本顶替。
+    out = _diagnose_fallbacks(sections, {"financial": [
+        _attempt(diagnostics={"safety_repair_reasons": ["旧跑的旧原因"]}),
+        _attempt(status="passed", adopted=True, repair_type="safety",
+                 diagnostics={"first_rejection_reasons": ["章节包含禁止的承保或审批结论"]}),
+    ]})
+    items = out["fallback_diagnosis_items"]["repaired_and_adopted"]
+    assert items and items[0]["first_reason"] == "章节包含禁止的承保或审批结论"
 
 
 def test_anchor_number_normalization():

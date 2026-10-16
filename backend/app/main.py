@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +28,8 @@ from .chapter_prompts import (
     chapter_default_prompt, chapter_prompt,
     chapter_uses_llm, compile_structured_prompt, editable_config_from_factory, effective_chapter_config,
     load_chapter_config,
-    legacy_prompt_config, migrate_legacy_prompt_overrides, prompt_config_payload, prompt_edit_state,
+    global_prompt_edit_state, legacy_prompt_config, migrate_legacy_prompt_overrides,
+    prompt_config_payload, prompt_edit_state,
     recompile_structured_prompts,
 )
 # 注意：chapter_prompts.seed_global_prompts_from_latest_overrides（把项目 Prompt 自动
@@ -55,7 +56,7 @@ from .p0 import (
 from .policy import load_policy
 from .professional import audit_event, canonical_fact_rows, fact_groups, resolve_fact_group, sync_fact_assertions
 from .report_blocks import section_blocks
-from .report_outline import section_labels
+from .report_outline import section_labels, outline_for_grouping
 from .report_delivery import (
     content_sha256, delivery_blockers, latest_attempt, record_chapter_attempt,
     reconcile_historical_sections, review_notice, set_section_attempt, write_report_section,
@@ -65,8 +66,12 @@ from .review_lifecycle import mark_report_reviewed, report_state
 from .bond_case import PROJECT_ID as BOND_PROJECT_ID, _materials as bond_materials, seed_bond_case
 from .bond_portfolio_cases import generate_bond_portfolio_materials, seed_bond_portfolio_cases
 from .real_reference import ensure_project_classification, is_real_reference, seed_real_reference_projects
+from .report_outline_store import (
+    delete_outline, has_project_override, outline_effective_source, outline_scope_state,
+    payload_sha256, save_outline, validate_outline,
+)
 from .schemas import (
-    CandidateDecision, DocumentUpdate, EntityProfileCreate, EntityProfileUpdate, ReportTableRefresh,
+    CandidateDecision, DocumentUpdate, EntityProfileCreate, EntityProfileUpdate, ReportOutlineUpdate, ReportTableRefresh,
     FactGroupResolve, FactUpdate, MaterialQARequest, ProfileImportCommit, ProjectCreate, ProjectUpdate, PromptEditableConfig, ReportPromptPreview, ReportPromptUpdate, ReviewTaskUpdate, RunCreate, SectionRegenerateRequest, SectionUpdate, TableCellReview,
 )
 from .security import check_rate, cleanup_expired_projects, validate_magic
@@ -183,32 +188,46 @@ def _has_proxy_forwarding_headers(request: Request) -> bool:
 def prompt_edit_permissions(project_id: str, request: Request) -> dict:
     """报告 Prompt 的"项目级 vs 全局级"可编辑权限。
 
-    规则（修订稿 §4）：
+    规则：
 
-    - 非真实参考项目：项目级可编辑（受既有项目令牌与归档门禁约束）；
-    - 真实参考项目（``data_class == 'real_reference'``）：仅当**非公开环境**、
-      请求来自**本机直连**（``request.client.host`` 为环回地址）且**不带任何代理转发头**
-      （``x-forwarded-for`` / ``x-real-ip`` / ``forwarded`` 均缺失）时，项目级才可编辑；
-    - 全局默认：任何环境、任何项目一律**不可编辑**。
+    - **项目级**：非真实参考项目可编辑（受既有项目令牌与归档门禁约束）；真实参考项目
+      （``data_class == 'real_reference'``）仅当**非公开环境**、请求来自**本机直连**
+      （``request.client.host`` 为环回地址）且**不带任何代理转发头**时才能编辑；
+    - **全局默认**：允许非公开环境、本机直连且无代理转发头的请求修改
+      （`PLAN_new.md` §一 / `PLAN_new_p0_p1.md` P0-1）。旧口径"一律不可编辑"已被新决定
+      替代——全局是**部署级**配置，与项目是否真实参考无关，所以只判环境与本机直连，
+      不再叠加项目类型条件。
+
+    两个权限各自带原因串：`reason`（项目级）与 `global_reason`（全局级），
+    接口原样透出，前端据此给出"为什么不能改"。
     """
-    if not is_real_reference(project_id):
-        return {
-            "editable": True, "global_editable": False, "real_reference": False,
-            "reason": "", "environment": "public_demo" if settings.public_demo else "local",
-        }
     local = _is_loopback_client(request)
     forwarded = _has_proxy_forwarding_headers(request)
+    # "本机可写"是**环境级**判据，项目级与全局级共用；`editable` 再叠加"是否真实参考项目"。
+    local_writable = (not settings.public_demo) and local and not forwarded
     if settings.public_demo:
-        reason = "公开演示环境不允许修改真实参考项目的 Prompt"
+        global_reason = "公开演示环境不允许修改全局默认 Prompt"
     elif forwarded:
-        reason = "请求带有代理转发头，无法确认本机直连，拒绝修改真实参考项目 Prompt"
+        global_reason = "请求带有代理转发头，无法确认本机直连，拒绝修改全局默认 Prompt"
     elif not local:
-        reason = "真实参考项目的项目级 Prompt 仅允许本机直连（环回地址）修改"
+        global_reason = "全局默认 Prompt 仅允许本机直连（环回地址）修改"
     else:
-        reason = ""
+        global_reason = ""
+
+    real_reference = is_real_reference(project_id)
+    reason = ""
+    if real_reference:
+        if settings.public_demo:
+            reason = "公开演示环境不允许修改真实参考项目的 Prompt"
+        elif forwarded:
+            reason = "请求带有代理转发头，无法确认本机直连，拒绝修改真实参考项目 Prompt"
+        elif not local:
+            reason = "真实参考项目的项目级 Prompt 仅允许本机直连（环回地址）修改"
     return {
-        "editable": (not settings.public_demo) and local and not forwarded,
-        "global_editable": False, "real_reference": True, "reason": reason,
+        # 非真实参考项目保持历史口径（不受本机判据限制）；真实参考项目要求本机直连。
+        "editable": local_writable or not real_reference,
+        "global_editable": local_writable, "real_reference": real_reference,
+        "reason": reason, "global_reason": global_reason,
         "environment": "public_demo" if settings.public_demo else "local",
     }
 
@@ -219,8 +238,35 @@ def _prompt_permission_fields(permissions: Optional[dict]) -> dict:
         "editable": bool(permissions.get("editable", True)),
         "global_editable": bool(permissions.get("global_editable", False)),
         "edit_reason": str(permissions.get("reason") or ""),
+        "global_edit_reason": str(permissions.get("global_reason") or ""),
         "real_reference": bool(permissions.get("real_reference", False)),
     }
+
+
+def _require_global_prompt_editable(project_id: str, request: Request) -> dict:
+    """全局默认 Prompt 保存/重置的门禁。
+
+    与项目级的区别：全局是**部署级**配置，判据只看"非公开环境 + 本机直连 + 无转发头"，
+    不叠加真实参考项目条件（`PLAN_new_p0_p1.md` P0-1）。项目令牌与归档门禁仍由调用方
+    先行执行——全局接口挂在 `/api/projects/{id}/` 下，仍需证明对该项目有访问权。
+    """
+    permissions = prompt_edit_permissions(project_id, request)
+    if not permissions["global_editable"]:
+        raise HTTPException(403, permissions.get("global_reason") or "当前环境不允许修改全局默认 Prompt")
+    return permissions
+
+
+def _prompt_config_sha256(prompt: str, structured_json: str) -> str:
+    """保存/重置的并发基准哈希：覆盖**即将被改写的那份状态**。
+
+    取「生效 prompt 文本 + 结构化配置 JSON」两者的组合，而不是只取其一：
+    - 只比 prompt 文本时，结构化配置改了但编译结果恰好相同的情况会被漏判；
+    - 只比 structured_json 时，`legacy` 覆盖（没有结构化配置）无值可比。
+    空配置与文本都为空 → 返回空串，调用方据此跳过并发检查（"无内容可覆盖"）。
+    """
+    if not str(prompt or "").strip() and not str(structured_json or "").strip():
+        return ""
+    return hashlib.sha256(f"{prompt or ''}\n{structured_json or ''}".encode("utf-8")).hexdigest()
 
 
 def _require_prompt_editable(project_id: str, request: Request) -> dict:
@@ -1262,7 +1308,12 @@ def project_evidence_graph(project_id: str, x_project_token: Optional[str] = Hea
 @app.get("/api/projects/{project_id}/report-quality")
 def project_report_quality(project_id: str, x_project_token: Optional[str] = Header(default=None)) -> dict:
     _authorize(project_id, x_project_token)
-    return report_quality(project_id)
+    # P1-1：报告接口同时给出目录口径——`outline_outdated` 表示"报告采用的目录"与当前
+    # 配置不一致；`regeneration_requirement` ∈ none/chapter/full_report/unknown
+    # （旧报告无 adoption 优先历史快照，无快照标 unknown，不得冒充一致）。
+    from .report_outline_adoption import regeneration_status
+
+    return {**report_quality(project_id), **regeneration_status(project_id)}
 
 
 @app.get("/api/projects/{project_id}/gold-standard")
@@ -1289,7 +1340,9 @@ def review_tasks(project_id: str, x_project_token: Optional[str] = Header(defaul
 @app.get("/api/projects/{project_id}/review-summary")
 def get_review_summary(project_id: str, x_project_token: Optional[str] = Header(default=None)) -> dict:
     _authorize(project_id, x_project_token)
-    return {**review_summary(project_id), **report_state(project_id)}
+    from .report_outline_adoption import regeneration_status
+
+    return {**review_summary(project_id), **report_state(project_id), **regeneration_status(project_id)}
 
 
 @app.post("/api/projects/{project_id}/review/apply")
@@ -1412,7 +1465,18 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
     # 论文式标题层级：编号在此计算（不写入正文），前端按 part_label/chapter_label 分组渲染；
     # blocks 为解析后的章内分块（含三级标题编号）＋该章的系统表格块（数值直接来自
     # TableBlock，不从正文 Markdown 反解），前端据此渲染标题层级与表格。
-    labels = section_labels(sections)
+    # P1-4：展示分组跟随生效目录（章节改名/排序立即生效；被删章节未再生前仍显示）。
+    # 章节标题的成品用词规范化（旧计划剩余项 P0-2）：新写入的 `title` 已规范化，但**历史
+    # 行**仍是原材料名（"评级报告复核及评级差异"）——读取侧再规范一次，保证网页目录/标题栏
+    # 与 Word 导出（`exports.py` 已规范化）逐字一致；幂等，不改变已规范的值。
+    # 必须在 `section_labels` **之前**执行：章标题（chapter_label）与分部标题都由
+    # `section["title"]` 派生，先规范才能让目录一起正确。
+    from .delivery_wording import material_numbers as _material_numbers
+    from .delivery_wording import normalize_report_text as _normalize_report_text
+    _title_numbers = _material_numbers(project_id)
+    for section in sections:
+        section["title"] = _normalize_report_text(str(section.get("title") or ""), _title_numbers)
+    labels = section_labels(sections, outline=outline_for_grouping(project_id))
     subject = _project_subject(project_id)
     project_revision = report_state(project_id)
     for section in sections:
@@ -1691,11 +1755,17 @@ def refresh_report_tables(
     }
 
 
-def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[dict] = None) -> dict:
+def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[dict] = None,
+                      scope: str = "project") -> dict:
     """Effective prompt row for a chapter: project override > global default > YAML.
 
     ``permissions`` 为 ``prompt_edit_permissions`` 的结果；缺失时按"项目级可编辑、
     全局不可编辑"处理（与 GET 未显式传入时保持一致的保守默认）。
+
+    ``scope`` 决定**可变的那一份**是哪个范围（`PLAN_new_p0_p1.md` P0-1 的"项目配置／全局默认"
+    切换）：``project`` 用 项目覆盖 > 全局 > YAML 链；``global`` 只用 全局覆盖 > YAML 链
+    （不掺项目覆盖，否则在"全局默认"范围里会看到并保存项目配置）。
+    两个范围的并发基准哈希都返回，前端切范围时用对应那一个。
     """
     project_override = row(
         "SELECT prompt,updated_at,structured_json,migration_mode FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?",
@@ -1706,13 +1776,23 @@ def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[d
         (chapter_key,),
     )
     default_prompt = chapter_default_prompt(chapter_key)
-    editable, source, migration_mode = prompt_edit_state(chapter_key, project_id)
-    if project_override and str(project_override.get("prompt") or "").strip():
-        prompt = str(project_override["prompt"])
-    elif global_override and str(global_override.get("prompt") or "").strip():
-        prompt = str(global_override["prompt"])
+    effective_config, source, migration_mode = prompt_edit_state(chapter_key, project_id)
+    global_config, global_source, global_migration_mode = global_prompt_edit_state(chapter_key)
+    global_prompt = (str(global_override["prompt"])
+                     if global_override and str(global_override.get("prompt") or "").strip()
+                     else default_prompt)
+    if scope == "global":
+        editable_config, migration_mode = global_config, global_migration_mode
+        prompt = global_prompt
     else:
-        prompt = default_prompt
+        editable_config = effective_config
+        prompt = chapter_prompt(chapter_key, project_id)
+    # 并发基准：项目级保存/重置改写的是项目覆盖行；尚无覆盖时为空串
+    # （`_check_prompt_concurrency` 对空值同样拦截，避免"以为在改一份不存在的覆盖"）。
+    project_config_sha = _prompt_config_sha256(
+        (project_override or {}).get("prompt") or "", (project_override or {}).get("structured_json") or "")
+    global_config_sha = _prompt_config_sha256(
+        (global_override or {}).get("prompt") or "", (global_override or {}).get("structured_json") or "")
     return {
         "title": BOND_CHAPTER_TITLES.get(chapter_key, chapter_key),
         "part": BOND_CHAPTER_PART.get(chapter_key, ""),
@@ -1722,7 +1802,19 @@ def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[d
         "updated_at": project_override.get("updated_at") if project_override else None,
         "global_overridden": bool(global_override and str(global_override.get("prompt") or "").strip()),
         "global_updated_at": global_override.get("updated_at") if global_override else None,
-        "editable_config": editable,
+        # 全局视图的"当前全局生效 Prompt"（全局覆盖，否则出厂 YAML）：前端"全局默认"范围
+        # 在没有覆盖时也要能看到并编辑出厂配置。
+        "global_prompt": global_prompt,
+        "scope": scope,
+        # `PLAN_new_p0_p1.md` P0-1：项目/全局两个范围各自的并发基准哈希。
+        "config_sha256": project_config_sha,
+        "global_config_sha256": global_config_sha,
+        # 当前编译器版本（`PLAN.md` §四.2）：前端读取后原样回传，版本不符时保存被 409。
+        "prompt_contract_version": PROMPT_CONTRACT_VERSION,
+        # 当前**生效**来源：项目覆盖 > 全局默认 > YAML。前端据此提示"有项目覆盖时项目仍优先"。
+        "effective_source": source,
+        "global_source": global_source,
+        "editable_config": editable_config,
         "factory_config": editable_config_from_factory(chapter_key),
         # 篇幅的运行时口径由后端给出（= 保存校验/生成校验用的那一份），前端只展示不推算。
         "length_policy": effective_chapter_config(chapter_key, project_id).get("length_policy", {}),
@@ -1736,61 +1828,146 @@ def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[d
         },
         "source": source,
         "migration_mode": migration_mode,
-        # 权限：项目级是否可编辑 + 全局是否可编辑（全局恒 false）。
+        # 权限：项目级是否可编辑 + 全局是否可编辑（全局 = 非公开且本机直连无转发头）。
         **_prompt_permission_fields(permissions),
     }
 
 
 @app.get("/api/projects/{project_id}/report-prompts")
 def report_prompts(project_id: str, request: Request,
-                   x_project_token: Optional[str] = Header(default=None)) -> list[dict]:
-    """Return every report chapter's effective prompt and its contract metadata."""
+                   x_project_token: Optional[str] = Header(default=None),
+                   scope: str = Query(default="project", pattern="^(project|global)$")) -> list[dict]:
+    """Return every report chapter's effective prompt and its contract metadata.
+
+    ``scope=global`` 返回**全局默认**范围：每章的 `prompt`/`editable_config` 取
+    全局覆盖 > 出厂 YAML 链（不含项目覆盖），供前端"全局默认"页加载与回填。
+    两种范围返回同一套字段，前端切换时可原样复用渲染与保存逻辑。
+    """
     _authorize(project_id, x_project_token)
     permissions = prompt_edit_permissions(project_id, request)
+    # P1-4：章节列表跟随生效目录——内置章节（template_key）+ 自定义章节（chapter_id）。
+    # 自定义章节可编辑章级 Prompt（覆盖链以 chapter_id 为键），前端据此渲染同一编辑器。
+    chapters: list[tuple[str, str, str]] = []  # (chapter_key, part_title, chapter_title)
+    try:
+        from .report_outline_store import effective_outline
+
+        for part in effective_outline(project_id).get("parts") or []:
+            part_title = str(part.get("title") or "")
+            for chapter in part.get("chapters") or []:
+                key = str(chapter.get("template_key") or chapter.get("chapter_id") or "")
+                if key:
+                    chapters.append((key, part_title, str(chapter.get("title") or "")))
+    except Exception:
+        chapters = []
+    if not chapters:
+        chapters = [(key, BOND_CHAPTER_PART.get(key, ""), BOND_CHAPTER_TITLES.get(key, key)) for key in BOND_CHAPTER_KEYS]
     output = []
-    for chapter_key in BOND_CHAPTER_KEYS:
+    for chapter_key, part_title, chapter_title in chapters:
         config = load_chapter_config(chapter_key)
         output.append({
             "chapter_key": chapter_key,
-            # 中文标题与报告分部以 chapter_prompts 元数据为单一来源，
-            # 不再依赖 report_sections——未生成报告的项目同样返回中文。
-            **(_prompt_row_state(project_id, chapter_key, permissions)),
+            # 目录分部级标题与章节标题覆盖内置映射（自定义章节也能拿到所在分部名与改名标题）。
+            **(_prompt_row_state(project_id, chapter_key, permissions, scope)),
+            "title": chapter_title or BOND_CHAPTER_TITLES.get(chapter_key, chapter_key),
+            "part": part_title or BOND_CHAPTER_PART.get(chapter_key, ""),
             "llm": config.get("llm", False),
             "required_sections": config.get("required_sections", []),
         })
     return output
 
 
+def _compile_prompt_payload(chapter_key: str, payload: "ReportPromptUpdate") -> dict:
+    """把请求体编译成落库用的四元组（项目级与全局级共用，避免两处逻辑漂移）。
+
+    返回 ``{prompt, structured_json, migration_mode, legacy_prompt}``：
+    - 提交 ``config``（新客户端）→ 结构化配置，由服务端用固定编译器产出生效文本；
+    - 提交 ``prompt``（旧客户端）→ 走 legacy 解析，尽力还原为结构化配置后再编译，
+      这样编辑器打开时看到的仍是一份可编辑结构，而不是一堆自由文本。
+    """
+    config = payload.config
+    if config is not None:
+        dumped = config.model_dump(mode="json")
+        return {
+            "prompt": compile_structured_prompt(chapter_key, dumped),
+            "structured_json": json_dump(dumped),
+            "migration_mode": "structured",
+            "legacy_prompt": "",
+        }
+    legacy_prompt = str(payload.prompt).strip()
+    legacy_config, migration_mode = legacy_prompt_config(chapter_key, legacy_prompt)
+    return {
+        "prompt": compile_structured_prompt(chapter_key, legacy_config),
+        "structured_json": json_dump(legacy_config),
+        "migration_mode": migration_mode,
+        "legacy_prompt": legacy_prompt,
+    }
+
+
+def _prompt_write_guards(chapter_key: str) -> None:
+    """项目级与全局级写入口共用的章节判据。"""
+    from .chapter_prompts import is_custom_chapter_key
+
+    if chapter_key not in BOND_CHAPTER_KEYS and not is_custom_chapter_key(chapter_key):
+        raise HTTPException(404, "报告章节不存在")
+    if not chapter_uses_llm(chapter_key):
+        raise HTTPException(422, "确定性章节由系统模板生成，不支持修改")
+
+
+def _check_prompt_concurrency(expected: Optional[str], current: str, scope_label: str) -> None:
+    """乐观并发：请求带的预期哈希与库中现状不一致 → 409。
+
+    只对**非空**的预期哈希生效，且现状为空（尚无覆盖）时同样拦截——那说明别人刚在你
+    之前保存过，或你以为自己在改一份并不存在的覆盖。客户端不传预期哈希时不检查
+    （兼容旧客户端）。
+    """
+    if not str(expected or "").strip():
+        return
+    if str(expected) != str(current or ""):
+        raise HTTPException(409, f"{scope_label}已被其他会话修改，请重新加载后再保存")
+
+
+def _check_prompt_contract_version(expected: Optional[str]) -> None:
+    """编译契约版本检查（`PLAN.md` §四.2：写入前检查"当前编译器版本"）。
+
+    结构化配置由**编译器**渲染成生效 Prompt 文本；编译器升级后同一份配置会渲染出不同文本。
+    若客户端是按旧编译器读到的内容在做编辑，直接保存会覆盖掉新编译器刚渲染的结果
+    （或写出与预览不一致的文本）。因此版本不符一律 409，让客户端重读一次。
+    不传则跳过（兼容旧客户端）。
+    """
+    if not str(expected or "").strip():
+        return
+    if str(expected) != str(PROMPT_CONTRACT_VERSION or ""):
+        raise HTTPException(
+            409, f"Prompt 编译器版本已更新（{expected} → {PROMPT_CONTRACT_VERSION}），请重新加载后再保存")
+
+
 @app.patch("/api/projects/{project_id}/report-prompts/{chapter_key}")
 def update_report_prompt(project_id: str, chapter_key: str, payload: ReportPromptUpdate, request: Request,
                          x_project_token: Optional[str] = Header(default=None)) -> dict:
     _ensure_project_writable(_authorize(project_id, x_project_token))
-    if chapter_key not in BOND_CHAPTER_KEYS:
-        raise HTTPException(404, "报告章节不存在")
+    _prompt_write_guards(chapter_key)
     # 项目级保存门禁：真实参考项目仅本机直连（非公开、无转发头）时允许；否则 403。
     permissions = _require_prompt_editable(project_id, request)
-    config = payload.config
-    if not chapter_uses_llm(chapter_key):
-        raise HTTPException(422, "确定性章节由系统模板生成，不支持修改")
-    if config is not None:
-        prompt = compile_structured_prompt(chapter_key, config.model_dump(mode="json"))
-        structured_json = json_dump(config.model_dump(mode="json"))
-        migration_mode = "structured"
-        legacy_prompt = ""
-    else:
-        legacy_prompt = str(payload.prompt).strip()
-        legacy_config, migration_mode = legacy_prompt_config(chapter_key, legacy_prompt)
-        prompt = compile_structured_prompt(chapter_key, legacy_config)
-        structured_json = json_dump(legacy_config)
+    compiled = _compile_prompt_payload(chapter_key, payload)
     now = now_iso()
     before = row("SELECT * FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?", (project_id, chapter_key))
+    _check_prompt_contract_version(payload.expected_prompt_contract_version)
+    _check_prompt_concurrency(
+        payload.expected_config_sha256,
+        _prompt_config_sha256((before or {}).get("prompt") or "", (before or {}).get("structured_json") or ""),
+        "项目 Prompt 配置",
+    )
     with connect() as conn:
         conn.execute(
             "INSERT INTO report_prompt_overrides (id,project_id,chapter_key,prompt,updated_at,structured_json,legacy_prompt,migration_mode) VALUES (?,?,?,?,?,?,?,?) "
             "ON CONFLICT(project_id,chapter_key) DO UPDATE SET prompt=excluded.prompt,updated_at=excluded.updated_at,structured_json=excluded.structured_json,legacy_prompt=excluded.legacy_prompt,migration_mode=excluded.migration_mode",
-            (str(uuid.uuid4()), project_id, chapter_key, prompt, now, structured_json, legacy_prompt, migration_mode),
+            (str(uuid.uuid4()), project_id, chapter_key, compiled["prompt"], now, compiled["structured_json"],
+             compiled["legacy_prompt"], compiled["migration_mode"]),
         )
-    audit_event(project_id, "report_prompt_update", "report_prompt", chapter_key, before, {"prompt": prompt, "config": config.model_dump(mode="json") if config else None}, "human")
+    # 保存只动配置与审计：**不删除项目覆盖、不调用模型、不修改历史正文**。
+    audit_event(project_id, "report_prompt_update", "report_prompt", chapter_key, before,
+                {"prompt": compiled["prompt"], "scope": "project",
+                 "config": payload.config.model_dump(mode="json") if payload.config else None}, "human")
     return {"chapter_key": chapter_key, **_prompt_row_state(project_id, chapter_key, permissions)}
 
 
@@ -1798,7 +1975,9 @@ def update_report_prompt(project_id: str, chapter_key: str, payload: ReportPromp
 def preview_report_prompt(project_id: str, chapter_key: str, payload: ReportPromptPreview, request: Request,
                           x_project_token: Optional[str] = Header(default=None)) -> dict:
     _authorize(project_id, x_project_token)
-    if chapter_key not in BOND_CHAPTER_KEYS:
+    from .chapter_prompts import is_custom_chapter_key
+
+    if chapter_key not in BOND_CHAPTER_KEYS and not is_custom_chapter_key(chapter_key):
         raise HTTPException(404, "报告章节不存在")
     if not chapter_uses_llm(chapter_key):
         raise HTTPException(422, "确定性章节不支持结构化预览")
@@ -1810,40 +1989,204 @@ def preview_report_prompt(project_id: str, chapter_key: str, payload: ReportProm
 
 @app.delete("/api/projects/{project_id}/report-prompts/{chapter_key}")
 def reset_report_prompt(project_id: str, chapter_key: str, request: Request,
-                        x_project_token: Optional[str] = Header(default=None)) -> dict:
+                        x_project_token: Optional[str] = Header(default=None),
+                        expected_config_sha256: Optional[str] = Query(default=None)) -> dict:
     _ensure_project_writable(_authorize(project_id, x_project_token))
-    if chapter_key not in BOND_CHAPTER_KEYS:
+    # P1-2：重置同样支持**自定义章节**（chapter-<uuid>）——删除项目覆盖后按
+    # 全局覆盖 > 出厂配置回落（与 GET 的覆盖链同源）。未知章节仍 404。
+    from .chapter_prompts import is_custom_chapter_key
+
+    if chapter_key not in BOND_CHAPTER_KEYS and not is_custom_chapter_key(chapter_key):
         raise HTTPException(404, "报告章节不存在")
     # 项目级重置与保存同一门禁：真实参考项目仅本机直连（非公开、无转发头）时允许。
     permissions = _require_prompt_editable(project_id, request)
     before = row("SELECT * FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?", (project_id, chapter_key))
+    # 与保存同一条并发基准（`PLAN.md` §四.2）：重置同样会覆盖别人刚写的内容。
+    _check_prompt_concurrency(
+        expected_config_sha256,
+        _prompt_config_sha256((before or {}).get("prompt") or "", (before or {}).get("structured_json") or ""),
+        "项目 Prompt 配置",
+    )
     execute("DELETE FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?", (project_id, chapter_key))
     audit_event(project_id, "report_prompt_reset", "report_prompt", chapter_key, before, {}, "human")
-    return {"chapter_key": chapter_key, **_prompt_row_state(project_id, chapter_key, permissions)}
+    state = _prompt_row_state(project_id, chapter_key, permissions)
+    part_title, chapter_title = _outline_chapter_meta(project_id, chapter_key)
+    return {
+        "chapter_key": chapter_key, **state,
+        # 与 GET /report-prompts 同一口径：标题/分部取生效目录，自定义章节显示目录改名。
+        "title": chapter_title or BOND_CHAPTER_TITLES.get(chapter_key, chapter_key),
+        "part": part_title or BOND_CHAPTER_PART.get(chapter_key, ""),
+    }
+
+
+def _outline_chapter_meta(project_id: str, chapter_key: str) -> tuple[str, str]:
+    """生效目录里的 (分部标题, 章节标题)；目录不可用或未收录时返回空串。"""
+    try:
+        from .report_outline_store import effective_outline
+
+        for part in effective_outline(project_id).get("parts") or []:
+            for chapter in part.get("chapters") or []:
+                key = str(chapter.get("template_key") or chapter.get("chapter_id") or "")
+                if key == chapter_key:
+                    return str(part.get("title") or ""), str(chapter.get("title") or "")
+    except Exception:
+        return "", ""
+    return "", ""
 
 
 @app.patch("/api/projects/{project_id}/report-prompts/global/{chapter_key}")
 def set_global_report_prompt(project_id: str, chapter_key: str, payload: ReportPromptUpdate, request: Request,
                              x_project_token: Optional[str] = Header(default=None)) -> dict:
-    """全局默认 Prompt 一律禁止通过接口修改（修订稿 §4）。
+    """保存**全局默认** Prompt（`PLAN_new_p0_p1.md` P0-1）。
 
-    既有的全局配置与历史覆盖继续生效（``global_chapter_prompt`` 仍会读取），
-    但不再允许任何调用方写入或提升为全局默认——包括真实参考项目的本机直连。
+    旧口径"全局一律禁止写入"（修订稿 §4）已被新决定替代：全局默认允许**非公开环境 +
+    本机直连 + 无代理转发头**的请求修改。接口挂在项目路径下只是为了复用项目令牌与归档
+    门禁——写入的是**部署级**配置，因此不叠加"是否真实参考项目"这一项目级条件。
+
+    保存语义（P0-1 明文）：**不删除项目覆盖、不调用模型、不修改历史正文**，只更新配置、
+    审计与 Prompt 哈希。生效优先级保持 项目覆盖 > 全局默认 > YAML，所以已有项目覆盖的
+    项目在保存全局后**仍然使用项目配置**——响应里的 `effective_source` 会如实说明。
     """
     _ensure_project_writable(_authorize(project_id, x_project_token))
-    if chapter_key not in BOND_CHAPTER_KEYS:
-        raise HTTPException(404, "报告章节不存在")
-    raise HTTPException(403, "全局默认 Prompt 不允许通过接口修改，仅支持项目级覆盖")
+    _prompt_write_guards(chapter_key)
+    permissions = _require_global_prompt_editable(project_id, request)
+    compiled = _compile_prompt_payload(chapter_key, payload)
+    now = now_iso()
+    before = row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
+    _check_prompt_contract_version(payload.expected_prompt_contract_version)
+    _check_prompt_concurrency(
+        payload.expected_config_sha256,
+        _prompt_config_sha256((before or {}).get("prompt") or "", (before or {}).get("structured_json") or ""),
+        "全局 Prompt 配置",
+    )
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO global_report_prompts (chapter_key,prompt,updated_at,structured_json,legacy_prompt,migration_mode) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(chapter_key) DO UPDATE SET prompt=excluded.prompt,updated_at=excluded.updated_at,structured_json=excluded.structured_json,legacy_prompt=excluded.legacy_prompt,migration_mode=excluded.migration_mode",
+            (chapter_key, compiled["prompt"], now, compiled["structured_json"],
+             compiled["legacy_prompt"], compiled["migration_mode"]),
+        )
+    audit_event(project_id, "report_prompt_global_update", "report_prompt", chapter_key, before,
+                {"prompt": compiled["prompt"], "scope": "global",
+                 "config": payload.config.model_dump(mode="json") if payload.config else None}, "human")
+    return {"chapter_key": chapter_key, **_prompt_row_state(project_id, chapter_key, permissions)}
 
 
 @app.delete("/api/projects/{project_id}/report-prompts/global/{chapter_key}")
 def reset_global_report_prompt(project_id: str, chapter_key: str, request: Request,
-                               x_project_token: Optional[str] = Header(default=None)) -> dict:
-    """全局默认 Prompt 一律禁止通过接口重置（既有全局覆盖保持不变）。"""
+                               x_project_token: Optional[str] = Header(default=None),
+                               expected_config_sha256: Optional[str] = Query(default=None)) -> dict:
+    """重置**全局默认** Prompt：删除全局覆盖，回落 YAML 出厂配置（P0-1）。
+
+    只删 `global_report_prompts` 那一行；**项目覆盖原样保留**，因此有项目覆盖的项目
+    在重置后仍然使用项目配置。幂等：没有全局覆盖时同样返回成功（已是出厂状态）。
+    """
     _ensure_project_writable(_authorize(project_id, x_project_token))
-    if chapter_key not in BOND_CHAPTER_KEYS:
-        raise HTTPException(404, "报告章节不存在")
-    raise HTTPException(403, "全局默认 Prompt 不允许通过接口重置，仅支持项目级覆盖")
+    _prompt_write_guards(chapter_key)
+    permissions = _require_global_prompt_editable(project_id, request)
+    before = row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
+    _check_prompt_concurrency(
+        expected_config_sha256,
+        _prompt_config_sha256((before or {}).get("prompt") or "", (before or {}).get("structured_json") or ""),
+        "全局 Prompt 配置",
+    )
+    execute("DELETE FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
+    audit_event(project_id, "report_prompt_global_reset", "report_prompt", chapter_key, before,
+                {"scope": "global"}, "human")
+    return {"chapter_key": chapter_key, **_prompt_row_state(project_id, chapter_key, permissions)}
+
+
+# ------------------------------------------------ P1-1：报告版本化目录（report-outline）--
+
+def _outline_scope_label(scope: str) -> str:
+    return "全局报告目录" if scope == "global" else "项目报告目录"
+
+
+def _outline_concurrency_conflict(scope: str, expected_version: Optional[str], expected_sha: Optional[str],
+                                  before: dict | None) -> None:
+    """乐观并发：请求带的版本/哈希与库中现状不一致 → 409。
+
+    与 P0-A ``_check_prompt_concurrency`` 同口径：只对**非空**预期值生效，且现状为空
+    （该 scope 尚无覆盖）时同样拦截——那说明别人刚在你之前保存过，或你以为在改一份并
+    不存在的覆盖。两值都传则都严格比对。
+    """
+    current_version = str((before or {}).get("outline_version") or "")
+    current_sha = payload_sha256((before or {}).get("payload_json") or "") if before else ""
+    if str(expected_version or "").strip() and str(expected_version) != current_version:
+        raise HTTPException(409, f"{_outline_scope_label(scope)}已被其他会话修改，请重新加载后再保存")
+    if str(expected_sha or "").strip() and str(expected_sha) != current_sha:
+        raise HTTPException(409, f"{_outline_scope_label(scope)}已被其他会话修改，请重新加载后再保存")
+
+
+def _report_outline_view(project_id: str, scope: str, permissions: dict) -> dict:
+    """GET/PUT/DELETE 的统一响应体（spec §四）。"""
+    state = outline_scope_state(scope, project_id)
+    return {
+        "scope": scope,
+        "outline": state["outline"],
+        "source": state["source"],
+        "outline_version": state["outline_version"],
+        "config_sha256": state["config_sha256"],
+        # 项目链生效来源与项目覆盖存在性（scope=global 时同样返回，供前端统一渲染）。
+        "effective_source": outline_effective_source(project_id),
+        "has_project_override": has_project_override(project_id),
+        **_prompt_permission_fields(permissions),
+    }
+
+
+@app.get("/api/projects/{project_id}/report-outline")
+def get_report_outline(project_id: str, request: Request,
+                       x_project_token: Optional[str] = Header(default=None),
+                       scope: str = Query(default="project", pattern="^(project|global)$")) -> dict:
+    """读取报告目录（项目链或全局链）。GET 一律可读，权限字段仅作展示。"""
+    _authorize(project_id, x_project_token)
+    permissions = prompt_edit_permissions(project_id, request)
+    return _report_outline_view(project_id, scope, permissions)
+
+
+@app.put("/api/projects/{project_id}/report-outline")
+def update_report_outline(project_id: str, payload: ReportOutlineUpdate, request: Request,
+                          x_project_token: Optional[str] = Header(default=None),
+                          scope: str = Query(default="project", pattern="^(project|global)$")) -> dict:
+    """保存报告目录：校验（422）→ 并发（409）→ UPSERT + 审计。响应 = 保存后的 GET 同构状态。
+
+    **不调用模型、不修改报告正文、不删除项目其他配置**（spec §四/§五）。
+    """
+    _ensure_project_writable(_authorize(project_id, x_project_token))
+    if scope == "global":
+        permissions = _require_global_prompt_editable(project_id, request)
+        identity = ""
+    else:
+        permissions = _require_prompt_editable(project_id, request)
+        identity = project_id
+    before = row("SELECT * FROM report_outlines WHERE scope=? AND project_id=?", (scope, identity))
+    try:
+        validate_outline(payload.outline)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _outline_concurrency_conflict(scope, payload.expected_outline_version, payload.expected_outline_sha256, before)
+    save_outline(scope, project_id, payload.outline)
+    return _report_outline_view(project_id, scope, permissions)
+
+
+@app.delete("/api/projects/{project_id}/report-outline")
+def reset_report_outline(project_id: str, request: Request,
+                         x_project_token: Optional[str] = Header(default=None),
+                         scope: str = Query(default="project", pattern="^(project|global)$"),
+                         expected_outline_version: Optional[str] = Query(default=None),
+                         expected_outline_sha256: Optional[str] = Query(default=None)) -> dict:
+    """重置报告目录（幂等）：删该 scope 覆盖行 + 审计。项目 scope 删除后回落全局/内置。"""
+    _ensure_project_writable(_authorize(project_id, x_project_token))
+    if scope == "global":
+        permissions = _require_global_prompt_editable(project_id, request)
+        identity = ""
+    else:
+        permissions = _require_prompt_editable(project_id, request)
+        identity = project_id
+    before = row("SELECT * FROM report_outlines WHERE scope=? AND project_id=?", (scope, identity))
+    _outline_concurrency_conflict(scope, expected_outline_version, expected_outline_sha256, before)
+    delete_outline(scope, project_id)
+    return _report_outline_view(project_id, scope, permissions)
 
 
 @app.patch("/api/projects/{project_id}/report/sections/{section_key}")
@@ -1913,6 +2256,18 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
     section = row("SELECT * FROM report_sections WHERE project_id=? AND section_key=?", (project_id, section_key))
     if not section:
         raise HTTPException(404, "报告章节不存在")
+    # P1-1：单章再生只覆盖"该章的小节配置"。若目录的**二级结构**（章节集合/顺序）已
+    # 相对"报告采用的目录"变化，单章再生无法让报告与目录一致——必须整份重新生成。
+    # 旧报告无 adoption 记录时优先历史快照；两者皆无（unknown）不拦，保持旧行为。
+    from .report_outline_adoption import regeneration_status
+
+    outline_status = regeneration_status(project_id)
+    if outline_status["regeneration_requirement"] == "full_report":
+        raise HTTPException(
+            422,
+            "报告目录的二级结构已变更（章节增删或排序），单章再生无法使报告与目录一致，"
+            "请整份重新生成（full_report_regeneration_required）",
+        )
     stored_citations = json_load(section.get("citation_ids") or "[]")
     # 起始版本：新前端随请求体发送预期版本与正文哈希；旧调用省略请求体，由服务端捕获起始值。
     start_revision = int(report_state(project_id).get("report_revision") or 0)
@@ -1934,11 +2289,18 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
         None,
     )
     deterministic_draft = str(section.get("deterministic_draft") or "").strip()
-    draft_seed = (
-        current_chapter.content if current_chapter and current_chapter.content.strip()
-        else deterministic_draft or str(section.get("content") or "")
-    )
-    source_ids = current_chapter.source_ids if current_chapter else []
+    if current_chapter is not None:
+        draft_seed = (
+            current_chapter.content if current_chapter.content.strip()
+            else deterministic_draft or str(section.get("content") or "")
+        )
+        source_ids = current_chapter.source_ids
+    else:
+        # 自定义章节（P1-4）：无确定性模板草稿——以空草稿全新撰写；旧模型正文不得
+        # 成为下一次生成的边界（与修订稿"previous model response must not become the
+        # next prompt's factual boundary"同一原则）。
+        draft_seed = ""
+        source_ids = []
     chapter_context = build_chapter_context(project_id, section_key, draft_seed, source_ids)
     evidence = [
         {"id": item["id"], "quote": item["quote"], "locator": item.get("locator", ""),
@@ -2105,6 +2467,11 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
     # 正文真正落库后，本次尝试才算采用（accepted=latest=本次）。
     if attempt_id:
         set_section_attempt(project_id, section_key, attempt_id, adopted=True)
+    # P1-1：单章再生成功后，刷新**该章**在"报告采用目录"里的标题与小节条目；
+    # 结构已变化（返回 False）时不更新——那时本来就走不到这里（入口已 422）。
+    from .report_outline_adoption import update_chapter_adoption
+
+    update_chapter_adoption(project_id, section_key)
     if repair_attempted:
         execute("UPDATE report_sections SET length_repair_attempted=1 WHERE project_id=? AND section_key=?",
                 (project_id, section_key))
@@ -2325,13 +2692,22 @@ def export(project_id: str, format: str = "md", variant: str = "draft", x_projec
     audit_event(project_id, "export", "report", format, {}, {"unresolved": unresolved["has_open_major_items"]}, "human")
     warning_headers = {"X-Report-Open-Items": "true" if unresolved["has_open_major_items"] else "false"}
     suffix = quote("_草稿" if variant == "draft" else "_最终")
+    from .exports import ExportWordingError
+
+    try:
+        if format == "md":
+            body = markdown_report(project_id, variant)
+        elif format == "docx":
+            body = docx_report(project_id, variant)
+        else:
+            raise HTTPException(400, "仅支持 md 或 docx")
+    except ExportWordingError as exc:
+        raise HTTPException(409, str(exc)) from exc
     if format == "md":
-        return Response(markdown_report(project_id, variant), media_type="text/markdown; charset=utf-8",
+        return Response(body, media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}{suffix}.md", **warning_headers})
-    if format == "docx":
-        return Response(docx_report(project_id, variant), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}{suffix}.docx", **warning_headers})
-    raise HTTPException(400, "仅支持 md 或 docx")
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}{suffix}.docx", **warning_headers})
 
 
 frontend_dist = settings.root_dir / "frontend" / "dist"

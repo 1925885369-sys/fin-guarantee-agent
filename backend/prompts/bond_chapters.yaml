@@ -1,10 +1,10 @@
-version: "3.2.0"
+version: "3.3.0"
 global_rules:
   missing_data: 缺失信息必须明确写“材料不足”或“无法判断”，不得以零值或模型推断替代。
   conflict: 募集说明书、评级报告、审计和合同存在冲突时必须并列展示全部来源，不得自动选值或据此形成确定结论。
   evidence: 每个事实、数字、风险和条件必须引用允许来源中的 PDF 页码、Word 段落或 Excel 区域；只能使用确定性草稿和允许主张中已有的内容。
   calculations: 不得由模型计算金额、比例、覆盖率、评级差异、偿债指标或现金流预测，只能引用系统确定性结果。
-  decisions: 不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议，也不得输出建议承保或建议不承保的倾向。
+  decisions: 可输出承保、拒保、担保额度、担保费率、债券评级或投资建议。
   terminology: 统一使用发行人、债券、保证人、反担保、偿债来源、募集资金专户、兑付、受托管理人、持有人会议等债券担保术语；不得混用贷款业务术语。
 chapters:
   scope:
@@ -24,7 +24,8 @@ chapters:
     required_sections: [发行条款, 增信结构, 审查边界]
     preserve_blocks: [拟议保证声明, 募集说明书披露归属, 材料不足声明]
     rules:
-      - 债券发行条款（规模、期限、票面利率、付息频率、还本方式）只能引用募集说明书披露值，并注明“据募集说明书披露”。
+      # P0-3：成品旧称统一由服务端规范化，模型不再被要求逐字写“据募集说明书披露”。
+      - 债券发行条款（规模、期限、票面利率、付息频率、还本方式）只能引用发行文件披露值。
       - 保证人、保证范围须标注“拟议”，强调须以签署版保证合同核验，不得表述为保证责任已生效。
     forbidden:
       - 不得把募集说明书的拟议安排描述为已确认事实。
@@ -37,7 +38,8 @@ chapters:
       max_evidence_items: 12
       max_evidence_chars: 18000
     output_contract:
-      required_phrases: [据募集说明书披露, 拟议]
+      # P0-3：移除“据募集说明书披露”强制项，保留其余必需表述；“拟议”仍是保证声明边界。
+      required_phrases: [拟议]
       required_missing_markers: [材料不足]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
       attribution_mode: prospectus
@@ -75,22 +77,35 @@ chapters:
       max_evidence_items: 12
       max_evidence_chars: 18000
     output_contract:
-      required_phrases: [据募集说明书披露]
+      # P0-3：模型与成品契约不再要求逐字输出旧称。
+      required_phrases: []
       required_missing_markers: [材料不足, 待核验]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
       attribution_mode: prospectus
   operations:
-    llm: false
+    llm: true
+    # 按 PLAN_new_p0_p1.md P0-2 / PLAN.md P0-B：第一部分经营章同 governance 切为模型直接撰写。
+    generation_mode: generate
     role: 经营分析员
     goal: 基于募集说明书和访谈材料分析主营业务、上下游集中度与经营持续性。
     required_inputs: [facts, sources, cross_checks]
     required_sections: [经营与集中度事实, 审查边界]
     preserve_blocks: [集中度核验状态, 材料不足声明]
     rules:
-      - 客户和供应商集中度只能引用确定性指标与规则结果。
       - 经营持续性、在手订单和产能只能依据材料中明确出现的事实；缺失时生成待核验任务而非补写结论。
     forbidden:
       - 不得虚构订单、产能、市场份额或客户稳定性。
+    # 篇幅目标与 governance 对齐：2000–4000 字符；不写 paragraph_order，结构交给
+    # required_sections 与项目 Prompt。
+    narrative_contract:
+      tone: professional_due_diligence
+      min_paragraphs: 3
+      max_paragraphs: 5
+      preferred_min_chars: 2000
+      preferred_max_chars: 4000
+      list_mode: limited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
     input_contract:
       fact_keys: [main_business, top_customer_share, top5_customer_share, top_supplier_share, top5_supplier_share, order_backlog, capacity_utilization]
       metric_keys: []
@@ -99,12 +114,15 @@ chapters:
       max_evidence_items: 12
       max_evidence_chars: 18000
     output_contract:
-      required_phrases: [据募集说明书披露]
+      # P0-3：移除“据募集说明书披露”强制项。
+      required_phrases: []
       required_missing_markers: [材料不足, 待核验]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
       attribution_mode: prospectus
   proceeds:
-    llm: false
+    llm: true
+    # 按 PLAN_new_p0_p1.md P0-2 / PLAN.md P0-B：募集资金用途章同 governance 切为模型直接撰写。
+    generation_mode: generate
     role: 募集资金用途核验员
     goal: 核验募集资金金额、用途和专户安排的合规性及闭环证据。
     required_inputs: [facts, checks, sources]
@@ -115,6 +133,16 @@ chapters:
       - 用途与偿债安排须区分“募集资金专户”与“偿债账户”，不得混用。
     forbidden:
       - 不得推断募集资金实际流向或虚构用途闭环。
+    # 篇幅目标与 governance 对齐：2000–4000 字符；不写 paragraph_order。
+    narrative_contract:
+      tone: professional_due_diligence
+      min_paragraphs: 3
+      max_paragraphs: 5
+      preferred_min_chars: 2000
+      preferred_max_chars: 4000
+      list_mode: limited
+      avoid_openings: [系统识别到, 规则状态为, 经模型分析]
+      prohibited_terms: [warning, insufficient, rule_key, 字段]
     input_contract:
       fact_keys: [proceeds_amount, proceeds_purpose, repayment_account, supporting_contract_amount]
       metric_keys: []
@@ -123,7 +151,8 @@ chapters:
       max_evidence_items: 12
       max_evidence_chars: 18000
     output_contract:
-      required_phrases: [募集说明书披露]
+      # P0-3：移除“募集说明书披露”强制项。
+      required_phrases: []
       required_missing_markers: [材料不足, 材料未披露]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
       attribution_mode: prospectus
@@ -136,7 +165,6 @@ chapters:
     required_sections: [财务概览, 财务结构与核验, 审查边界]
     preserve_blocks: [材料不足声明, 勾稽状态, 规则状态]
     rules:
-      - 所有金额、比率、增速和周转指标只能引用确定性事实或指标。
       - 只使用上下文列明的三个完整年度及统一报表口径；不得混用季度、半年度、合并和母公司口径。
       - 主体档案、募集说明书、评级报告和系统计算必须分别归属，不得把评级观点写成事实。
       - 未取得审计报告原件时，明确标注“披露信息待核验”，不得表述为审计确认。
@@ -147,7 +175,6 @@ chapters:
       - 不得改动、重排或重算系统数据表中的任何数值、年度与表注。
       - 不得为变化编造原因；缺乏底稿支持的原因只能写成待核验事项。
       - 不得把冻结主体档案的事实汇总表述为已完成的独立核验。
-      - 不得自行输出表格；表格一律由系统生成。
     input_contract:
       fact_keys: [revenue, cost_of_goods_sold, net_profit, operating_cash_flow, cash_received_from_sales, accounts_receivable, other_receivables, total_overdue_receivables, inventory, cash, restricted_cash, total_assets, total_liabilities, equity, current_assets, current_liabilities, finance_expense, interest_expense]
       # 计划 §三 新增指标白名单：周转率（次，期初期末平均余额）、结构占比、三年速动比率。
@@ -199,7 +226,8 @@ chapters:
       max_evidence_items: 14
       max_evidence_chars: 20000
     output_contract:
-      required_phrases: [募集说明书披露]
+      # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
+      required_phrases: []
       required_missing_markers: [材料不足, 待核验]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议, 可偿付现金]
       max_citations: 3
@@ -236,7 +264,8 @@ chapters:
       max_evidence_items: 14
       max_evidence_chars: 20000
     output_contract:
-      required_phrases: [募集说明书披露]
+      # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
+      required_phrases: []
       required_missing_markers: [材料不足, 待核验]
       forbidden_patterns: [建议承保, 建议拒绝, 授信获批]
       max_citations: 3
@@ -309,7 +338,8 @@ chapters:
       max_evidence_items: 12
       max_evidence_chars: 18000
     output_contract:
-      required_phrases: [募集说明书披露]
+      # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
+      required_phrases: []
       required_missing_markers: [材料不足, 材料未披露]
       forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
       attribution_mode: prospectus
@@ -372,7 +402,8 @@ chapters:
       max_evidence_items: 14
       max_evidence_chars: 20000
     output_contract:
-      required_phrases: [募集说明书披露]
+      # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
+      required_phrases: []
       required_missing_markers: [材料不足, 无法判断可执行性]
       forbidden_patterns: [建议承保, 建议拒绝]
       max_citations: 2

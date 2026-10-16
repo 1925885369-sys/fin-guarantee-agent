@@ -118,6 +118,31 @@ def normalize_document(project_id: str, text: str) -> str:
     return normalize_report_text(text, material_numbers(project_id))
 
 
+def normalize_table_block(block, numbers: dict[str, str] | None = None):
+    """返回表名／列标签／单元格／表注／口径都已规范化的 ``TableBlock`` 副本。
+
+    网页、Markdown、Word 三个出口都从**冻结快照**重新渲染表格，快照里的原文
+    （表名、列标签、单元格）来自材料解析，可能带原材料种类名——只在写入侧规范化
+    正文不够：展示/导出重新渲染时又是原文（实测：中邮「主体评级历史」表头列
+    ``评级报告``、覆盖表单元格 ``信用评级报告``）。这里返回副本、**不改冻结快照**，
+    原始材料与证据详情仍显示原称（``PLAN3.md`` §3）。
+    """
+    from .table_block import table_block_from_dict
+
+    payload = block.to_dict()
+    payload["title"] = normalize_report_text(str(payload.get("title") or ""), numbers)
+    payload["scope"] = normalize_report_text(str(payload.get("scope") or ""), numbers)
+    for column in payload.get("columns") or []:
+        column["label"] = normalize_report_text(str(column.get("label") or ""), numbers)
+    for row in payload.get("rows") or []:
+        for cell in row.get("cells") or []:
+            cell["raw"] = normalize_report_text(str(cell.get("raw") or ""), numbers)
+            if cell.get("normalized") is not None:
+                cell["normalized"] = normalize_report_text(str(cell["normalized"]), numbers)
+    payload["notes"] = [normalize_report_text(str(note), numbers) for note in payload.get("notes") or []]
+    return table_block_from_dict(payload)
+
+
 def wording_violations(text: str) -> list[dict]:
     """成品用词校验：禁用词、内部 UUID、内部字段键都必须为零出现。"""
     from .facts import FACT_REGISTRY

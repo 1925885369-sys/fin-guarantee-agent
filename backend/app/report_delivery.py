@@ -350,19 +350,58 @@ def delivery_blockers(project_id: str) -> list[str]:
 
 
 def _wording_problems(project_id: str) -> list[str]:
-    """成品用词：禁用表述、内部 UUID、内部字段键都必须零出现。"""
-    from .delivery_wording import wording_violations
+    """成品用词：禁用表述、内部 UUID、内部字段键都必须零出现。
+
+    扫描**完整成品结构**（旧计划剩余项 P0-2），不只正文：章标题与目录标签、系统表格
+    （表名／列标签／单元格／表注／口径）。只扫正文会漏掉「标题里是禁用词、表头里是
+    禁用词」这类遗漏——版面上明明有禁用词，检查却通过。展示/导出层已做规范化转换，
+    这里扫的是**转换后的实际呈现文本**：凡规范化后仍残留的一律报位置并阻断交付。
+    """
+    from .delivery_wording import material_numbers, normalize_report_text, wording_violations
 
     sections = rows(
-        "SELECT section_key,content FROM report_sections WHERE project_id=?", (project_id,)
+        "SELECT * FROM report_sections WHERE project_id=?", (project_id,)
     )
+    numbers = material_numbers(project_id)
     violations: list[dict] = []
     for section in sections:
-        for item in wording_violations(str(section.get("content") or "")):
-            violations.append({**item, "section": section.get("section_key")})
+        key = str(section.get("section_key") or "")
+        body = str(section.get("content") or "")
+        for item in wording_violations(body):
+            violations.append({**item, "location": f"{key} 正文"})
+        # 标题走读取侧同一套规范化：新旧行都按最终显示文本判。
+        title = normalize_report_text(str(section.get("title") or ""), numbers)
+        for item in wording_violations(title):
+            violations.append({**item, "location": f"{key} 章标题"})
+    # 系统表格：从快照渲染的同一份 blocks（网页/MD/Word 共用），规范化后再扫。
+    from .report_blocks import section_blocks
+
+    subject_row = row("SELECT company_name FROM projects WHERE id=?", (project_id,))
+    subject = str((subject_row or {}).get("company_name") or "")
+    for section in sections:
+        key = str(section.get("section_key") or "")
+        try:
+            blocks = section_blocks(project_id, section, subject=subject)
+        except Exception:  # 表格问题不阻断正文；扫描失败跳过该章表格
+            continue
+        for block in blocks:
+            if block.get("kind") != "table":
+                continue
+            table = block.get("table") or {}
+            table_id = str(block.get("table_id") or "")
+            fields: list[tuple[str, str]] = [("表名", str(block.get("title") or ""))]
+            fields += [(f"表头列「{col.get('label')}」", str(col.get("label") or ""))
+                       for col in (block.get("columns") or []) if isinstance(col, dict)]
+            fields += [(f"表注{i + 1}", str(note)) for i, note in enumerate(block.get("notes") or [])]
+            for row_item in table.get("rows") or []:
+                for cell in row_item.get("cells") or []:
+                    fields.append((f"单元格（{row_item.get('row_key')}）", str(cell.get("raw") or "")))
+            for field, text in fields:
+                for item in wording_violations(text):
+                    violations.append({**item, "location": f"{key} {table_id} {field}"})
     if not violations:
         return []
-    summary = "、".join(sorted({f"{item['value']}×{item['count']}" for item in violations}))
+    summary = "；".join(sorted({f"{item.get('location')}：{item['value']}×{item['count']}" for item in violations}))
     return [f"成品用词不合规：{summary}"]
 
 
@@ -411,6 +450,12 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
 
     numbers = material_numbers(project_id)
     content = normalize_report_text(content, numbers)
+    # 章节标题同样要在保存前规范化：`章节标题` 直接进报告目录与前端标题栏，
+    # 旧实现只在**导出**时规范化标题，库里的 `title` 仍是原材料名（"评级报告复核及
+    # 评级差异"），GET /report 读取原样返回 → 网页/前端显示禁用词、与 Word 导出不一致
+    # （旧计划剩余项 P0-2 的"评级章标题"遗漏）。`title` 为空（多数更新路径不带）时保持空。
+    if title:
+        title = normalize_report_text(str(title), numbers)
     required_disclosures = [
         normalize_report_text(block, numbers) for block in (required_disclosures or [])
     ]

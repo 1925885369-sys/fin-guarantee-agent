@@ -1232,6 +1232,189 @@ def _safety_repair_details(validation: dict) -> dict:
     return details
 
 
+# ---------------- P1-2：三级小节（目录配置）的请求指令与响应组装 ----------------
+# 目录里配置了启用小节的章节，输出契约从"整章 content"切换为"按小节分条返回"：
+# 固定三级结构替代重复的 required_sections/paragraph_order 组织指令（PLAN_new.md §三），
+# 服务端按目录顺序渲染小节标题、组装整章正文。无小节配置时行为与旧版完全一致。
+
+# 编译器在 system prompt 尾部的输出约定句（chapter_prompts 两个编译器同源）。
+_CONTENT_JSON_CONVENTION = "输出严格 JSON：{\"content\":\"Markdown正文\",\"citation_ids\":[\"允许的引用ID\"]}。"
+_SUBSECTION_JSON_CONVENTION = (
+    "输出严格 JSON：{\"subsections\":[{\"subsection_id\":\"清单中的小节ID\",\"content\":\"该小节 Markdown 正文\","
+    "\"citation_ids\":[\"允许的引用ID\"]}],\"citation_ids\":[\"本章其余引用ID\"]}。"
+)
+# 小节输出段落的哨兵标记：重复调用时先截断到标记前再整体重注入，保证幂等。
+_SUBSECTION_SECTION_MARK = "【小节输出契约】"
+
+
+def _context_subsections(chapter_context: dict | None) -> list[dict]:
+    """章节上下文里**参与生成**的小节（P1-2）；没有则返回空表（旧行为）。
+
+    ``enabled: false`` 或标题为空的小节不参与模型生成，也不进入请求与校验。
+    """
+    output: list[dict] = []
+    for item in (chapter_context or {}).get("subsections") or []:
+        if not isinstance(item, dict) or not item.get("enabled", True):
+            continue
+        sub_id = str(item.get("subsection_id") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if not sub_id or not title:
+            continue
+        output.append({
+            "subsection_id": sub_id,
+            "title": title,
+            "prompt": str(item.get("prompt") or "").strip(),
+        })
+    return output
+
+
+def _subsection_instructions(subsections: list[dict]) -> str:
+    """把小节清单写成模型可执行的任务说明（标题、可选的小节要求）。"""
+    listing = "；".join(
+        f"{index}) {item['subsection_id']}「{item['title']}」"
+        + (f"——要求：{item['prompt']}" if item.get("prompt") else "")
+        for index, item in enumerate(subsections, 1)
+    )
+    return (
+        f"本章按固定三级结构组织为 {len(subsections)} 个小节，必须为每个小节各返回一条 subsections 记录：{listing}。"
+        "不得遗漏、重复或自造 subsection_id；只返回小节正文，不要在小节正文里重复小节标题——"
+        "标题由服务端按目录顺序渲染。"
+    )
+
+
+def apply_subsection_contract(system_prompt: str, subsections: list[dict]) -> str:
+    """把小节组织指令并入 system prompt（替代 required_sections 组织句与 content 输出约定）。
+
+    **幂等**：上次注入的整段（哨兵标记起）先被截断，再按当前清单整体重注入；
+    旧版 content 输出约定句与"必须保留内容区块"组织句被移除——用户自定义的其余内容不受影响。
+    """
+    prompt = str(system_prompt or "")
+    if not subsections:
+        return prompt
+    if _SUBSECTION_SECTION_MARK in prompt:
+        prompt = prompt.split(_SUBSECTION_SECTION_MARK)[0].rstrip()
+    prompt = prompt.replace(_CONTENT_JSON_CONVENTION, "").rstrip()
+    # 固定的三级结构替代重复的组织指令（PLAN_new.md §三）：移除章级"必须保留内容区块"句。
+    prompt = re.sub(r"必须保留以下内容区块：[^。]*。", "", prompt).rstrip()
+    prompt = (
+        f"{prompt}\n{_SUBSECTION_SECTION_MARK}\n{_SUBSECTION_JSON_CONVENTION}\n"
+        f"{_subsection_instructions(subsections)}"
+    )
+    return re.sub(r"[ \t]{2,}", " ", prompt).strip()
+
+
+def _entry_field(item, name: str, default=""):
+    """小节条目的字段读取：兼容 LlmSubsection 对象与 model_dump 后的 dict。"""
+    if isinstance(item, dict):
+        return item.get(name, default)
+    return getattr(item, name, default)
+
+
+def assemble_subsections(entries: list, subsections: list[dict], alias_to_citation: dict[str, str],
+                         allowed: set[str], strict_citations: bool,
+                         extra_citations: list[str] | None = None,
+                         *, require_complete: bool = True) -> tuple[str, list[str]] | None:
+    """把模型的 subsections 响应组装为整章正文（服务端渲染小节标题）。
+
+    - ``require_complete=True``（首稿与修复稿都按此校验，P1-2）：缺失、重复、未知
+      subsection_id 或**空正文** → 返回 ``None``，由调用方按"唯一一次修复 / 修复后仍
+      不完整即明确失败"处理。
+    - ``require_complete=False``（宽松轮，仅供历史兼容）：尽力组装——缺失小节跳过、
+      未知条目忽略、空正文只保留标题占位。
+    引用按小节顺序合并去重，``extra_citations``（章级 citation_ids）追加在后。
+    """
+    by_id: dict[str, dict] = {}
+    for item in entries or []:
+        sub_id = str(_entry_field(item, "subsection_id", "") or "").strip()
+        if not sub_id or sub_id in by_id:
+            if require_complete:
+                return None
+            continue
+        by_id[sub_id] = item
+    expected = [str(item["subsection_id"]) for item in subsections]
+    if require_complete and set(by_id) != set(expected):
+        return None
+    parts: list[str] = []
+    citations: list[str] = []
+    for section in subsections:
+        item = by_id.get(section["subsection_id"])
+        if item is None:
+            continue
+        body = str(_entry_field(item, "content", "") or "").strip()
+        if not body and require_complete:
+            # 空正文不算完成（P1-2）：只渲染一个光标题的小节不是可用正文，
+            # 必须走修复；修复后仍空 → 明确失败，不得当作完成静默采用。
+            return None
+        parts.append(f"### {section['title']}\n\n{body}" if body else f"### {section['title']}")
+        for citation_id in _entry_field(item, "citation_ids", None) or []:
+            resolved = alias_to_citation.get(citation_id, citation_id)
+            if strict_citations or resolved in allowed:
+                if resolved not in citations:
+                    citations.append(resolved)
+    for citation_id in extra_citations or []:
+        if citation_id not in citations:
+            citations.append(citation_id)
+    return "\n\n".join(parts), citations
+
+
+def _finalize_report_section(body: dict, alias_to_citation: dict[str, str], allowed: set[str],
+                             strict_citations: bool, subsections: list[dict],
+                             *, require_complete: bool, usage: LlmUsage | None = None,
+                             repair_round: bool = False) -> LlmSection:
+    """报告章节响应的统一后处理：引用归一 + 小节组装。
+
+    有 ``subsections`` 配置时，响应必须携带各小节内容，**首稿与修复稿同一口径**
+    （P1-2）：缺失、重复、未知 subsection_id 或空正文都算不完整。首稿失败抛
+    ``report_repair_required`` 走唯一一次结构修复；修复轮失败抛
+    ``report_repair_incomplete`` —— 由调用方按"修复后仍不完整"明确失败
+    （单章保留旧正文、整份生成用确定性备用稿），不得宽松组装后当成完成。
+    """
+    error_type = "report_repair_incomplete" if repair_round else "report_repair_required"
+    prefix = "修复后" if repair_round else ""
+    result = LlmSection.model_validate(body)
+    result.citation_ids = list(dict.fromkeys(
+        alias_to_citation.get(cid, cid) for cid in result.citation_ids
+    ))
+    if not strict_citations:
+        result.citation_ids = [cid for cid in result.citation_ids if cid in allowed]
+    if subsections:
+        entries = list(getattr(result, "subsections", None) or [])
+        if not entries:
+            # 完全没有 subsections 响应：不完整（首稿走结构修复；修复轮明确失败）。
+            # 宽松组装只在 ``require_complete=False`` 的历史兼容路径里保留。
+            if require_complete:
+                raise StructuredLlmError(
+                    error_type,
+                    f"{prefix}响应缺少小节内容（subsections）",
+                    usage, raw_content=json.dumps(body, ensure_ascii=False),
+                )
+        else:
+            assembled = assemble_subsections(
+                entries, subsections, alias_to_citation, allowed, strict_citations,
+                extra_citations=list(result.citation_ids), require_complete=require_complete,
+            )
+            if assembled is None and require_complete:
+                raise StructuredLlmError(
+                    error_type,
+                    f"{prefix}小节响应不完整：缺失、重复、未知 subsection_id 或空正文",
+                    usage, raw_content=json.dumps(body, ensure_ascii=False),
+                )
+            if assembled is not None:
+                assembled_content, assembled_citations = assembled
+                # 空组装结果不得覆盖模型给出的整章正文（宽松轮容错）。
+                if assembled_content.strip() or not str(result.content or "").strip():
+                    result.content, result.citation_ids = assembled_content, assembled_citations
+        result.subsections = []
+    elif require_complete and not str(result.content or "").strip():
+        # content 必填性由本检查承接（schema 放宽为默认空串以兼容 subsections 响应）。
+        raise StructuredLlmError(
+            error_type,
+            f"{prefix}响应缺少正文内容",
+            usage, raw_content=json.dumps(body, ensure_ascii=False),
+        )
+    return result
+
+
 def _report_request(title: str, content: str, evidence: list[dict], context: LlmCallContext | None,
                     chapter_key: str | None, chapter_context: dict | None) -> tuple:
     """构造章节润色请求（首次润色与篇幅压缩共用同一份）。
@@ -1319,6 +1502,14 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
             system_prompt = system_prompt.replace(legacy, "").rstrip()
         if GENERATE_BOUNDARY_SENTENCE not in system_prompt:
             system_prompt = f"{system_prompt}\n{GENERATE_BOUNDARY_SENTENCE}"
+    # P1-2：有小节配置的章节，输出契约改为按小节分条返回（替代重复的组织指令）。
+    subsections = _context_subsections(chapter_context)
+    if subsections:
+        system_prompt = apply_subsection_contract(system_prompt, subsections)
+        if isinstance(request, dict):
+            request.pop("required_sections", None)
+            request.pop("required_elements", None)
+            request["required_subsections"] = subsections
     return system_prompt, request, alias_to_citation, context or LlmCallContext(task_type="report"), allowed
 
 
@@ -1432,12 +1623,12 @@ def repair_section_length(title: str, content: str, evidence: list[dict], contex
                                    max_input_chars=settings.llm_report_max_chars,
                                    drop_report=drop_report,
                                    evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
-    parsed = LlmSection.model_validate(body)
-    parsed.citation_ids = list(dict.fromkeys(
-        alias_to_citation.get(cid, cid) for cid in parsed.citation_ids
-    ))
-    if not strict_citations:
-        parsed.citation_ids = [cid for cid in parsed.citation_ids if cid in allowed]
+    # 修复轮同样要求小节完整（P1-2）：修复后仍缺/重/未知/空正文 → report_repair_incomplete，
+    # 由调用方按"修复后仍不完整"明确失败，不得宽松组装后当成完成。
+    parsed = _finalize_report_section(
+        body, alias_to_citation, allowed, strict_citations,
+        _context_subsections(chapter_context), require_complete=True, repair_round=True,
+    )
     return parsed, usage
 
 
@@ -1466,12 +1657,11 @@ def repair_section_safety(title: str, content: str, evidence: list[dict], contex
                                    max_input_chars=settings.llm_report_max_chars,
                                    drop_report=drop_report,
                                    evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
-    parsed = LlmSection.model_validate(body)
-    parsed.citation_ids = list(dict.fromkeys(
-        alias_to_citation.get(cid, cid) for cid in parsed.citation_ids
-    ))
-    if not strict_citations:
-        parsed.citation_ids = [cid for cid in parsed.citation_ids if cid in allowed]
+    # 修复轮同样要求小节完整（P1-2）：修复后仍不完整 → report_repair_incomplete（明确失败）。
+    parsed = _finalize_report_section(
+        body, alias_to_citation, allowed, strict_citations,
+        _context_subsections(chapter_context), require_complete=True, repair_round=True,
+    )
     return parsed, usage
 
 
@@ -1504,12 +1694,12 @@ def repair_section_json(title: str, content: str, evidence: list[dict], context:
                                    max_input_chars=settings.llm_report_max_chars,
                                    drop_report=drop_report,
                                    evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
-    parsed = LlmSection.model_validate(body)
-    parsed.citation_ids = list(dict.fromkeys(
-        alias_to_citation.get(cid, cid) for cid in parsed.citation_ids
-    ))
-    if not strict_citations:
-        parsed.citation_ids = [cid for cid in parsed.citation_ids if cid in allowed]
+    # 修复轮同样要求小节完整（P1-2）：JSON 结构修复后仍缺/重/未知/空正文 →
+    # report_repair_incomplete，由调用方明确失败，不再宽松组装。
+    parsed = _finalize_report_section(
+        body, alias_to_citation, allowed, strict_citations,
+        _context_subsections(chapter_context), require_complete=True, repair_round=True,
+    )
     return parsed, usage
 
 
@@ -1524,15 +1714,14 @@ def rewrite_section(title: str, content: str, evidence: list[dict], context: Llm
     system_prompt, request, alias_to_citation, call_context, allowed = _report_request(
         title, content, evidence, context, chapter_key, chapter_context,
     )
+    subsections = _context_subsections(chapter_context)
 
-    def _finalize(body: dict) -> LlmSection:
-        result = LlmSection.model_validate(body)
-        result.citation_ids = list(dict.fromkeys(
-            alias_to_citation.get(cid, cid) for cid in result.citation_ids
-        ))
-        if not strict_citations:
-            result.citation_ids = [cid for cid in result.citation_ids if cid in allowed]
-        return result
+    def _finalize(body: dict, usage: LlmUsage | None = None) -> LlmSection:
+        # P1-2：首轮要求小节完整（缺/重/未知 → report_repair_required，走唯一一次结构修复）。
+        return _finalize_report_section(
+            body, alias_to_citation, allowed, strict_citations, subsections,
+            require_complete=True, usage=usage,
+        )
 
     # ``safety_repair`` 与 ``length_repair`` 互斥（调用方保证只传一个）；两者都传时安全修复优先。
     # 两种修复同构：**各自直接做唯一一次定向修复，不再先做一次主稿重写**——此前篇幅分支会先做
@@ -1564,7 +1753,12 @@ def rewrite_section(title: str, content: str, evidence: list[dict], context: Llm
                                    max_input_chars=settings.llm_report_max_chars,
                                    drop_report=drop_report,
                                    evidence_sources=_report_evidence_sources(chapter_context, evidence, alias_to_citation))
-    parsed = _finalize(body)
+    try:
+        parsed = _finalize(body, usage)
+    except StructuredLlmError as exc:
+        # 结构不完整（小节缺失/重复/未知）时把本次调用 usage 带上——上层据此记账后
+        # 用唯一一次修复机会重跑（error_type 与 JSON 不可解析走同一条修复通道）。
+        raise StructuredLlmError(exc.error_type, str(exc), usage, raw_content=exc.raw_content) from exc
     return parsed, usage
 
 

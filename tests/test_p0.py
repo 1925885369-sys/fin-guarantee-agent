@@ -378,3 +378,107 @@ def test_p0_endpoints_require_project_token_and_six_cases_have_gold_annotations(
             annotations = client.get(f"/api/projects/{demo_id}/gold-standard").json()
             assert annotations and {item["annotation_type"] for item in annotations} >= {"fact", "warning", "citation", "tie_out"}
         _cleanup(project_id)
+
+
+def test_number_mentions_exclude_month_ranges():
+    """月份区间（"2026年1~3月"）不是取值：提取层剔除，避免"1"/"3"被判查无记录。
+
+    2026-10-15 北投 cashflow #13 实测：吸收投资系列句本可支持，被月份区间的两个
+    数字拖垮整句（missing_record）而回退。
+    """
+    from backend.app.p0 import _number_mentions
+
+    mentions = _number_mentions(
+        "2025年和2026年1~3月，公司吸收投资收到的现金分别为235.74亿元和120.25亿元。"
+    )
+    raws = [item["raw"] for item in mentions]
+    assert "235.74亿元" in raws and "120.25亿元" in raws
+    assert "1" not in raws and "3月" not in raws
+
+
+def test_gap_window_covers_enumerated_subjects():
+    """缺口谓语与枚举科目相隔较远（30+ 字）时仍按缺失陈述处理（2026-10-15 复核）。
+
+    "材料未披露 A、B、C…" / "…处于材料不足状态，缺少 …，因而未作风险判断"——
+    原 16 字窗口差几字就漏判、整句误记 unsupported。claim 是单句，窗口放宽的代价
+    仅在无数字说明句；带数字主张仍走数字判定。
+    """
+    from backend.app.p0 import _claim_support_outcome
+
+    claim = ("关联方信息方面，主要关联方清单已纳入主体档案，该清单的完整性、关联关系认定口径"
+             "及其与工商登记信息的一致性，材料不足，无法判断。")
+    status, reason, _ = _claim_support_outcome(
+        "", "governance", claim, "factual", ["s-1"], {"s-1": "任意文本"}, [{"record_type": "fact"}], "model",
+    )
+    assert status != "unsupported", f"缺失陈述被误判：{status}/{reason}"
+
+    claim2 = "但材料未披露在手订单规模、订单覆盖期限、产能利用率或市场份额等能够直接支撑经营持续性判断的数据。"
+    status2, reason2, _ = _claim_support_outcome(
+        "", "operations", claim2, "factual", ["s-1"], {"s-1": "任意文本"}, [{"record_type": "fact"}], "model",
+    )
+    assert status2 != "unsupported", f"缺失陈述被误判：{status2}/{reason2}"
+
+
+def test_number_mentions_exclude_line_numbers_and_month_marks():
+    """专名编号与月份单点不是取值（2026-10-15 北投 operations #4/#10 实测）。
+
+    地铁线路名（"3号线""22号线"）与活动时间（"6月""9月末"）被读成数字会凭空制造
+    "查无记录的数字"并拖垮整句支持判定。
+    """
+    from backend.app.p0 import _number_mentions
+
+    assert _number_mentions("以及3号线一期剩余段、22号线（平谷线）、28号线（CBD线）等在建工程。") == []
+    mentions = _number_mentions("2025年6月及9月末完成验收；园区营业额超2300万元。")
+    assert [item["raw"] for item in mentions] == ["2300万元"]
+    # 字母前缀编号（"BS4/6""V4.1.202606"）与括注式期限（"（含1年）"）同属非取值。
+    assert _number_mentions("BS4/6商办楼与BS5/8组团的竣备与移交情况。") == []
+    assert _number_mentions("评级方法采用模型V4.1.202606。") == []
+    assert _number_mentions("一年以内（含1年）合计口径观察。") == []
+
+
+def test_gap_and_declaration_forms_do_not_trip_support_check():
+    """缺口/过程声明句的三类新措辞不得误判（2026-10-16 本轮试跑实测）。
+
+    正例（三条真实回退主张，整句无业务事实主张）：
+      ① "本报告不对…作出结论；…均需在补充…后方可核验"（北投 governance #18）；
+      ② "…之前，均无法形成确定性判断"（中邮 cashflow #38）；
+      ③ "勾稽声明：本章未对任何现金流数据…进行自行计算或换算"（中邮 cashflow #32，
+         缺口词与命中科目相隔整句——整句级过程声明）。
+    反例（负例不得放宽）：
+      ④ "未对公司经营成果产生重大影响"——否定式**业务事实**句，仍按事实校验；
+      ⑤ "未对其他应收款计提坏账准备"——会计处理是事实（动词"计提"不在过程白名单）。
+    """
+    from backend.app.p0 import _CLAIM_DECLARATION_RE, _claim_support_outcome
+
+    records = [{"record_type": "fact"}]
+
+    def outcome(claim: str, key: str = "governance"):
+        return _claim_support_outcome(
+            "", key, claim, "factual", ["s-1"], {"s-1": "任意文本"}, records, "model",
+        )
+
+    gap_claims = (
+        "据此，本报告不对关联方资金往来的规模、占比或风险水平作出结论；"
+        "相关金额与占比均需在补充关联方往来明细及其他应收款、净资产数据后方可核验。",
+        "上述事项在取得募集说明书相关章节原件、偿债安排文件、银行流水及偿债专户对账单之前，"
+        "均无法形成确定性判断。",
+        "勾稽声明：本章未对任何现金流数据、偿债指标或覆盖比例进行自行计算或换算，"
+        "所引数值均直接取自募集说明书披露口径；后续如取得偿债现金流预测，"
+        "应就每一预测期间分别与银行流水、订单回款记录及偿债专户余额进行逐期勾稽。",
+    )
+    for claim in gap_claims:
+        status, reason, _ = outcome(claim)
+        assert status != "unsupported", f"缺口/过程声明被误判：{status}/{reason}｜{claim[:24]}"
+
+    # 过程声明闸门的自证：命中片段确实来自白名单动词（未对…进行自行计算）。
+    matched = _CLAIM_DECLARATION_RE.search(gap_claims[2])
+    assert matched and matched.group(0).startswith("未对") and matched.group(0).endswith("计算")
+
+    # 反例④：否定式业务事实句（不含"进行/作出 + 计算/换算/勾稽"）仍判缺记录。
+    status4, reason4, _ = outcome(
+        "本期债券发行未对公司经营成果产生重大影响，其他应收款规模保持稳定。"
+    )
+    assert status4 == "unsupported" and reason4 == "missing_record", (status4, reason4)
+    # 反例⑤：会计处理事实句（"计提"不豁免）仍判缺记录。
+    status5, reason5, _ = outcome("公司未对其他应收款计提坏账准备。")
+    assert status5 == "unsupported" and reason5 == "missing_record", (status5, reason5)

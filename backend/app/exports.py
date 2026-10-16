@@ -14,7 +14,7 @@ from docx.shared import Cm, Pt, RGBColor
 from .database import json_load, row, rows
 from .facts import material_inventory
 from .report_blocks import TABLE_CAPTION_RE, render_table_block_markdown, section_blocks
-from .report_outline import cn_number, grouped_sections
+from .report_outline import cn_number, grouped_sections, outline_for_grouping
 from .report_delivery import review_notice
 from .review import unresolved_items
 from .review_lifecycle import report_state
@@ -214,6 +214,35 @@ def _blocks_markdown(blocks: list[dict]) -> str:
     return "\n\n".join(output)
 
 
+class ExportWordingError(RuntimeError):
+    """最终导出前的成品用词残留：报位置并拒绝（旧计划剩余项 P0-2）。
+
+    交付门（``delivery_blockers``）已按结构扫过一遍；这里再扫一遍**组装完成的
+    实际文本**——封面、目录、正文、表格、引用与附录任何一个环节漏改，都在这里兜住。
+    """
+
+
+def _wording_report(text: str) -> list[str]:
+    """禁用词位置清单：``第 N 行「词」×次数``。全部为残留（规范化后仍存在）。"""
+    from .delivery_wording import wording_violations
+
+    violations = wording_violations(text or "")
+    if not violations:
+        return []
+    lines = (text or "").splitlines()
+    problems: list[str] = []
+    for item in violations:
+        index = next((number for number, line in enumerate(lines, 1) if item["value"] in line), 0)
+        problems.append(f"第{index}行「{item['value']}」×{item['count']}")
+    return problems
+
+
+def _assert_wording_clean(text: str, *, where: str) -> None:
+    problems = _wording_report(text)
+    if problems:
+        raise ExportWordingError(f"{where}成品用词不合规（残留禁用词）：" + "；".join(problems))
+
+
 def markdown_report(project_id: str, variant: str = "draft") -> str:
     project = row("SELECT * FROM projects WHERE id=?", (project_id,))
     sections = _product_titles(
@@ -241,7 +270,8 @@ def markdown_report(project_id: str, variant: str = "draft") -> str:
 
     # 论文式层级：一级 `## 一、分部`、二级 `### （一）章`、三级 `#### 1. 分块`。
     # 编号在此按层级计算，不写入正文，避免模型改写或章节重生成后编号丢失。
-    groups = grouped_sections(sections)
+    # P1-4：分组/标题跟随生效目录（与网页/Word 出口同源）。
+    groups = grouped_sections(sections, outline=outline_for_grouping(project_id))
     for group in groups:
         output.extend([f"## {group['label']}", ""])
         for chapter in group["chapters"]:
@@ -256,7 +286,10 @@ def markdown_report(project_id: str, variant: str = "draft") -> str:
     if open_lines:
         output.extend([f"## {cn_number(len(groups) + 1)}、未决事项附录", "", *[f"- {line}" for line in open_lines], ""])
     output.extend([f"## {cn_number(len(groups) + 2)}、附录：证据索引", "", *_markdown_evidence_index(records, citation_numbers, material_labels), ""])
-    return "\n".join(output)
+    text = "\n".join(output)
+    if variant == "final":
+        _assert_wording_clean(text, where="Markdown")
+    return text
 
 
 def _set_east_asia_font(element, font_name: str, latin: str | None = None) -> None:
@@ -642,9 +675,9 @@ def _add_cover(document: Document, project: dict, title: str, level: str, has_op
     document.add_page_break()
 
 
-def _add_contents(document: Document, sections: list[dict]) -> None:
+def _add_contents(document: Document, sections: list[dict], outline: dict | None = None) -> None:
     _add_heading_text(document, "报告目录", 1)
-    for group in grouped_sections(sections):
+    for group in grouped_sections(sections, outline=outline):
         paragraph = document.add_paragraph()
         run = paragraph.add_run(group["label"])
         run.bold = True
@@ -698,6 +731,15 @@ def _add_evidence_appendix(document: Document, records: list[dict], citation_num
                 _set_east_asia_font(run._element, "宋体")
 
 
+def _document_text(document: Document) -> str:
+    """Word 文档的实际文本（段落＋全部表格单元格），用于导出前的用词残留扫描。"""
+    parts = [paragraph.text for paragraph in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    return "\n".join(parts)
+
+
 def docx_report(project_id: str, variant: str = "draft") -> bytes:
     project = row("SELECT * FROM projects WHERE id=?", (project_id,))
     sections = _product_titles(
@@ -720,10 +762,10 @@ def docx_report(project_id: str, variant: str = "draft") -> bytes:
     if notice:
         paragraph = document.add_paragraph(notice)
         paragraph.runs[0].bold = True
-    _add_contents(document, sections)
+    _add_contents(document, sections, outline=outline_for_grouping(project_id))
 
     # 与 Markdown 出口共用同一套论文式编号：一级 一、二级 （一）三级 1.
-    groups = grouped_sections(sections)
+    groups = grouped_sections(sections, outline=outline_for_grouping(project_id))
     for group in groups:
         _add_heading_text(document, group["label"], 1)
         for chapter in group["chapters"]:
@@ -742,6 +784,8 @@ def docx_report(project_id: str, variant: str = "draft") -> bytes:
             _add_inline_markdown(paragraph, line)
     _add_evidence_appendix(document, records, citation_numbers, material_labels, f"{cn_number(len(groups) + 2)}、附录：证据索引")
     _enforce_typography(document)
+    if variant == "final":
+        _assert_wording_clean(_document_text(document), where="Word")
 
     buffer = BytesIO()
     document.save(buffer)

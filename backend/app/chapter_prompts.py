@@ -47,6 +47,52 @@ BOND_CHAPTER_KEYS = (
     "risk_matrix", "tasks", "monitoring", "evidence",
 )
 
+# 自定义章节键形态（P1-4）：`chapter-<uuid>`。目录中 template_key=null 的章节以
+# chapter_id 作为 section_key 进入生成与 Prompt 配置链——"改名不改变生成方式与事实归属"。
+_CUSTOM_CHAPTER_ID_RE = re.compile(
+    r"^chapter-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def is_custom_chapter_key(chapter_key: str) -> bool:
+    """该键是否是目录中的自定义章节（`chapter-<uuid>` 形态）。"""
+    return bool(_CUSTOM_CHAPTER_ID_RE.match(str(chapter_key or "")))
+
+
+# 自定义章节的合成出厂配置：无 YAML 契约，任务由目录标题/小节/Prompt 组成检索与生成
+# 指令；安全边界与内置模型章节完全一致（固定 guardrails 仍由编译器附加，见
+# ``compile_structured_prompt`` 尾部）。长度目标给宽松默认区间，用户可在 Prompt
+# 工作区里按章调整。
+def _synthetic_custom_chapter_config() -> dict:
+    return {
+        "llm": True,
+        "role": "尽调报告撰写员",
+        "goal": "依据本章标题、章节要求与系统提供的证据材料撰写分析正文；材料不足处写明“材料不足”，不得推断或补写结论。",
+        "required_inputs": [],
+        "required_sections": [],
+        "preserve_blocks": [],
+        "rules": [],
+        "forbidden": [],
+        "input_contract": {
+            "fact_keys": [], "metric_keys": [], "rule_keys": [], "source_kinds": [],
+            "max_evidence_items": 12, "max_evidence_chars": 18000,
+        },
+        "output_contract": {
+            "required_phrases": [], "required_missing_markers": ["材料不足", "待核验"],
+            "forbidden_patterns": ["建议承保", "建议拒绝", "投资建议"],
+            "max_citations": 3, "attribution_mode": "neutral",
+        },
+        "narrative_contract": {
+            "tone": "professional_due_diligence",
+            "paragraph_order": [], "min_paragraphs": 3, "max_paragraphs": 5,
+            "preferred_min_chars": 1200, "preferred_max_chars": 3000,
+            "list_mode": "limited",
+            "avoid_openings": ["系统识别到", "规则状态为", "经模型分析"],
+            "prohibited_terms": ["warning", "insufficient", "rule_key", "字段"],
+        },
+        "generation_mode": "generate",
+    }
+
 # 章节中文标题与报告分部的单一来源。报告生成（bond_report）、导出分组（exports）
 # 和 prompt API（main）都从这里取，未生成报告的项目也能拿到中文标题。
 BOND_CHAPTER_TITLES = {
@@ -292,16 +338,24 @@ def prompt_config_sha256(bond: bool = True) -> str:
 
 
 def chapter_uses_llm(chapter_key: str) -> bool:
-    """该章节是否启用 LLM 润色。未知章节拒绝调用模型。"""
+    """该章节是否启用 LLM 润色。未知章节拒绝调用模型；自定义章节（P1-4）恒为生成。"""
     config = _pack_for(chapter_key).chapters.get(chapter_key)
-    return bool(config and config.llm)
+    if config is None:
+        return is_custom_chapter_key(chapter_key)
+    return bool(config.llm)
 
 
 def load_chapter_config(chapter_key: str) -> dict:
-    """返回经过强类型校验的单章配置；未知章节返回安全的纯规则配置。"""
+    """返回经过强类型校验的单章配置；未知章节返回安全的纯规则配置。
+
+    自定义章节（`chapter-<uuid>`）返回合成配置（P1-4）：任务由目录标题/小节/Prompt
+    组成检索与生成指令，安全边界与内置模型章节一致。
+    """
     pack = _pack_for(chapter_key)
     config = pack.chapters.get(chapter_key)
     if config is None:
+        if is_custom_chapter_key(chapter_key):
+            return _synthetic_custom_chapter_config()
         return {
             "llm": False, "role": "", "goal": "未知章节，禁止模型改写。", "required_inputs": [],
             "required_sections": [], "preserve_blocks": [], "rules": [], "forbidden": [],
@@ -589,6 +643,28 @@ def legacy_prompt_config(chapter_key: str, prompt: str) -> tuple[dict, str]:
     return factory, "parsed_legacy"
 
 
+def _merge_override(factory: dict, item: dict | None) -> tuple[dict, str] | None:
+    """把一行覆盖合并到出厂配置上，返回 (配置, migration_mode)；无有效覆盖返回 None。
+
+    结构化覆盖按字段覆盖出厂值（`narrative_contract` 逐子键合并）；legacy 覆盖没有结构，
+    只能整体作为"额外要求"追加。两种形态项目级与全局级完全一致，故抽出来共用——
+    否则"全局保存后编辑器看到的结构"与"项目保存后看到的结构"会漂移。
+    """
+    if not item:
+        return None
+    structured = _decode_structured(item.get("structured_json"))
+    if structured:
+        result = dict(factory)
+        result.update(structured)
+        result["narrative_contract"] = {**factory["narrative_contract"], **(structured.get("narrative_contract") or {})}
+        return result, str(item.get("migration_mode") or "structured")
+    if str(item.get("prompt") or "").strip():
+        result = dict(factory)
+        result["additional_requirements"] = str(item["prompt"])
+        return result, "preserved_legacy"
+    return None
+
+
 def prompt_edit_state(chapter_key: str, project_id: str | None = None) -> tuple[dict, str, str]:
     """Return (editable config, source, migration mode) for the UI/API."""
     factory = editable_config_from_factory(chapter_key)
@@ -601,18 +677,30 @@ def prompt_edit_state(chapter_key: str, project_id: str | None = None) -> tuple[
     except Exception:
         return factory, "system", "structured"
     for item, source in ((project, "project"), (global_row, "global")):
-        if not item:
-            continue
-        structured = _decode_structured(item.get("structured_json"))
-        if structured:
-            result = dict(factory)
-            result.update(structured)
-            result["narrative_contract"] = {**factory["narrative_contract"], **(structured.get("narrative_contract") or {})}
-            return result, source, str(item.get("migration_mode") or "structured")
-        if str(item.get("prompt") or "").strip():
-            result = dict(factory)
-            result["additional_requirements"] = str(item["prompt"])
-            return result, source, "preserved_legacy"
+        merged = _merge_override(factory, item)
+        if merged:
+            return merged[0], source, merged[1]
+    return factory, "system", "structured"
+
+
+def global_prompt_edit_state(chapter_key: str) -> tuple[dict, str, str]:
+    """**全局默认**的生效链：全局覆盖 > 出厂 YAML，**不含任何项目覆盖**（P0-1）。
+
+    前端"全局默认"范围要用它来加载与回填——若复用 ``prompt_edit_state``（含项目链），
+    在有项目覆盖的项目上编辑"全局默认"会看到项目覆盖的内容，保存后把项目配置写进全局。
+    """
+    factory = editable_config_from_factory(chapter_key)
+    try:
+        from .database import row
+        global_row = row(
+            "SELECT structured_json,prompt,migration_mode FROM global_report_prompts WHERE chapter_key=?",
+            (chapter_key,),
+        )
+    except Exception:
+        return factory, "system", "structured"
+    merged = _merge_override(factory, global_row)
+    if merged:
+        return merged[0], "global", merged[1]
     return factory, "system", "structured"
 
 

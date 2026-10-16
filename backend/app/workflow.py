@@ -1031,11 +1031,45 @@ def _fact_sentence(facts: list[dict], keys: list[str]) -> str:
 
 
 def _templates(project: dict, facts: list[dict], checks: list[dict], risks: list[dict], inventory: dict) -> list[SectionTemplate]:
-    """报告章节模板。产品已收敛为**仅债券担保**，因此只走债券生成器。"""
+    """报告章节模板：跟随生效目录（P1-4）。
+
+    - 内置章节按目录顺序生成：标题以目录为准（改名立即反映），section_key 仍是内置键
+      （改名不改变生成方式与事实归属）；目录中被删除的内置章节不再生成——删除只影响
+      今后报告结构，历史快照不受影响。
+    - 自定义章节（``template_key=null``）以 ``chapter_id`` 为 section_key、空确定性草稿
+      （模型直接撰写 + Prompt 驱动检索，见 ``build_chapter_context``）。
+    - 目录不可读/为空时回退 17 章全量，保证旧行为不变。
+    """
     from .bond_report import generate_bond_chapters
 
-    chapters = generate_bond_chapters(project["id"], False)
-    return [SectionTemplate(item.key, item.title, item.content, item.source_ids) for item in chapters]
+    builtin = {item.key: item for item in generate_bond_chapters(project["id"], False)}
+    templates: list[SectionTemplate] = []
+    seen: set[str] = set()
+    try:
+        from .report_outline_store import effective_outline
+
+        outline = effective_outline(project["id"])
+    except Exception:
+        outline = {}
+    for part in outline.get("parts") or []:
+        for chapter in part.get("chapters") or []:
+            template_key = str(chapter.get("template_key") or "")
+            chapter_id = str(chapter.get("chapter_id") or "")
+            title = str(chapter.get("title") or "").strip()
+            if template_key:
+                item = builtin.get(template_key)
+                if not item or template_key in seen:
+                    continue
+                seen.add(template_key)
+                templates.append(SectionTemplate(template_key, title or item.title, item.content, item.source_ids))
+            else:
+                if not chapter_id or chapter_id in seen:
+                    continue
+                seen.add(chapter_id)
+                templates.append(SectionTemplate(chapter_id, title or "自定义章节", "", []))
+    if not templates:
+        return [SectionTemplate(item.key, item.title, item.content, item.source_ids) for item in builtin.values()]
+    return templates
 
 
 def _numbers_supported(content: str, original: str, evidence: list[dict]) -> bool:
@@ -1298,6 +1332,18 @@ def chapter_diagnostics(validation: dict) -> dict:
             validation.get("support_unsupported_claims") or 0)
         diagnostics["support_invalid_citations"] = int(
             validation.get("support_invalid_citations") or 0)
+        # 逐条明细（收口方案 §五"逐条证明正确披露不误退"）：主张位置、原因码与匹配记录随
+        # 诊断一并冻结——验收与复核不再只有计数，可以直接点名"哪一句、为什么、命中了谁"。
+        diagnostics["support_failed_items"] = [
+            {
+                "claim_index": item.get("claim_index"),
+                "claim_text": str(item.get("claim_text") or "")[:160],
+                "reason_code": str(item.get("reason_code") or ""),
+                "matched_record_ids": list(item.get("matched_record_ids") or [])[:5],
+                "unsupported_numbers": list(item.get("unsupported_numbers") or [])[:8],
+            }
+            for item in (validation.get("support_detail_items") or [])[:8]
+        ]
     return diagnostics
 
 
@@ -1317,6 +1363,9 @@ def _frozen_input_snapshot(chapter_context: dict, *, chapter_key: str, expected:
         "prompt_sha256": chapter_context.get("prompt_sha256", ""),
         "prompt_version": chapter_context.get("prompt_version", ""),
         "materials_version": chapter_context.get("materials_version", ""),
+        # 生成时生效的目录版本与小节哈希（P1-2）：随台账冻结，供回放与审计对照。
+        "outline_version": chapter_context.get("outline_version", ""),
+        "outline_sha256": chapter_context.get("outline_sha256", ""),
         "expected_revision": expected.get("expected_revision"),
         "expected_content_sha256": expected.get("expected_content_sha256", ""),
         "allowed_citation_count": len(chapter_context.get("allowed_citation_ids") or []),
@@ -1339,6 +1388,8 @@ def _frozen_input_snapshot(chapter_context: dict, *, chapter_key: str, expected:
             "length_policy": chapter_context.get("length_policy") or {},
             "table_snapshot_hash": chapter_context.get("table_snapshot_hash", ""),
             "prompt_contract_version": chapter_context.get("prompt_contract_version", ""),
+            # 参与生成的小节清单（P1-2）：与 input_hash 同源的冻结输入的一部分。
+            "subsections": list(chapter_context.get("subsections") or []),
         },
     }
 
@@ -1428,6 +1479,10 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
     repair_type = "none"
     draft_content = ""
     repair_content = ""
+    # 本跑**首稿被拒的具体原因**（含支持明细）：随尝试台账冻结（收口方案 §五"逐条证明"）——
+    # 验收报告"修复采纳"行必须显示本跑首拒原因，不能拿该章节更早一次运行的失败记录顶替。
+    first_rejection: list[str] = []
+    first_rejection_support: list[dict] = []
     # 预算整条丢弃的证据收集器（修订稿 §2.1 / §3.2）：本尝试内所有模型调用共用一份，
     # 丢弃即刻收窄章节上下文——校验允许集、修复输入与写库白名单都只见模型实际收到的材料。
     drop_collector: dict = {}
@@ -1444,6 +1499,10 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             diagnostics.setdefault(
                 "needs_review_count", len(validation.get("needs_review_items") or []),
             )
+            if first_rejection:
+                diagnostics.setdefault("first_rejection_reasons", list(first_rejection))
+            if first_rejection_support:
+                diagnostics.setdefault("first_rejection_support_items", list(first_rejection_support))
             attempt_id = record_chapter_attempt(
                 project_id=project_id, section_key=chapter_key, run_id=run_id,
                 status=status, stage=stage, repair_type=repair_type, adopted=adopted,
@@ -1477,6 +1536,9 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             if getattr(exc, "error_type", "") == "report_repair_required" and not repair_attempted:
                 repair_attempted = True
                 repair_type = "json"
+                first_rejection = [
+                    f"首次输出结构不可解析（{str(getattr(exc, 'error_type', '') or '结构校验失败')}）"
+                ]
                 _add_usage(usage_total, getattr(exc, "usage", None) or LlmUsage())
                 # 首稿调用已丢弃的证据先收窄：JSON 修复复用同一份（收窄后的）输入。
                 _apply_dropped_evidence(chapter_context, drop_collector)
@@ -1525,6 +1587,19 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             # 安全被拒 / 待核验 → 唯一一次修复机会（安全修复优先）
             repair_attempted = True
             repair_type = "safety"
+            first_rejection = [str(item) for item in (validation.get("reasons") or [])][:3] or (
+                [f"仅剩未决项 {len(validation.get('needs_review_items') or [])} 条，触发一次修复"]
+                if validation.get("needs_review_items") else [])
+            if validation.get("support_failed"):
+                first_rejection_support = [
+                    {
+                        "claim_index": item.get("claim_index"),
+                        "claim_text": str(item.get("claim_text") or "")[:160],
+                        "reason_code": str(item.get("reason_code") or ""),
+                        "matched_record_ids": list(item.get("matched_record_ids") or [])[:5],
+                    }
+                    for item in (validation.get("support_detail_items") or [])[:8]
+                ]
             result, validation, repair_usage, repair_draft = repair_chapter_safety(
                 title, deterministic_content, evidence, chapter_key=chapter_key,
                 chapter_context=chapter_context, call_context=call_context,
@@ -1546,6 +1621,7 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             # 安全校验全过、仅篇幅超出目标上限 → 共用同一"每章一次"配额，定向压缩一次
             repair_attempted = True
             repair_type = "length"
+            first_rejection = ["篇幅超出目标上限，触发定向压缩"]
             result, validation, repair_usage, repair_draft = repair_chapter_length(
                 title, deterministic_content, evidence, chapter_key=chapter_key,
                 chapter_context=chapter_context, call_context=call_context,
@@ -1563,7 +1639,12 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             )
     except Exception as exc:
         error_type = getattr(exc, "error_type", "") if isinstance(exc, StructuredLlmError) else ""
-        reason = f"章节模型调用或结构校验失败：{error_type or type(exc).__name__}"
+        if error_type == "report_repair_incomplete":
+            # P1-2：首稿结构失败 → 唯一一次修复；修复后仍不完整 → **明确失败**。
+            # 完整生成保留确定性备用稿（fallback 标记 + 回退原因），单章再生保留旧正文。
+            reason = f"章节模型调用或结构校验失败：report_repair_incomplete（{str(exc)}）"
+        else:
+            reason = f"章节模型调用或结构校验失败：{error_type or type(exc).__name__}"
         return _emit(
             content=deterministic_content, citation_ids=None,
             validation={"status": "fallback", "reasons": [reason]},
@@ -2218,6 +2299,12 @@ def _run(run_id: str, project_id: str, resume_node: str = "inventory", source_ru
         policy = load_policy(run.get("policy_profile") or None)
         save_policy_snapshot(project_id, run_id, policy)
         materialize_snapshot_evidence(project_id)
+        # P1-1：**整份生成开始时**冻结当次采用的目录（配置之后怎么改都与本次无关），
+        # 完成时随报告快照在同一事务写入（见下方 completed 分支）。读取失败降级为空
+        # payload——目录问题不阻断报告生成。
+        from .report_outline_adoption import freeze_adoption, save_adoption
+
+        adoption = freeze_adoption(project_id)
 
         inventory = material_inventory(project_id)
         if reusable("inventory"):
@@ -2453,6 +2540,9 @@ def _run(run_id: str, project_id: str, resume_node: str = "inventory", source_ru
                  now_iso(), latency, measured_usage["input_tokens"], measured_usage["output_tokens"], measured_usage["cost"], run_id),
             )
             capture_snapshot(project_id, run_id, conn=conn)
+            # P1-1：报告采用目录随完成写入（与快照同事务）——「报告采用的目录」自此
+            # 以本次生成开始时冻结的版本为准，之后配置变更不再影响本报告的记账。
+            save_adoption(project_id, adoption, run_id=run_id, conn=conn)
         # A completed run publishes the report only if evidence validation
         # passed.  Any later human decision increments review_revision and
         # explicitly makes this version stale again.

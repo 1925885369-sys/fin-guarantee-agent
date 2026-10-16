@@ -14,8 +14,51 @@ from .facts import FACT_REGISTRY
 # cashflow #5/#23 实测——"未识别到原表""未见明确约定" 未在词表里，缺口陈述被当成
 # "无证据事实"。
 _GAP_STATEMENT_CONTEXT_RE = re.compile(
-    r"(缺少|缺乏|缺失|材料不足|未提供|未获取|未取得|未披露|未识别到|未识别|未见|未在现有材料"
-    r"|没有|无法获取|无法识别|暂无|暂缺)"
+    r"(缺少|缺乏|缺失|材料不足|未提供|未获取|未取得|未随|未披露|未识别到|未识别|未见|未出现"
+    r"|未包含|未在现有材料|没有|无法获取|无法识别|无法判断|无法形成结论|无法基于|暂无|暂缺"
+    r"|待核验|待补充|待提供|待核实"
+    # 否定性边界声明（"本章仅作事实转述，不据此推断…"/"不构成投资建议"）：与缺口陈述
+    # 同属"无事实主张"的边界句，科目存在性闸门同样不应生效（2026-10-15 北投
+    # operations #17 实测）。
+    r"|不据此|不作结论|不作判断|不作风险判断|不代表|不构成|不得视为|不视为"
+    # 2026-10-16 本轮试跑复核新增：① "…均需在补充…后方可核验"（北投 governance #18：
+    # "本报告不对关联方资金往来的规模、占比或风险水平作出结论；…方可核验"——限定性
+    # 边界句，与"不作结论"同族，只是措辞为"不对…作出结论/方可核验"）；
+    # ② "无法形成确定性判断"（中邮 cashflow #38："…之前，均无法形成确定性判断"——
+    # "无法形成结论"的等价措辞）。
+    # 2026-10-16 第三轮试跑复核再扩：③ "无法区分/无法确认/无法核实"与"另行核验"
+    # （中邮 governance：关联方事项"无法区分…情形、相关金额与占比均无法确认，需…另行核验"）；
+    # ④ "未作（风险）判断/未作结论"（中邮 operations："缺少…基础数据，因此本项未作风险
+    # 判断"）；⑤ "不对…作出（确定性）结论"的窗口版（完整句整句版见 `_CLAIM_DECLARATION_RE`）。
+    r"|方可核验|另行核验|无法区分|无法确认|无法核实|未作(?:风险)?判断|未作结论"
+    r"|不对[^。；]{0,24}(?:作出(?:确定性|结论性)?(?:结论|判断)|作(?:结论|判断))"
+    r"|无法形成(?:结论|确定性判断|确定结论))"
+)
+
+# 强缺口词（首尾窗口专用）：**刻意不含**"没有/不代表"等通用否定词——业务事实句
+# "没有诉讼、没有关联交易"不得借否定词豁免事实校验（执行方案 §P0-1）。
+_GAP_EDGE_RE = re.compile(
+    r"(缺少|缺乏|缺失|材料不足|未提供|未获取|未取得|未随|未披露|未识别|未见|未出现"
+    r"|未包含|待核验|待补充|待提供|待核实|暂无|暂缺|无法获取|无法识别|无法判断"
+    r"|无法形成结论|无法基于"
+    # 2026-10-16：与上下文正则同步补"无法形成确定性判断"（中邮 cashflow #38 实测）与
+    # "无法区分/无法确认/无法核实"（第三轮复核）。
+    r"|无法形成(?:确定性判断|确定结论|结论)|无法区分|无法确认|无法核实)"
+)
+
+# 整句级"方法/过程声明"（2026-10-16 本轮试跑复核新增）："勾稽声明：本章未对任何现金流
+# 数据、偿债指标或覆盖比例**进行自行计算或换算**…"（中邮 cashflow #32 实测）——缺口词
+# （未对）与命中科目（偿债专户）相隔整句，邻域窗口与首尾窗口都装不下；过程声明不含业务
+# 事实主张，整句按无事实主张处理。
+# **动词白名单限定在 计算/换算/勾稽**：这三个动词只描述分析方法，不用于断言业务事实
+# （事实句"未对商誉计提减值"用"计提"、"未对长期股权投资重分类"用"重分类"，均不在名单，
+# 不受影响）；窗口 60 字且不跨句（不吞"；"后的内容）。
+# 第三轮复核追加"不对…作出（确定性）结论"整句版：中邮 cashflow "在取得…之前，本章不对
+# 本期债券兑付保障程度作出确定性结论"——句子短、但"不对"与"作出结论"间隔超出邻域窗口，
+# 且"作出**确定性**结论"不在否定边界声明的既有措辞里。
+_CLAIM_DECLARATION_RE = re.compile(
+    r"未对[^。；]{0,60}(?:进行|作出)(?:自行)?(?:计算|换算|勾稽)"
+    r"|不对[^。；]{0,30}作出(?:确定性|结论性)?(?:结论|判断)"
 )
 
 POINT_IN_TIME_KEYS = {
@@ -453,7 +496,7 @@ def _mentions_ambiguous_attribution(item: dict, records: list[dict]) -> bool:
     candidates = []
     for record in records:
         record_value, record_unit, _ = _canonical_measurement(record.get("value"), str(record.get("unit") or ""))
-        if record_value != value or (has_unit and record_unit != unit):
+        if record_value != value or (has_unit and record_unit and record_unit != unit):
             continue
         candidates.append(record)
     if len({_record_identity(record) for record in candidates}) <= 1:
@@ -496,7 +539,7 @@ def _same_value_record_ids(mentions: list[dict], records: list[dict], limit: int
         if not record_value:
             continue
         for wanted_value, wanted_unit in wanted:
-            if record_value == wanted_value and (not wanted_unit or record_unit == wanted_unit):
+            if record_value == wanted_value and (not wanted_unit or not record_unit or record_unit == wanted_unit):
                 record_id = str(record.get("record_id") or "")
                 if record_id and record_id not in found:
                     found.append(record_id)
@@ -643,18 +686,33 @@ def _claim_support_outcome(
     # 语境窗口：前 16 字 / 后 24 字——缺口短语常是整段枚举的**谓语**（"A、B、C…等，
     # 材料不足/未披露"），后窗口太窄会漏（北投 financial #44 "…到期债务未披露" 实测）。
     claim_labels: list[tuple[str, tuple[str, ...]]] = []
+    # 强缺口词的**首尾窗口**（整句首 16 / 尾 16 字）：句首/句尾宣告"材料不足声明：…"
+    # "…均未随本核心材料包提供，材料不足"时，枚举科目与谓语相隔极远（长句），邻域窗口
+    # 装不下——首尾出现强缺口词即整句按缺失陈述处理（2026-10-15 华辰 governance #28
+    # 实测）。**刻意不含通用否定词**（"没有/不代表"等）：业务事实句"没有诉讼、没有关联
+    # 交易"不得借否定词豁免事实校验（执行方案 §P0-1）。
+    # 2026-10-16：追加**整句级过程声明**（`_CLAIM_DECLARATION_RE`）——"未对…进行(自行)
+    # 计算/换算/勾稽"是方法声明而非事实主张，缺口词与科目相隔整句（中邮 cashflow #32
+    # 实测：未对…在句首、命中科目"偿债专户"在第二个分句）。
+    edge_gap = bool(
+        _GAP_EDGE_RE.search(claim[:16]) or _GAP_EDGE_RE.search(claim[-16:])
+        or _CLAIM_DECLARATION_RE.search(claim)
+    )
     for definition in FACT_REGISTRY.values():
         positions = [match.start() for match in re.finditer(re.escape(definition.label), claim)]
         if not positions:
             continue
         # 缺口语境可前可后："缺少X" vs "X为材料不足/未披露"——两者都按缺失陈述处理。
-        # 后窗口 32：缺口谓语常是整段枚举的**谓语**，谓语前的枚举项都要一并跳过——
-        # 实测中邮 guarantee「保证责任上限、保证范围…以及保证人代偿能力，**均因材料不足**
-        # 而无法判断」：首个标签距谓语 25 字，旧 24 字窗口差 1 字漏判，整句被误记无支持。
+        # 窗口 2026-10-15 复核放宽（前 16→32 / 后 32→48）：缺口谓语常与**枚举列表**的
+        # 各科目相隔较远（"材料未披露 A、B、C…"/"…的一致性，材料不足，无法判断"），
+        # 原窗口差 1-20 字就漏判、整句被误记无支持并拖垮回退。claim 本身是**单句**
+        # （`_claim_lines` 按句切分），窗口放大的代价仅为"同句无数字说明句"被漏放；
+        # **带数字的主张仍走数字判定**，不受本闸门影响（实测：北投 operations #18/#32、
+        # 华辰 governance #9）。
         gap = False
         for index in positions:
-            before = claim[max(0, index - 16):index]
-            after = claim[index + len(definition.label): index + len(definition.label) + 32]
+            before = claim[max(0, index - 32):index]
+            after = claim[index + len(definition.label): index + len(definition.label) + 48]
             if _GAP_STATEMENT_CONTEXT_RE.search(before) or _GAP_STATEMENT_CONTEXT_RE.search(after):
                 gap = True
                 break
@@ -663,7 +721,7 @@ def _claim_support_outcome(
         # 注意：展平成 (登记名, *别名) 一维序列——`_label_present_in_sources` 逐名检索，
         # 嵌套元组会让别名静默失效（北投 financial #36/#41 "评级机构"→别名"中诚信" 实测）。
         claim_labels.append((definition.label, *tuple(definition.aliases or ())))
-    if claim_labels and not any(
+    if claim_labels and not edge_gap and not any(
         _label_present_in_sources(names, evidence_lookup, evidence_labels, record_labels)
         for names in claim_labels
     ):

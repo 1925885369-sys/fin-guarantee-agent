@@ -209,8 +209,26 @@ export interface ReportPrompt {
   global_updated_at?: string | null;
   /** 项目级编辑权限（后端按环境/本机直连判定；真实参考项目仅本机直连、非公开环境可编辑） */
   editable?: boolean;
-  /** 全局默认是否可编辑（当前恒 false；全局权限由后续方案负责） */
+  /** 全局默认是否可编辑：非公开环境 + 本机直连 + 无代理转发头时为 true
+   *  （`PLAN.md` P0-A；旧口径"恒 false"已被替代） */
   global_editable?: boolean;
+  /** 全局默认不可编辑的原因（对应 editable 的 edit_reason） */
+  global_edit_reason?: string;
+  /** 当前请求的范围：project（项目配置）/ global（全局默认），与 `?scope=` 一致 */
+  scope?: "project" | "global" | string;
+  /** **全局链**生效的 Prompt（全局覆盖 > 出厂 YAML，不掺项目覆盖），"全局默认"页据此回填 */
+  global_prompt?: string;
+  /** 全局链来源：global（有全局覆盖）/ system（出厂） */
+  global_source?: "project" | "global" | "system" | string;
+  /** 章节当前**生效**来源：项目覆盖 > 全局默认 > 出厂。有项目覆盖时项目仍优先 */
+  effective_source?: "project" | "global" | "system" | string;
+  /** **项目级**并发基准哈希（保存/重置项目配置时回传，不符则后端 409） */
+  config_sha256?: string;
+  /** **全局级**并发基准哈希（保存/重置全局默认时回传，不符则后端 409） */
+  global_config_sha256?: string;
+  /** 当前 Prompt 编译器版本：升级后同一份结构化配置会渲染出不同文本，
+   *  客户端按旧版本编辑时保存会被 409（`PLAN.md` §四.2） */
+  prompt_contract_version?: string;
   /** 项目级只读原因（editable=false 时展示给用户） */
   edit_reason?: string;
   /** 是否真实参考项目（只读提示与展示口径用） */
@@ -223,6 +241,62 @@ export interface LengthPolicy {
   effective_max_chars?: number;
   unit?: string;
   source?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 报告目录配置（report-outline）：契约见 `docs/report-outline-spec.md` §六
+// ---------------------------------------------------------------------------
+
+/** 三级小节：章内唯一且稳定（改名不换 ID）；`prompt` 空串＝沿用章级要求；`enabled=false`＝暂不参与生成。 */
+export interface OutlineSubsection {
+  subsection_id: string;
+  title: string;
+  order: number;
+  prompt: string;
+  enabled: boolean;
+}
+
+/**
+ * 二级章节：`template_key` 内置＝yaml 键、自定义＝null（ID 为 `chapter-<uuid>`）。
+ * `generation_mode` / `evidence_scope` 由服务端派生并重写，前端只读展示。
+ */
+export interface OutlineChapter {
+  chapter_id: string;
+  template_key: string | null;
+  title: string;
+  order: number;
+  generation_mode: "generate" | "template";
+  evidence_scope: "chapter_contract" | "prompt_retrieval";
+  subsections: OutlineSubsection[];
+}
+
+/** 一级分部：内置固定 `part-1`~`part-6`，页面不编辑（仅原样透传）。 */
+export interface OutlinePart {
+  part_id: string;
+  title: string;
+  order: number;
+  chapters: OutlineChapter[];
+}
+
+/** 完整目录：顺序即顺序，`order` 每次保存由服务端重排。 */
+export interface ReportOutline {
+  outline_version: string;
+  parts: OutlinePart[];
+}
+
+/** `GET/PUT/DELETE /report-outline` 的响应（也含各 scope 的可编辑判据）。 */
+export interface ReportOutlineState {
+  scope: "project" | "global";
+  outline: ReportOutline;
+  source: string;
+  outline_version: string;
+  config_sha256: string;
+  effective_source: string;
+  has_project_override: boolean;
+  editable: boolean;
+  edit_reason: string;
+  global_editable: boolean;
+  global_edit_reason: string;
 }
 
 export interface PromptNarrativeConfig {
@@ -508,6 +582,12 @@ export interface ReportQuality {
   tie_outs: Record<CheckStatus, number>;
   entities: number;
   gold_annotations: number;
+  /** P1-1：报告采用的目录与当前配置是否不一致。 */
+  outline_outdated?: boolean;
+  /** P1-1：再生要求——none/chapter（按章再生即可）/full_report（须整份重新生成）/unknown（旧报告缺凭据）。 */
+  regeneration_requirement?: "none" | "chapter" | "full_report" | "unknown";
+  /** P1-1：配置已变化的章节键（chapter 级再生用）。 */
+  outline_changed_chapters?: string[];
 }
 
 export interface EvidenceGraphSummary {

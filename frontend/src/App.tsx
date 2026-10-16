@@ -10,7 +10,7 @@ import {
   ListFilter,
 } from "lucide-react";
 import { DuplicateDocumentError, api } from "./api";
-import type { DocumentKind, UploadedDocument } from "./api";
+import type { DocumentKind, PromptConcurrency, UploadedDocument } from "./api";
 import { DEFAULT_PAGE_SIZE, HelpTip, Pagination, ReadinessBar, SourceBadge, StatusBadge } from "./components/common";
 import type { PageSize } from "./components/common";
 import { ProjectIntakeWizard } from "./components/project-intake/ProjectIntakeWizard";
@@ -28,6 +28,7 @@ import type {
   FinancialMetric, FinancialTieOut, Health, Inventory, PolicyInfo, Project,
   BondSummary, EntityProfileSummary, MaterialQAResponse, ProjectEntity, ProjectProfileSnapshot, ProjectSummary,
   ProjectUpdatePayload,
+  OutlineChapter, OutlinePart, OutlineSubsection, ReportOutline, ReportOutlineState,
   PromptConstraints, PromptEditableConfig, ReportBlock, ReportBlockCell, ReportBlockRow, ReportPrompt, ReportQuality, ReportSection,
   ReportSnapshot, ReportSnapshotSummary,
   ReportTableBlock, ReviewApplyResult, ReviewSummary, ReviewTask, Risk, Run, RunArtifact, RunNode, Severity, WorkflowStage,
@@ -924,6 +925,47 @@ function clonePromptConfig(config: PromptEditableConfig): PromptEditableConfig {
   };
 }
 
+/** 生成 UUID（章节/小节 ID 用）；老环境无 `crypto.randomUUID` 时退化为 v4 形态随机串。 */
+function newOutlineUuid(): string {
+  const cryptoRef = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  if (cryptoRef?.randomUUID) return cryptoRef.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const value = Math.floor(Math.random() * 16);
+    return (char === "x" ? value : (value & 0x3) | 0x8).toString(16);
+  });
+}
+
+/** 自定义章节：`template_key=null`（ID 形态 `chapter-<uuid>`）、模型生成、Prompt 驱动检索。 */
+function newOutlineChapter(): OutlineChapter {
+  return { chapter_id: `chapter-${newOutlineUuid()}`, template_key: null, title: "新章节", order: 1, generation_mode: "generate", evidence_scope: "prompt_retrieval", subsections: [] };
+}
+
+/** 自定义小节：ID 形态 `sub-<uuid>`（前端拟、服务端保存时原样接受）。 */
+function newOutlineSubsection(): OutlineSubsection {
+  return { subsection_id: `sub-${newOutlineUuid()}`, title: "新小节", order: 1, prompt: "", enabled: true };
+}
+
+/** 深拷贝目录草稿：编辑只改草稿，不污染服务端返回的基准（用于并发比较）。 */
+function cloneOutline(outline: ReportOutline): ReportOutline {
+  return { ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => ({ ...chapter, subsections: chapter.subsections.map((subsection) => ({ ...subsection })) })) })) };
+}
+
+/** 把各级 `order` 重排为 1..n；服务端保存时也会重排，客户端保持一致便于比较与展示。 */
+function normalizeOutline(outline: ReportOutline): ReportOutline {
+  return {
+    ...outline,
+    parts: outline.parts.map((part, partIndex) => ({
+      ...part,
+      order: partIndex + 1,
+      chapters: part.chapters.map((chapter, chapterIndex) => ({
+        ...chapter,
+        order: chapterIndex + 1,
+        subsections: chapter.subsections.map((subsection, subsectionIndex) => ({ ...subsection, order: subsectionIndex + 1 })),
+      })),
+    })),
+  };
+}
+
 function formatPromptUpdatedAt(value?: string | null): string {
   if (!value) return "时间未知";
   const date = new Date(value);
@@ -961,8 +1003,11 @@ function PromptConstraintGroup({ title, values }: { title: string; values: strin
 
 function PromptWorkspace({ project, token }: { project: Project; token?: string }) {
   const [prompts, setPrompts] = useState<ReportPrompt[]>([]);
+  // 草稿按「范围:章节」双键缓存：切换范围或章节再切回来，未保存的编辑都在
+  // （P0-A 要求"两种编辑范围分别缓存草稿，切换章节不丢未保存内容"）。
   const [drafts, setDrafts] = useState<Record<string, PromptEditableConfig>>({});
-  const [activeKey, setActiveKey] = useState("");
+  const [scope, setScope] = useState<"project" | "global">("project");
+  const [activeChapterId, setActiveChapterId] = useState("");
   const [tab, setTab] = useState<"structured" | "preview">("structured");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
@@ -972,30 +1017,153 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [constraintModalOpen, setConstraintModalOpen] = useState(false);
+  // 报告目录：基准状态与整份草稿都按范围缓存（切换章节/范围都不丢未保存的目录编辑）。
+  const [outlineStates, setOutlineStates] = useState<Record<string, ReportOutlineState>>({});
+  const [outlineDrafts, setOutlineDrafts] = useState<Record<string, ReportOutline>>({});
+  const [outlineLoading, setOutlineLoading] = useState(true);
+  const [outlineError, setOutlineError] = useState("");
+  const [savingOutline, setSavingOutline] = useState(false);
+  const [renameChapterId, setRenameChapterId] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+
+  // 当前范围的目录基准与草稿（均按范围缓存，切换范围互不影响）。
+  const outlineDraft = outlineDrafts[scope];
+  const outlineState = outlineStates[scope];
+
+  const draftKey = useCallback((chapterKey: string) => `${scope}:${chapterKey}`, [scope]);
 
   const load = useCallback(async () => {
-    setLoading(true); setLoadError("");
-    try {
-      const rows = await api.reportPrompts(project.id, token);
+    setLoading(true); setOutlineLoading(true);
+    setLoadError(""); setOutlineError("");
+    // 目录加载失败只影响目录区、不崩整页：两块并行拉取，各自落到自己的错误位。
+    const [promptResult, outlineResult] = await Promise.allSettled([
+      api.reportPrompts(project.id, token, scope),
+      api.reportOutline(project.id, token, scope),
+    ]);
+    if (promptResult.status === "fulfilled") {
+      const rows = promptResult.value;
       setPrompts(rows);
-      setDrafts(Object.fromEntries(rows.map((item) => [item.chapter_key, clonePromptConfig(item.editable_config)])));
-      setActiveKey((current) => rows.some((item) => item.chapter_key === current) ? current : (rows.find((item) => item.llm)?.chapter_key || rows[0]?.chapter_key || ""));
-    } catch (reason) {
-      setLoadError(reason instanceof Error ? reason.message : "无法读取报告 Prompt");
-    } finally {
-      setLoading(false);
+      // **保留已有草稿**：同一个范围内已经编辑过、尚未保存的内容不能被这次加载覆盖。
+      // 首次进入该范围时没有草稿，才用服务端返回的配置填充。
+      setDrafts((current) => Object.fromEntries(rows.map((item) => {
+        const key = `${scope}:${item.chapter_key}`;
+        return [key, current[key] ?? clonePromptConfig(item.editable_config)];
+      })));
+    } else {
+      setPrompts([]);
+      setLoadError(promptResult.reason instanceof Error ? promptResult.reason.message : "无法读取报告 Prompt");
     }
-  }, [project.id, token]);
+    if (outlineResult.status === "fulfilled") {
+      const state = outlineResult.value;
+      setOutlineStates((current) => ({ ...current, [scope]: state }));
+      // 同样保留已有草稿：未保存的目录编辑不被这次加载覆盖。
+      setOutlineDrafts((current) => current[scope] ? current : { ...current, [scope]: cloneOutline(state.outline) });
+    } else {
+      setOutlineError(outlineResult.reason instanceof Error ? outlineResult.reason.message : "无法读取报告目录");
+    }
+    setLoading(false); setOutlineLoading(false);
+  }, [project.id, token, scope]);
 
   useEffect(() => { load(); }, [load]);
-  const active = prompts.find((item) => item.chapter_key === activeKey) || prompts[0];
-  const activeDraft = active ? (drafts[active.chapter_key] || active.editable_config) : null;
-  // 项目级编辑权限以**后端返回的权限字段**为准（修订稿 §4）：真实参考项目仅本机直连、
-  // 非公开环境才可编辑——不再按 data_class 硬编码只读（否则后端开了权限前端也进不去，
-  // 只读时又说不出具体原因）。权限字段缺失（旧响应）时才退回 data_class 判断。
-  const readOnly = active?.editable === undefined
+
+  // 目录保存/重置后**只重读章节配置**（P1-2）：目录变了，章节集合与自定义章节的
+  // 键都会变，Prompt 列表必须跟着刷新；已编辑未保存的草稿按 key 保留，不被这次
+  // 重读覆盖（新增章节没有草稿，用服务端返回的配置填充）。
+  const reloadPrompts = useCallback(async () => {
+    try {
+      const rows = await api.reportPrompts(project.id, token, scope);
+      setPrompts(rows);
+      setDrafts((current) => Object.fromEntries(rows.map((item) => {
+        const key = `${scope}:${item.chapter_key}`;
+        return [key, current[key] ?? clonePromptConfig(item.editable_config)];
+      })));
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : "无法读取报告 Prompt");
+    }
+  }, [project.id, token, scope]);
+
+  const chapterGroups = useMemo(() => {
+    const groups: { part: string; items: { item: ReportPrompt; index: number }[] }[] = [];
+    prompts.forEach((item) => {
+      const part = item.part || "报告章节";
+      const last = groups[groups.length - 1];
+      if (last && last.part === part) last.items.push({ item, index: last.items.length });
+      else groups.push({ part, items: [{ item, index: 0 }] });
+    });
+    return groups;
+  }, [prompts]);
+
+  type NavChapter = { chapterId: string; templateKey: string | null; title: string; generationMode: "generate" | "template"; index: number; outlineDirty: boolean };
+  type NavPart = { partId: string; partTitle: string; chapters: NavChapter[] };
+
+  // 左侧导航优先用**目录草稿**渲染（分部 → 二级章节）；目录接口不可用时回落到 Prompt 分组，
+  // 这样目录加载失败也不会让整页失去章级 Prompt 编辑能力。
+  const navParts = useMemo<NavPart[]>(() => {
+    if (outlineDraft) {
+      const baseline = outlineState?.outline;
+      return outlineDraft.parts.map((part) => ({
+        partId: part.part_id,
+        partTitle: part.title,
+        chapters: part.chapters.map((chapter, chapterIndex) => {
+          const baseChapter = baseline?.parts.find((item) => item.part_id === part.part_id)?.chapters.find((item) => item.chapter_id === chapter.chapter_id);
+          return {
+            chapterId: chapter.chapter_id,
+            templateKey: chapter.template_key,
+            title: chapter.title,
+            generationMode: chapter.generation_mode,
+            index: chapterIndex + 1,
+            outlineDirty: baseChapter ? JSON.stringify(chapter) !== JSON.stringify(baseChapter) : false,
+          };
+        }),
+      }));
+    }
+    return chapterGroups.map((group) => ({
+      partId: group.part,
+      partTitle: group.part,
+      chapters: group.items.map(({ item, index }) => ({
+        chapterId: `chapter-${item.chapter_key}`,
+        templateKey: item.chapter_key,
+        title: item.title,
+        generationMode: item.llm ? "generate" : "template",
+        index: index + 1,
+        outlineDirty: false,
+      })),
+    }));
+  }, [outlineDraft, outlineState, chapterGroups]);
+
+  const navChapters = useMemo(() => navParts.flatMap((part) => part.chapters), [navParts]);
+  const activeNavChapter = navChapters.find((chapter) => chapter.chapterId === activeChapterId) || null;
+  const activeOutlineChapter = outlineDraft
+    ? outlineDraft.parts.flatMap((part) => part.chapters).find((chapter) => chapter.chapter_id === activeChapterId) || null
+    : null;
+  // 章节查找统一走 templateKey || chapterId：内置章节按 template_key 命中，
+  // 自定义章节（template_key=null）按目录 chapter_id 命中后端返回的同构条目。
+  const active = prompts.find((item) => item.chapter_key === (activeNavChapter?.templateKey || activeNavChapter?.chapterId));
+  const activeDraft = active ? (drafts[draftKey(active.chapter_key)] || active.editable_config) : null;
+
+  // 默认选中：与旧行为一致——优先第一个「模型生成」章节，否则第一个章节。
+  // 当前选中项仍存在时保留，切换范围/编辑目录都不会无故跳章。
+  useEffect(() => {
+    if (!navChapters.length) return;
+    setActiveChapterId((current) => navChapters.some((chapter) => chapter.chapterId === current)
+      ? current
+      : (navChapters.find((chapter) => chapter.templateKey && prompts.find((item) => item.chapter_key === chapter.templateKey)?.llm) || navChapters[0]).chapterId);
+  }, [navChapters, prompts]);
+
+  // 编辑权限以**后端返回的权限字段**为准：范围不同判据不同——项目级看 `editable`，
+  // 全局级看 `global_editable`（全局是部署级配置，只要求非公开 + 本机直连 + 无转发头）。
+  // 权限字段缺失（旧响应）时才退回 data_class 判断。
+  const scopeEditable = scope === "global" ? active?.global_editable : active?.editable;
+  const readOnly = scopeEditable === undefined
     ? project.data_class === "real_reference"
-    : active.editable === false;
+    : scopeEditable === false;
+  const scopeEditReason = scope === "global" ? active?.global_edit_reason : active?.edit_reason;
+  // 目录权限与 Prompt 同一口径：项目级看 editable、全局级看 global_editable。
+  const outlineScopeEditable = scope === "global" ? outlineState?.global_editable : outlineState?.editable;
+  const outlineReadOnly = outlineScopeEditable === undefined ? project.data_class === "real_reference" : outlineScopeEditable === false;
+  const outlineEditReason = (scope === "global" ? outlineState?.global_edit_reason : outlineState?.edit_reason) || "";
+  const outlineDirty = Boolean(outlineDraft && outlineState && JSON.stringify(outlineDraft) !== JSON.stringify(outlineState.outline));
+  const totalChapters = outlineDraft ? outlineDraft.parts.reduce((sum, part) => sum + part.chapters.length, 0) : 0;
   const previewSignature = activeDraft ? JSON.stringify(activeDraft) : "";
   useEffect(() => {
     if (tab !== "preview" || !active || !active.llm || !activeDraft) return;
@@ -1022,62 +1190,93 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const updateRow = (chapterKey: string, values: Partial<ReportPrompt>) => setPrompts((current) => current.map((item) => item.chapter_key === chapterKey ? { ...item, ...values } : item));
   type PromptDraftPatch = Omit<Partial<PromptEditableConfig>, "narrative_contract"> & { narrative_contract?: Partial<PromptEditableConfig["narrative_contract"]> };
   const updateDraft = (chapterKey: string, value: PromptDraftPatch) => setDrafts((current) => {
-    const base = current[chapterKey] || prompts.find((item) => item.chapter_key === chapterKey)?.editable_config;
+    const key = draftKey(chapterKey);
+    const base = current[key] || prompts.find((item) => item.chapter_key === chapterKey)?.editable_config;
     if (!base) return current;
-    return { ...current, [chapterKey]: { ...base, ...value, narrative_contract: value.narrative_contract ? { ...base.narrative_contract, ...value.narrative_contract } : base.narrative_contract } };
+    return { ...current, [key]: { ...base, ...value, narrative_contract: value.narrative_contract ? { ...base.narrative_contract, ...value.narrative_contract } : base.narrative_contract } };
   });
   const sourceText = (item: ReportPrompt) => item.source === "project" ? "项目自定义" : item.source === "global" ? "全局默认" : "系统默认";
   const canEdit = Boolean(active?.llm && !readOnly);
   const isChanged = Boolean(active && activeDraft && JSON.stringify(activeDraft) !== JSON.stringify(active.editable_config));
   const canSetGlobalDefault = Boolean(active?.llm && !readOnly && saving !== active.chapter_key && activeDraft);
   const effectiveUpdatedAt = active?.overridden ? active.updated_at : active?.global_overridden ? active.global_updated_at : null;
+  // 并发基准随范围取：项目级用 `config_sha256`，全局级用 `global_config_sha256`；
+  // 两者都带 `prompt_contract_version`（编译器升级后同一份配置会渲染出不同文本）。
+  // 该范围尚无覆盖时哈希为空串，`_concurrencyBody/_concurrencyQuery` 会整体省略该字段，
+  // 避免"预期为空"被后端当成冲突。
+  const concurrencyBasis = (): PromptConcurrency => ({
+    configSha256: scope === "global" ? active?.global_config_sha256 : active?.config_sha256,
+    promptContractVersion: active?.prompt_contract_version,
+  });
+  const concurrencyHint = (reason: unknown) => {
+    const text = reason instanceof Error ? reason.message : "";
+    // 409 = 别的会话改过配置，或编译器版本变了 → 明确让用户重读，不自动重试。
+    return /409|已被其他会话修改|编译器版本/.test(text) ? `${text}（请重新加载后再保存）` : text;
+  };
 
   const save = async () => {
     if (!active || !activeDraft || !canEdit) return;
     setSaving(active.chapter_key); setMessage("");
     try {
-      const saved = await api.saveReportPrompt(project.id, active.chapter_key, activeDraft, token);
+      const basis = concurrencyBasis();
+      const saved = scope === "global"
+        ? await api.setGlobalReportPrompt(project.id, active.chapter_key, activeDraft, token, basis)
+        : await api.saveReportPrompt(project.id, active.chapter_key, activeDraft, token, basis);
       updateRow(active.chapter_key, saved);
-      setDrafts((current) => ({ ...current, [active.chapter_key]: clonePromptConfig(saved.editable_config) }));
+      setDrafts((current) => ({ ...current, [draftKey(active.chapter_key)]: clonePromptConfig(saved.editable_config) }));
       setPreviewPrompt(saved.prompt);
-      setMessage(`已保存“${active.title}”的项目级配置；对应章节将在报告中标记为待再生（保存不会自动调用模型），需要时在该章重新生成。`);
-    } catch (reason) { setLoadError(reason instanceof Error ? reason.message : "保存 Prompt 失败"); }
+      setMessage(scope === "global"
+        ? `已保存“${active.title}”的全局默认配置；有项目覆盖的项目仍优先使用项目配置（保存不会自动调用模型）。现有报告不变，需要时在项目内重新生成该章。`
+        : `已保存“${active.title}”的项目级配置；对应章节将在报告中标记为待再生（保存不会自动调用模型），需要时在该章重新生成。`);
+    } catch (reason) { setLoadError(concurrencyHint(reason) || "保存 Prompt 失败"); }
     finally { setSaving(""); }
   };
   const reset = async () => {
     if (!active) return;
     setSaving(active.chapter_key); setMessage("");
     try {
-      const resetRow = await api.resetReportPrompt(project.id, active.chapter_key, token);
+      const basis = concurrencyBasis();
+      const resetRow = scope === "global"
+        ? await api.resetGlobalReportPrompt(project.id, active.chapter_key, token, basis)
+        : await api.resetReportPrompt(project.id, active.chapter_key, token, basis);
       updateRow(active.chapter_key, resetRow);
-      setDrafts((current) => ({ ...current, [active.chapter_key]: clonePromptConfig(resetRow.editable_config) }));
+      setDrafts((current) => ({ ...current, [draftKey(active.chapter_key)]: clonePromptConfig(resetRow.editable_config) }));
       setPreviewPrompt(resetRow.prompt);
-      setMessage(`“${active.title}”已恢复为${resetRow.global_overridden ? "全局默认" : "系统默认"}配置。`);
-    } catch (reason) { setLoadError(reason instanceof Error ? reason.message : "恢复默认配置失败"); }
+      setMessage(scope === "global"
+        ? `“${active.title}”的全局默认已撤销，回落系统出厂配置；已有项目覆盖不受影响。`
+        : `“${active.title}”已恢复为${resetRow.global_overridden ? "全局默认" : "系统默认"}配置。`);
+    } catch (reason) { setLoadError(concurrencyHint(reason) || "恢复默认配置失败"); }
     finally { setSaving(""); }
   };
+  // "设为全局默认"是范围切换的快捷方式：把当前草稿写进全局链（项目覆盖不动）。
   const setGlobalDefault = async () => {
     if (!active || !activeDraft || !canEdit) return;
     setSaving(active.chapter_key); setMessage("");
     try {
-      const globalRow = await api.setGlobalReportPrompt(project.id, active.chapter_key, activeDraft, token);
+      const globalRow = await api.setGlobalReportPrompt(project.id, active.chapter_key, activeDraft, token, {
+        configSha256: active.global_config_sha256,
+        promptContractVersion: active.prompt_contract_version,
+      });
       updateRow(active.chapter_key, globalRow);
-      if (!active.overridden) setDrafts((current) => ({ ...current, [active.chapter_key]: clonePromptConfig(globalRow.editable_config) }));
+      if (!active.overridden) setDrafts((current) => ({ ...current, [`global:${active.chapter_key}`]: clonePromptConfig(globalRow.editable_config) }));
       setPreviewPrompt(globalRow.prompt);
       setMessage(`“${active.title}”已${active.global_overridden ? "更新" : "设为"}全局默认配置。`);
-    } catch (reason) { setLoadError(reason instanceof Error ? reason.message : "设置全局默认失败"); }
+    } catch (reason) { setLoadError(concurrencyHint(reason) || "设置全局默认失败"); }
     finally { setSaving(""); }
   };
   const resetGlobalDefault = async () => {
     if (!active) return;
     setSaving(active.chapter_key); setMessage("");
     try {
-      const row = await api.resetGlobalReportPrompt(project.id, active.chapter_key, token);
+      const row = await api.resetGlobalReportPrompt(project.id, active.chapter_key, token, {
+        configSha256: active.global_config_sha256,
+        promptContractVersion: active.prompt_contract_version,
+      });
       updateRow(active.chapter_key, row);
-      if (!active.overridden) setDrafts((current) => ({ ...current, [active.chapter_key]: clonePromptConfig(row.editable_config) }));
+      if (!active.overridden) setDrafts((current) => ({ ...current, [`global:${active.chapter_key}`]: clonePromptConfig(row.editable_config) }));
       setPreviewPrompt(row.prompt);
       setMessage(`“${active.title}”的全局默认已撤销。`);
-    } catch (reason) { setLoadError(reason instanceof Error ? reason.message : "撤销全局默认失败"); }
+    } catch (reason) { setLoadError(concurrencyHint(reason) || "撤销全局默认失败"); }
     finally { setSaving(""); }
   };
 
@@ -1086,24 +1285,126 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   // 系统已无字符硬上限，不再有"越硬顶"这种前端判断。
   const draftPreferredMax = activeDraft?.narrative_contract.preferred_max_chars ?? 0;
   const draftPreferredMin = activeDraft?.narrative_contract.preferred_min_chars ?? 0;
-  const chapterGroups = useMemo(() => {
-    const groups: { part: string; items: { item: ReportPrompt; index: number }[] }[] = [];
-    prompts.forEach((item) => {
-      const part = item.part || "报告章节";
-      const last = groups[groups.length - 1];
-      if (last && last.part === part) last.items.push({ item, index: last.items.length });
-      else groups.push({ part, items: [{ item, index: 0 }] });
-    });
-    return groups;
-  }, [prompts]);
   const activeChapterNumber = chapterGroups.flatMap((group) => group.items).find(({ item }) => item.chapter_key === active?.chapter_key)?.index ?? 0;
+
+  // ------- 报告目录（report-outline）编辑 -------
+  // 所有目录编辑只改当前范围的草稿；保存成功后用服务端响应整体替换草稿与基准。
+  const mutateOutline = (mutator: (outline: ReportOutline) => ReportOutline) => {
+    setOutlineDrafts((current) => {
+      const base = current[scope];
+      if (!base) return current;
+      return { ...current, [scope]: normalizeOutline(mutator(base)) };
+    });
+  };
+  const patchChapter = (chapterId: string, patch: Partial<OutlineChapter>) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => chapter.chapter_id === chapterId ? { ...chapter, ...patch } : chapter) })) }));
+  const moveChapter = (partId: string, chapterId: string, direction: -1 | 1) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => { if (part.part_id !== partId) return part; const index = part.chapters.findIndex((chapter) => chapter.chapter_id === chapterId); const target = index + direction; if (index < 0 || target < 0 || target >= part.chapters.length) return part; const chapters = [...part.chapters]; [chapters[index], chapters[target]] = [chapters[target], chapters[index]]; return { ...part, chapters }; }) }));
+  const removeChapter = (chapterId: string) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.filter((chapter) => chapter.chapter_id !== chapterId) })) }));
+  const addChapter = (partId: string) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => part.part_id === partId ? { ...part, chapters: [...part.chapters, newOutlineChapter()] } : part) }));
+  const patchSubsection = (chapterId: string, subsectionId: string, patch: Partial<OutlineSubsection>) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => chapter.chapter_id === chapterId ? { ...chapter, subsections: chapter.subsections.map((subsection) => subsection.subsection_id === subsectionId ? { ...subsection, ...patch } : subsection) } : chapter) })) }));
+  const moveSubsection = (chapterId: string, subsectionId: string, direction: -1 | 1) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => { if (chapter.chapter_id !== chapterId) return chapter; const index = chapter.subsections.findIndex((subsection) => subsection.subsection_id === subsectionId); const target = index + direction; if (index < 0 || target < 0 || target >= chapter.subsections.length) return chapter; const subsections = [...chapter.subsections]; [subsections[index], subsections[target]] = [subsections[target], subsections[index]]; return { ...chapter, subsections }; }) })) }));
+  const removeSubsection = (chapterId: string, subsectionId: string) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => chapter.chapter_id === chapterId ? { ...chapter, subsections: chapter.subsections.filter((subsection) => subsection.subsection_id !== subsectionId) } : chapter) })) }));
+  const addSubsection = (chapterId: string) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => chapter.chapter_id === chapterId ? { ...chapter, subsections: [...chapter.subsections, newOutlineSubsection()] } : chapter) })) }));
+  const beginRename = (chapter: NavChapter) => { setRenameChapterId(chapter.chapterId); setRenameValue(chapter.title); };
+  const commitRename = () => {
+    const title = renameValue.replace(/[\r\n]+/g, " ").trim();
+    if (renameChapterId && title) patchChapter(renameChapterId, { title });
+    setRenameChapterId(""); setRenameValue("");
+  };
+  const confirmRemoveChapter = (chapter: NavChapter) => {
+    if (!window.confirm(`删除章节「${chapter.title}」？该章节及其小节会从目录中移除（保存后生效）。`)) return;
+    if (activeChapterId === chapter.chapterId) setActiveChapterId("");
+    removeChapter(chapter.chapterId);
+  };
+  const confirmRemoveSubsection = (chapter: OutlineChapter, subsection: OutlineSubsection) => {
+    if (!window.confirm(`删除小节「${subsection.title}」？保存后生效。`)) return;
+    removeSubsection(chapter.chapter_id, subsection.subsection_id);
+  };
+  const saveOutline = async () => {
+    if (!outlineDraft || !outlineState || outlineReadOnly || savingOutline) return;
+    setSavingOutline(true); setMessage(""); setOutlineError("");
+    try {
+      const saved = await api.saveReportOutline(project.id, token, scope, outlineDraft, {
+        expectedOutlineVersion: outlineState.outline_version,
+        expectedOutlineSha256: outlineState.config_sha256,
+      });
+      setOutlineStates((current) => ({ ...current, [scope]: saved }));
+      setOutlineDrafts((current) => ({ ...current, [scope]: cloneOutline(saved.outline) }));
+      await reloadPrompts();
+      setMessage(scope === "global"
+        ? "已保存全局默认报告目录；对所有未单独覆盖的项目生效（保存不会自动再生报告）。"
+        : "已保存项目报告目录；相关报告将标记为待再生（保存不会自动再生报告）。");
+    } catch (reason) { setOutlineError(concurrencyHint(reason) || "保存目录失败"); }
+    finally { setSavingOutline(false); }
+  };
+  const resetOutline = async () => {
+    if (!outlineState || savingOutline) return;
+    if (!window.confirm(scope === "global" ? "恢复默认目录将撤销本范围的目录自定义并回落内置目录，确定继续？" : "恢复默认目录将撤销本项目目录覆盖并回落全局/内置目录，确定继续？")) return;
+    setSavingOutline(true); setMessage(""); setOutlineError("");
+    try {
+      const state = await api.resetReportOutline(project.id, token, scope, {
+        expectedOutlineVersion: outlineState.outline_version,
+        expectedOutlineSha256: outlineState.config_sha256,
+      });
+      setOutlineStates((current) => ({ ...current, [scope]: state }));
+      setOutlineDrafts((current) => ({ ...current, [scope]: cloneOutline(state.outline) }));
+      await reloadPrompts();
+      setMessage("已恢复默认报告目录。");
+    } catch (reason) { setOutlineError(concurrencyHint(reason) || "恢复默认目录失败"); }
+    finally { setSavingOutline(false); }
+  };
+
+  // 范围切换对**目录与 Prompt 两块同时生效**（同一 scope 状态）。
+  const scopeSwitch = <div className="prompt-scope-bar">
+    <div className="prompt-scope-switch" role="group" aria-label="编辑范围">
+      <button type="button" className={scope === "project" ? "active" : ""} aria-pressed={scope === "project"} onClick={() => setScope("project")}>项目配置</button>
+      <button type="button" className={scope === "global" ? "active" : ""} aria-pressed={scope === "global"} onClick={() => setScope("global")}>全局默认</button>
+    </div>
+    <span className="prompt-scope-note">{scope === "project"
+      ? "只影响当前项目；已有项目覆盖时优先于全局默认。"
+      : "对所有未单独覆盖的项目生效。"}</span>
+  </div>;
+
+  const subsectionEditor = activeOutlineChapter ? <section className="outline-subsection-editor">
+    <div className="outline-subsection-head">
+      <div className="outline-subsection-head-copy"><strong>三级小节</strong><HelpTip label="三级小节说明">小节用于拆分本章的写作顺序与要求，保存后写入报告目录。留空的 Prompt 沿用本章要求；取消勾选则暂不参与生成。</HelpTip></div>
+      <span className="outline-subsection-count">{activeOutlineChapter.subsections.length} 个小节</span>
+    </div>
+    {activeOutlineChapter.generation_mode === "template" && <div className="outline-subsection-note"><Info size={15} /><span>本章由固定规则确定性生成，本小节暂不参与模型生成；标题仍可编辑，Prompt 暂不生效。</span></div>}
+    <div className="outline-subsection-list">
+      {activeOutlineChapter.subsections.map((subsection, index) => <div className="outline-subsection-card" key={subsection.subsection_id}>
+        <div className="outline-subsection-row">
+          <span className="outline-subsection-index">{String(index + 1).padStart(2, "0")}</span>
+          <input className="outline-subsection-title" aria-label={`小节 ${index + 1} 标题`} value={subsection.title} maxLength={60} disabled={outlineReadOnly} placeholder="小节标题" onChange={(event) => patchSubsection(activeOutlineChapter.chapter_id, subsection.subsection_id, { title: event.target.value.replace(/[\r\n]+/g, " ") })} />
+          <label className="outline-subsection-toggle" title="取消勾选后该小节暂不参与生成"><input type="checkbox" checked={subsection.enabled} disabled={outlineReadOnly} onChange={(event) => patchSubsection(activeOutlineChapter.chapter_id, subsection.subsection_id, { enabled: event.target.checked })} />参与生成</label>
+          {!outlineReadOnly && <div className="outline-subsection-actions"><button className="icon-button compact" type="button" aria-label="上移小节" title="上移" disabled={index === 0} onClick={() => moveSubsection(activeOutlineChapter.chapter_id, subsection.subsection_id, -1)}><ArrowUp size={14} /></button><button className="icon-button compact" type="button" aria-label="下移小节" title="下移" disabled={index === activeOutlineChapter.subsections.length - 1} onClick={() => moveSubsection(activeOutlineChapter.chapter_id, subsection.subsection_id, 1)}><ArrowDown size={14} /></button><button className="icon-button compact danger" type="button" aria-label="删除小节" title="删除" onClick={() => confirmRemoveSubsection(activeOutlineChapter, subsection)}><Trash2 size={14} /></button></div>}
+        </div>
+        <textarea className="outline-subsection-prompt" aria-label={`小节 ${index + 1} Prompt`} rows={2} value={subsection.prompt} disabled={outlineReadOnly || activeOutlineChapter.generation_mode === "template"} placeholder="补充该小节的写作要求；留空沿用本章要求。" onChange={(event) => patchSubsection(activeOutlineChapter.chapter_id, subsection.subsection_id, { prompt: event.target.value })} />
+      </div>)}
+      {!activeOutlineChapter.subsections.length && <p className="outline-subsection-empty">本章暂无小节，可新增小节来拆分写作顺序。</p>}
+    </div>
+    {!outlineReadOnly && <button className="secondary-button small outline-subsection-add" type="button" disabled={activeOutlineChapter.subsections.length >= 30} onClick={() => addSubsection(activeOutlineChapter.chapter_id)}><ListPlus size={14} />新增小节</button>}
+    {outlineReadOnly && <p className="outline-subsection-readonly">{outlineEditReason || "当前环境不允许修改报告目录。"}</p>}
+  </section> : null;
+
+  const outlineActionBar = outlineDraft ? <footer className="outline-action-bar">
+    <span>{outlineReadOnly ? (outlineEditReason || "当前环境不允许修改报告目录。") : outlineDirty ? "目录存在未保存的修改" : "目录与已保存版本一致"}</span>
+    <div>
+      <button className="text-button" type="button" disabled={outlineReadOnly || savingOutline} onClick={resetOutline}>恢复默认目录</button>
+      <button className="primary-button" type="button" disabled={!outlineDirty || outlineReadOnly || savingOutline} onClick={saveOutline}>{savingOutline ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存目录</button>
+    </div>
+  </footer> : null;
   return <div className="view-content prompt-workspace"><div className="page-heading"><div><span className="eyebrow">报告交付配置</span><div className="page-title-row"><h1>报告 Prompt</h1><HelpTip label="报告 Prompt 页面说明">业务写作要求可编辑；证据范围、引用约束和禁止事项固定由系统执行，不随章节配置改变。</HelpTip></div></div><div className="prompt-summary"><FileCog size={16} /><span>{prompts.filter((item) => item.overridden).length} 个项目自定义 · {prompts.filter((item) => item.global_overridden).length} 个全局默认</span></div></div>
     {message && <div className="inline-success prompt-feedback"><Check size={15} />{message}</div>}
     {loadError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{loadError}<button className="icon-button" onClick={() => setLoadError("")} title="关闭"><X size={14} /></button></div>}
-    {loading || !active || !activeDraft ? <div className="loading-page prompt-loading"><LoaderCircle className="spin" size={24} />正在载入章节 Prompt</div> : <section className="prompt-workbench">
-      <aside className="prompt-chapter-nav" aria-label="报告章节"><div className="prompt-chapter-nav-head"><strong>报告章节</strong><span>{prompts.length}</span></div>{chapterGroups.map((group) => <div className="prompt-part-group" key={group.part}><div className="prompt-part-label">{group.part}</div>{group.items.map(({ item, index }) => { const dirty = JSON.stringify(drafts[item.chapter_key] || item.editable_config) !== JSON.stringify(item.editable_config); return <button className={`prompt-chapter-option ${item.chapter_key === active.chapter_key ? "active" : ""}`} key={item.chapter_key} aria-current={item.chapter_key === active.chapter_key ? "page" : undefined} onClick={() => { setActiveKey(item.chapter_key); setTab("structured"); }}><span className="prompt-index">{index + 1}、</span><span><strong>{item.title}</strong></span>{dirty && <i title="存在未保存修改" />}</button>; })}</div>)}</aside>
-      <main className="prompt-detail"><div className="prompt-mobile-picker"><label htmlFor="prompt-chapter-picker">报告章节</label><select id="prompt-chapter-picker" value={active.chapter_key} onChange={(event) => { setActiveKey(event.target.value); setTab("structured"); }}>{chapterGroups.map((group) => <optgroup label={group.part} key={group.part}>{group.items.map(({ item, index }) => <option value={item.chapter_key} key={item.chapter_key}>{index + 1}、{item.title}</option>)}</optgroup>)}</select></div>
-        <header className="prompt-detail-head"><div><span>{active.part || "报告章节"} · 第 {activeChapterNumber + 1} 章</span><h2>{active.title}</h2></div><div className="prompt-detail-badges"><span className={active.llm ? "llm" : "deterministic"}>{active.llm ? "模型生成" : "确定性生成"}</span><PromptGenerationHelp llm={active.llm} /><span className={active.source === "system" ? "default" : "custom"}>{sourceText(active)}</span>{active.migration_mode !== "structured" && <span className="legacy">历史配置已迁移</span>}</div></header>
+    {outlineError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{outlineError}<button className="icon-button" onClick={() => setOutlineError("")} title="关闭"><X size={14} /></button></div>}
+    {loading || !navChapters.length ? <div className="loading-page prompt-loading"><LoaderCircle className="spin" size={24} />正在载入章节 Prompt</div> : <section className="prompt-workbench">
+      <aside className="prompt-chapter-nav" aria-label="报告章节"><div className="prompt-chapter-nav-head"><strong>报告章节</strong><span>{navChapters.length}</span></div>{navParts.map((part) => <div className="prompt-part-group" key={part.partId}><div className="prompt-part-label">{part.partTitle}</div>{part.chapters.map((chapter) => { const promptItem = prompts.find((item) => item.chapter_key === (chapter.templateKey || chapter.chapterId)); const dirty = chapter.outlineDirty || (promptItem ? JSON.stringify(drafts[`${scope}:${promptItem.chapter_key}`] || promptItem.editable_config) !== JSON.stringify(promptItem.editable_config) : false); const canEditChapter = Boolean(outlineDraft && !outlineReadOnly); return <div className="outline-nav-row" key={chapter.chapterId}>{renameChapterId === chapter.chapterId ? <div className="outline-nav-rename"><input value={renameValue} autoFocus maxLength={60} aria-label="章节名称" onChange={(event) => setRenameValue(event.target.value.replace(/[\r\n]+/g, " "))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitRename(); } else if (event.key === "Escape") { setRenameChapterId(""); } }} /><button className="icon-button compact" type="button" aria-label="确认改名" title="确认" onClick={commitRename}><Check size={14} /></button><button className="icon-button compact" type="button" aria-label="取消改名" title="取消" onClick={() => setRenameChapterId("")}><X size={14} /></button></div> : <><button className={`prompt-chapter-option ${chapter.chapterId === activeChapterId ? "active" : ""}`} aria-current={chapter.chapterId === activeChapterId ? "page" : undefined} onClick={() => { setActiveChapterId(chapter.chapterId); setTab("structured"); }}><span className="prompt-index">{chapter.index}、</span><span><strong>{chapter.title}</strong></span>{dirty && <i title="存在未保存修改" />}</button>{canEditChapter && <div className="outline-nav-actions"><button className="icon-button compact" type="button" aria-label="重命名章节" title="重命名" onClick={() => beginRename(chapter)}><Pencil size={13} /></button><button className="icon-button compact" type="button" aria-label="上移章节" title="上移" disabled={chapter.index <= 1} onClick={() => moveChapter(part.partId, chapter.chapterId, -1)}><ArrowUp size={13} /></button><button className="icon-button compact" type="button" aria-label="下移章节" title="下移" disabled={chapter.index >= part.chapters.length} onClick={() => moveChapter(part.partId, chapter.chapterId, 1)}><ArrowDown size={13} /></button><button className="icon-button compact danger" type="button" aria-label="删除章节" title="删除" onClick={() => confirmRemoveChapter(chapter)}><Trash2 size={13} /></button></div>}</>}</div>; })}{outlineDraft && !outlineReadOnly && <button className="outline-add-chapter" type="button" disabled={totalChapters >= 60} onClick={() => addChapter(part.partId)}><FolderPlus size={14} />新增章节</button>}</div>)}</aside>
+      <main className="prompt-detail"><div className="prompt-mobile-picker"><label htmlFor="prompt-chapter-picker">报告章节</label><select id="prompt-chapter-picker" value={activeChapterId} onChange={(event) => { setActiveChapterId(event.target.value); setTab("structured"); }}>{navParts.map((part) => <optgroup label={part.partTitle} key={part.partId}>{part.chapters.map((chapter) => <option value={chapter.chapterId} key={chapter.chapterId}>{chapter.index}、{chapter.title}</option>)}</optgroup>)}</select></div>
+        {active && activeDraft ? <>
+        <header className="prompt-detail-head"><div><span>{active.part || "报告章节"} · 第 {activeChapterNumber + 1} 章</span><h2>{active.title}</h2></div><div className="prompt-detail-badges"><span className={active.llm ? "llm" : "deterministic"}>{active.llm ? "模型生成" : "确定性生成"}</span><PromptGenerationHelp llm={active.llm} />{!activeNavChapter?.templateKey && <span className="custom">自定义章节</span>}<span className={active.source === "system" ? "default" : "custom"}>{sourceText(active)}</span>{active.migration_mode !== "structured" && <span className="legacy">历史配置已迁移</span>}</div></header>
+        {scopeSwitch}
+        {scope === "global" && active.overridden && <div className="prompt-scope-warning"><AlertTriangle size={15} /><span>当前项目已为本章设置项目配置，<strong>仍优先使用项目配置</strong>；本次改动只影响其他未覆盖的项目。</span></div>}
+        {scope === "global" && !active.overridden && active.effective_source === "global" && <div className="prompt-scope-note prompt-scope-effective">当前项目尚未覆盖本章，正在生效的就是这套全局默认。</div>}
         <div className="prompt-tabs" role="tablist"><button className={tab === "structured" ? "active" : ""} role="tab" aria-selected={tab === "structured"} onClick={() => setTab("structured")}><SlidersHorizontal size={16} />结构化配置</button><button className={tab === "preview" ? "active" : ""} role="tab" aria-selected={tab === "preview"} onClick={() => setTab("preview")}><Eye size={16} />完整 Prompt</button></div>
         {tab === "structured" ? <div className="prompt-structured"><fieldset disabled={!canEdit}>
           <section className="prompt-card"><div className="prompt-card-head"><strong>写作视角</strong></div><div className="prompt-field-grid"><section className="prompt-field"><label htmlFor="prompt-role">角色</label><small>定义本章的业务写作视角</small><input id="prompt-role" value={activeDraft.role} onChange={(event) => updateDraft(active.chapter_key, { role: event.target.value })} /></section><section className="prompt-field"><label htmlFor="prompt-tone">行文语气</label><small>在正式尽调语言范围内调整表达</small><input id="prompt-tone" value={activeDraft.narrative_contract.tone} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { tone: event.target.value } })} /></section></div></section>
@@ -1119,10 +1420,20 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
           </div></div></details>
           <details className="prompt-card prompt-collapsible prompt-extra"><summary><div><strong>补充业务要求</strong><HelpTip label="补充业务要求说明">用于保留历史整段 Prompt，或录入本章额外的写作要求。</HelpTip></div><span className="prompt-card-brief">{activeDraft.additional_requirements.trim() ? `已填写 ${activeDraft.additional_requirements.trim().length} 字` : "未填写"}</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><textarea id="prompt-extra" aria-label="补充业务要求" rows={8} value={activeDraft.additional_requirements} onChange={(event) => updateDraft(active.chapter_key, { additional_requirements: event.target.value })} placeholder="输入补充要求；系统仍会执行下方只读风控约束。" /></div></details>
         </fieldset>
-          {!active.llm && <div className="deterministic-prompt-note"><ShieldCheck size={17} /><div><strong>本章配置只读</strong><p>可查看章节配置全文，不能修改业务写作要求。</p></div></div>}{readOnly && active.llm && <p className="prompt-readonly">{active.edit_reason || "当前环境不允许修改本项目 Prompt 配置。"}</p>}
+          {!active.llm && <div className="deterministic-prompt-note"><ShieldCheck size={17} /><div><strong>本章配置只读</strong><p>可查看章节配置全文，不能修改业务写作要求。</p></div></div>}{readOnly && active.llm && <p className="prompt-readonly">{scopeEditReason || (scope === "global" ? "当前环境不允许修改全局默认 Prompt。" : "当前环境不允许修改本项目 Prompt 配置。")}</p>}
           <section className="prompt-constraints-summary"><div><ShieldCheck size={16} /><div><strong>只读风控约束</strong><HelpTip label="只读风控约束说明">证据边界、禁止事项和引用规则由系统固定执行，不随章节配置改变。</HelpTip></div></div><button className="secondary-button small" type="button" onClick={() => setConstraintModalOpen(true)}>查看详情</button></section>
-          {active.llm && !readOnly && <footer className="prompt-action-bar"><span>{isChanged ? "存在未保存的修改" : effectiveUpdatedAt ? `当前配置已保存 · 最近更新：${formatPromptUpdatedAt(effectiveUpdatedAt)}` : "当前使用系统默认配置"}</span><div>{active.overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>撤销项目覆盖</button>}<button className="secondary-button" disabled={!canSetGlobalDefault} onClick={setGlobalDefault}>{active.global_overridden ? "更新全局默认" : "设为全局默认"}</button>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={resetGlobalDefault}>撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存项目配置</button></div></footer>}
+          {active.llm && !readOnly && <footer className="prompt-action-bar"><span>{isChanged ? "存在未保存的修改" : effectiveUpdatedAt ? `当前配置已保存 · 最近更新：${formatPromptUpdatedAt(effectiveUpdatedAt)}` : "当前使用系统默认配置"}</span><div>{scope === "global"
+              ? <>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : null}撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存全局默认</button></>
+              : <>{active.overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>撤销项目覆盖</button>}<button className="secondary-button" disabled={!canSetGlobalDefault} onClick={setGlobalDefault}>{active.global_overridden ? "更新全局默认" : "设为全局默认"}</button>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={resetGlobalDefault}>撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存项目配置</button></>}</div></footer>}
         </div> : <div className="prompt-preview"><div><strong>{active.llm ? "最终发送给模型的指令" : "章节配置全文"}</strong><span>{active.llm ? "由服务端使用当前草稿实时编译" : "由系统固定规则生成"}</span></div>{active.llm ? previewLoading ? <div className="prompt-preview-loading"><LoaderCircle className="spin" size={20} />正在编译完整 Prompt</div> : previewError ? <div className="inline-error"><AlertTriangle size={15} />{previewError}</div> : <textarea aria-label={`${active.title} 完整 Prompt`} value={previewPrompt || active.prompt} readOnly /> : <textarea aria-label={`${active.title} 章节配置全文`} value={active.prompt} readOnly />}</div>}
+        </> : <>
+        <header className="prompt-detail-head"><div><span>{active?.part || "报告目录"}</span><h2>{activeNavChapter?.title || "报告目录"}</h2></div><div className="prompt-detail-badges"><span className="llm">模型生成</span><span className="custom">自定义章节</span></div></header>
+        {scopeSwitch}
+        <p className="prompt-readonly">该章节尚无可用 Prompt 配置；请先保存报告目录，或等待服务端同步后重试。</p>
+        </>}
+        {outlineLoading && !outlineDraft && <div className="outline-loading"><LoaderCircle className="spin" size={16} />正在载入报告目录</div>}
+        {subsectionEditor}
+        {outlineActionBar}
       </main>
     </section>}
     {constraintModalOpen && <div className="prompt-constraint-modal-backdrop" role="presentation" onClick={() => setConstraintModalOpen(false)}><section className="prompt-constraint-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-constraint-modal-title" onClick={(event) => event.stopPropagation()}><header className="prompt-constraint-modal-head"><div><strong id="prompt-constraint-modal-title">只读风控约束</strong><span>不可编辑 · 由系统固定执行</span></div><button className="icon-button" type="button" aria-label="关闭风控约束详情" title="关闭" onClick={() => setConstraintModalOpen(false)}><X size={16} /></button></header><div className="prompt-constraint-modal-body"><div className="prompt-constraints-body"><PromptConstraintGroup title="必须保留" values={constraints.preserve_blocks} /><PromptConstraintGroup title="禁止事项" values={constraints.forbidden} /><PromptConstraintGroup title="允许材料类型" values={constraints.input_contract.source_kinds || []} /><PromptConstraintGroup title="输入字段" values={[...(constraints.input_contract.fact_keys || []), ...(constraints.input_contract.metric_keys || []), ...(constraints.input_contract.rule_keys || [])]} /><PromptConstraintGroup title="输出必备表述" values={[...(constraints.output_contract.required_phrases || []), ...(constraints.output_contract.required_missing_markers || [])]} /><div className="prompt-constraint-group"><strong>引用规则</strong><p>最多 {constraints.output_contract.max_citations ?? 0} 条引用 · 篇幅由本章 Prompt 的目标字符范围决定</p></div><div className="prompt-constraint-group global-rules"><strong>全局规则</strong>{Object.entries(constraints.global_rules).map(([key, value]) => <p key={key}>{value}</p>)}</div></div></div></section></div>}
@@ -1429,7 +1740,7 @@ function Report({ project, bondSummary, sections, quality, snapshot, token, open
   const finalWordReady = canExport && quality?.status === "passed" && !project.analysis_stale && !project.report_stale && project.report_state === "final_ready";
   const wordReady = draftWordReady;
   const wordExportTitle = "导出草稿 Word；最终版需应用最新复核、通过校验并标记已复核";
-  return <div className="view-content report-view"><div className="page-heading"><div><span className="eyebrow">人工复核工作区</span><h1>尽调报告</h1></div><div className="export-group"><span className={`report-quality-chip ${quality?.status === "passed" ? "passed" : "warning"}`}><ShieldCheck size={14} />事实支持率 {quality ? `${Math.round(quality.support_rate * 100)}%` : "待校验"}</span>{canExport ? <><button className="secondary-button export-action" onClick={() => api.exportReport(project.id, "md", reportTitle, token, Boolean(bondSummary))}><Download size={16} />Markdown</button><button className="primary-button export-action" disabled={!wordReady} title={wordExportTitle} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "draft")}><Download size={16} />导出 Word</button></> : <span className="export-restricted"><LockKeyhole size={14} />真实材料默认不提供导出</span>}<button className="secondary-button export-action" disabled={!markReviewedReady || busy === "__report-review__"} title={markReviewedReady ? "标记当前报告为已复核" : "需先应用复核、通过校验并关闭重大事项"} onClick={markReviewed}>{busy === "__report-review__" ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}标记已复核</button><button className="secondary-button export-action" disabled={!finalWordReady} title={finalWordReady ? "导出最终已复核 Word" : "需应用最新复核、通过校验、关闭重大事项并标记已复核"} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "final")}><FileCheck2 size={16} />最终 Word</button></div></div>{staleTableSections.length > 0 && <div className="report-block-warning"><FileSpreadsheet size={16} /><span>{staleTableSections.length} 个章节的系统表格需要更新。更新会保留分析正文并将相关章节设为待复核，不调用模型。</span><button className="secondary-button small" disabled={busy === "__table-refresh__" || Boolean(project.archived_at)} onClick={refreshSystemTables}>{busy === "__table-refresh__" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}更新系统表格</button></div>}{tableRefreshError && <div className="report-block-warning" role="alert"><AlertTriangle size={16} />{tableRefreshError}</div>}<div className="report-layout"><aside className="report-toc"><strong>报告目录</strong>{sections.map((section, index) => { const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <span className="toc-part">{section.part_label}</span>}<a href={`#section-${section.section_key}`}><span>{section.chapter_number || (standalone || !section.chapter_label ? "" : String(index + 1).padStart(2, "0"))}</span>{standalone ? section.part_label : section.title}</a></Fragment>; })}</aside><main className="report-paper"><div className="report-cover"><span>{reportLabel}</span><h2>{reportTitle}</h2>{bondSummary?.reportLevel && <p>报告状态：{bondSummary.reportLevel}</p>}{snapshot && <p>主体档案快照：v{snapshot.version} · 基准日 {snapshot.baseline_date || "待确认"}</p>}<p>募集说明书与评级报告版本：本次运行所用已解析文件</p><p>Agent 初稿 · 等待人工复核</p>{project.data_class === "real_reference" && <p>真实公开材料本地参考 · 不属于评测案例</p>}{hasOpenMajor && <strong className="cover-warning"><AlertTriangle size={16} />存在未决重大事项</strong>}</div><div className={`report-quality-line ${quality?.status === "passed" ? "passed" : "warning"}`}><div><strong>{quality?.supported_claims ?? 0}/{quality?.factual_claims ?? 0}</strong><span>事实性主张已获得证据支持</span></div><div><strong>{quality?.invalid_citations ?? 0}</strong><span>无效引用</span></div><div><strong>{quality?.unsupported_claims ?? 0}</strong><span>无证据主张</span></div></div>{quality?.status === "warning" && <div className="report-block-warning"><AlertTriangle size={16} />存在无证据事实或无效引用，相关章节不能标记为已复核，Word 导出已禁用。</div>}{project.analysis_stale && <div className="report-block-warning"><RefreshCw size={16} />{(project.report_stale_reasons || []).includes("project_info_changed") ? "项目基础信息已变更，请重新运行尽调" : "材料或主体快照已变化，需要重新运行 Agent"}；重跑前 Word 导出已禁用。</div>}<div className={`report-notice ${hasOpenMajor ? "major" : ""}`}><AlertTriangle size={17} />{hasOpenMajor ? "本报告包含未处理冲突、高风险候选项或高优先级任务，详见摘要与附录。" : "本报告为风险审查辅助材料，不构成自动审批意见。"}</div>{sections.map((section, index) => { const citationsExpanded = expandedCitations.has(section.section_key); const sectionExpanded = expandedSections.has(section.section_key); const visibleCitations = citationsExpanded ? section.citation_ids : section.citation_ids.slice(0, 3); const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <h3 className="report-part-heading">{section.part_label}</h3>}<section className={`report-section ${sectionExpanded ? "mobile-expanded" : "mobile-collapsed"}`} id={`section-${section.section_key}`}><div className="section-heading"><h2 className="section-title">{section.chapter_number ? <span className="section-number">{section.chapter_number}</span> : null}<span className="section-name">{standalone ? section.part_label : section.title}</span></h2><div className="section-status"><span className={`section-quality ${section.validation_status === "passed" ? "passed" : "warning"}`}>{Math.round((section.support_rate ?? 0) * 100)}% 支持</span>{reportLengthBadge(section)}{reportGenerationBadge(section)}{reportDeliveryBadge(section)}</div><button className="mobile-section-toggle icon-button" title={sectionExpanded ? "收起章节" : "展开章节"} onClick={() => setExpandedSections((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}><ChevronDown size={16} /></button><div className="section-tools"><button className="icon-button" title="重新生成" onClick={() => regenerate(section)} disabled={busy === section.section_key}><RefreshCw className={busy === section.section_key ? "spin" : ""} size={16} /></button><button className="icon-button" title="编辑章节" onClick={() => { setEditing(section.section_key); setDraft(section.content); }}><Pencil size={16} /></button></div></div><div className="section-collapsible">{editing === section.section_key ? <div className="editor"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="text-button" onClick={() => setEditing(null)}>取消</button><button className="primary-button small" onClick={() => save(section)}>保存修改</button></div></div> : <div className="section-content"><ReportBlocks section={section} openCitation={openCitation} /></div>}<div className="citation-row">{visibleCitations.map((id) => <button key={id} onClick={() => openCitation(id)}>{id.slice(-8)}</button>)}{section.citation_ids.length > 3 && <button className="citation-more" onClick={() => setExpandedCitations((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}>{citationsExpanded ? "收起引用" : `查看全部 ${section.citation_ids.length} 条`}</button>}{section.review_status === "reviewed" ? <span className="reviewed"><Check size={13} />已复核</span> : <button className="mark-reviewed" disabled={section.validation_status !== "passed" || hasOpenMajor} title={section.validation_status !== "passed" ? "证据校验未通过" : hasOpenMajor ? "存在未决重大事项" : "标记已复核"} onClick={() => { setDraft(section.content); save(section, true); }}><Check size={13} />标记已复核</button>}</div></div></section></Fragment>; })}</main></div></div>;
+  return <div className="view-content report-view"><div className="page-heading"><div><span className="eyebrow">人工复核工作区</span><h1>尽调报告</h1></div><div className="export-group"><span className={`report-quality-chip ${quality?.status === "passed" ? "passed" : "warning"}`}><ShieldCheck size={14} />事实支持率 {quality ? `${Math.round(quality.support_rate * 100)}%` : "待校验"}</span>{canExport ? <><button className="secondary-button export-action" onClick={() => api.exportReport(project.id, "md", reportTitle, token, Boolean(bondSummary))}><Download size={16} />Markdown</button><button className="primary-button export-action" disabled={!wordReady} title={wordExportTitle} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "draft")}><Download size={16} />导出 Word</button></> : <span className="export-restricted"><LockKeyhole size={14} />真实材料默认不提供导出</span>}<button className="secondary-button export-action" disabled={!markReviewedReady || busy === "__report-review__"} title={markReviewedReady ? "标记当前报告为已复核" : "需先应用复核、通过校验并关闭重大事项"} onClick={markReviewed}>{busy === "__report-review__" ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}标记已复核</button><button className="secondary-button export-action" disabled={!finalWordReady} title={finalWordReady ? "导出最终已复核 Word" : "需应用最新复核、通过校验、关闭重大事项并标记已复核"} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "final")}><FileCheck2 size={16} />最终 Word</button></div></div>{staleTableSections.length > 0 && <div className="report-block-warning"><FileSpreadsheet size={16} /><span>{staleTableSections.length} 个章节的系统表格需要更新。更新会保留分析正文并将相关章节设为待复核，不调用模型。</span><button className="secondary-button small" disabled={busy === "__table-refresh__" || Boolean(project.archived_at)} onClick={refreshSystemTables}>{busy === "__table-refresh__" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}更新系统表格</button></div>}{quality?.regeneration_requirement === "full_report" && <div className="report-block-warning"><AlertTriangle size={16} /><span>报告目录的二级结构已变更（章节增删或排序），单章再生无法使报告与目录一致；请整份重新生成报告。</span></div>}{quality?.regeneration_requirement === "chapter" && <div className="report-block-warning"><AlertTriangle size={16} /><span>{`报告目录有 ${quality.outline_changed_chapters?.length || 1} 个章节的小节配置已变化，按章再生对应章节即可更新（不影响其他章节）。`}</span></div>}{tableRefreshError && <div className="report-block-warning" role="alert"><AlertTriangle size={16} />{tableRefreshError}</div>}<div className="report-layout"><aside className="report-toc"><strong>报告目录</strong>{sections.map((section, index) => { const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <span className="toc-part">{section.part_label}</span>}<a href={`#section-${section.section_key}`}><span>{section.chapter_number || (standalone || !section.chapter_label ? "" : String(index + 1).padStart(2, "0"))}</span>{standalone ? section.part_label : section.title}</a></Fragment>; })}</aside><main className="report-paper"><div className="report-cover"><span>{reportLabel}</span><h2>{reportTitle}</h2>{bondSummary?.reportLevel && <p>报告状态：{bondSummary.reportLevel}</p>}{snapshot && <p>主体档案快照：v{snapshot.version} · 基准日 {snapshot.baseline_date || "待确认"}</p>}<p>募集说明书与评级报告版本：本次运行所用已解析文件</p><p>Agent 初稿 · 等待人工复核</p>{project.data_class === "real_reference" && <p>真实公开材料本地参考 · 不属于评测案例</p>}{hasOpenMajor && <strong className="cover-warning"><AlertTriangle size={16} />存在未决重大事项</strong>}</div><div className={`report-quality-line ${quality?.status === "passed" ? "passed" : "warning"}`}><div><strong>{quality?.supported_claims ?? 0}/{quality?.factual_claims ?? 0}</strong><span>事实性主张已获得证据支持</span></div><div><strong>{quality?.invalid_citations ?? 0}</strong><span>无效引用</span></div><div><strong>{quality?.unsupported_claims ?? 0}</strong><span>无证据主张</span></div></div>{quality?.status === "warning" && <div className="report-block-warning"><AlertTriangle size={16} />存在无证据事实或无效引用，相关章节不能标记为已复核，Word 导出已禁用。</div>}{project.analysis_stale && <div className="report-block-warning"><RefreshCw size={16} />{(project.report_stale_reasons || []).includes("project_info_changed") ? "项目基础信息已变更，请重新运行尽调" : "材料或主体快照已变化，需要重新运行 Agent"}；重跑前 Word 导出已禁用。</div>}<div className={`report-notice ${hasOpenMajor ? "major" : ""}`}><AlertTriangle size={17} />{hasOpenMajor ? "本报告包含未处理冲突、高风险候选项或高优先级任务，详见摘要与附录。" : "本报告为风险审查辅助材料，不构成自动审批意见。"}</div>{sections.map((section, index) => { const citationsExpanded = expandedCitations.has(section.section_key); const sectionExpanded = expandedSections.has(section.section_key); const visibleCitations = citationsExpanded ? section.citation_ids : section.citation_ids.slice(0, 3); const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <h3 className="report-part-heading">{section.part_label}</h3>}<section className={`report-section ${sectionExpanded ? "mobile-expanded" : "mobile-collapsed"}`} id={`section-${section.section_key}`}><div className="section-heading"><h2 className="section-title">{section.chapter_number ? <span className="section-number">{section.chapter_number}</span> : null}<span className="section-name">{standalone ? section.part_label : section.title}</span></h2><div className="section-status"><span className={`section-quality ${section.validation_status === "passed" ? "passed" : "warning"}`}>{Math.round((section.support_rate ?? 0) * 100)}% 支持</span>{reportLengthBadge(section)}{reportGenerationBadge(section)}{reportDeliveryBadge(section)}</div><button className="mobile-section-toggle icon-button" title={sectionExpanded ? "收起章节" : "展开章节"} onClick={() => setExpandedSections((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}><ChevronDown size={16} /></button><div className="section-tools"><button className="icon-button" title="重新生成" onClick={() => regenerate(section)} disabled={busy === section.section_key}><RefreshCw className={busy === section.section_key ? "spin" : ""} size={16} /></button><button className="icon-button" title="编辑章节" onClick={() => { setEditing(section.section_key); setDraft(section.content); }}><Pencil size={16} /></button></div></div><div className="section-collapsible">{editing === section.section_key ? <div className="editor"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="text-button" onClick={() => setEditing(null)}>取消</button><button className="primary-button small" onClick={() => save(section)}>保存修改</button></div></div> : <div className="section-content"><ReportBlocks section={section} openCitation={openCitation} /></div>}<div className="citation-row">{visibleCitations.map((id) => <button key={id} onClick={() => openCitation(id)}>{id.slice(-8)}</button>)}{section.citation_ids.length > 3 && <button className="citation-more" onClick={() => setExpandedCitations((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}>{citationsExpanded ? "收起引用" : `查看全部 ${section.citation_ids.length} 条`}</button>}{section.review_status === "reviewed" ? <span className="reviewed"><Check size={13} />已复核</span> : <button className="mark-reviewed" disabled={section.validation_status !== "passed" || hasOpenMajor} title={section.validation_status !== "passed" ? "证据校验未通过" : hasOpenMajor ? "存在未决重大事项" : "标记已复核"} onClick={() => { setDraft(section.content); save(section, true); }}><Check size={13} />标记已复核</button>}</div></div></section></Fragment>; })}</main></div></div>;
 }
 
 /* 证据原文重排。抽取出来的整页文本本身就是一行一条记录，只是浏览器把换行折叠掉了，

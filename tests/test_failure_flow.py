@@ -104,6 +104,12 @@ def test_safety_rejection_triggers_exactly_one_repair_and_passes(monkeypatch):
     assert outcome["fallback_stage"] == "none"
     assert outcome["repair_attempted"] is True
     assert FORBIDDEN not in outcome["content"]
+    # 本跑首拒原因随台账冻结（收口方案 §五"逐条证明"）：验收不再从历史失败行猜原因。
+    attempt = row("SELECT diagnostics_json FROM chapter_generation_attempts "
+                  "WHERE project_id=? AND section_key=? ORDER BY rowid DESC LIMIT 1",
+                  (PROJECT_ID, CHAPTER))
+    diagnostics = json.loads(attempt["diagnostics_json"])
+    assert any("禁止" in item for item in diagnostics.get("first_rejection_reasons") or [])
 
 
 def test_safety_repair_failure_falls_back_without_a_second_repair(monkeypatch):
@@ -217,10 +223,23 @@ def test_real_model_calls_are_capped_at_two_per_chapter(monkeypatch):
         def fake_chat(system_prompt, prompt, *, schema=None, normalizer=None,
                       allowed_source_ids=None, context=None, max_input_chars=None):
             index = len(calls)
-            calls.append(json.loads(prompt))
-            return ({"content": replies[min(index, len(replies) - 1)],
-                     "citation_ids": list(chapter_ctx.get("allowed_citation_ids") or [])},
-                    LlmUsage())
+            request = json.loads(prompt)
+            calls.append(request)
+            reply_text = replies[min(index, len(replies) - 1)]
+            citations = list(chapter_ctx.get("allowed_citation_ids") or [])
+            # P1-2：rating 章带内置小节（构建期注入 required_subsections）→ 应答按小节分条，
+            # 与真实契约一致；无小节配置的上下文仍回旧协议的整章 content。
+            required = request.get("required_subsections") or []
+            if required:
+                return ({
+                    "subsections": [
+                        {"subsection_id": item["subsection_id"], "content": reply_text,
+                         "citation_ids": citations}
+                        for item in required
+                    ],
+                    "citation_ids": [],
+                }, LlmUsage())
+            return ({"content": reply_text, "citation_ids": citations}, LlmUsage())
 
         monkeypatch.setattr(llm, "is_configured", lambda: True)
         monkeypatch.setattr(llm, "_chat_json", fake_chat)
@@ -938,6 +957,12 @@ def test_support_failure_consumes_the_shared_repair_opportunity(monkeypatch):
         # 修复输入里带上了无支持主张的明细（否则模型只能盲改）
         assert seen_details and seen_details[0].get("support_failed") is True
         assert seen_details[0].get("support_detail_items")[0]["claim_index"] == 7
+        # 本跑首拒支持明细随台账冻结：验收报告可直接点名主张与原因码。
+        attempt = row("SELECT diagnostics_json FROM chapter_generation_attempts "
+                      "WHERE project_id=? AND section_key=? ORDER BY rowid DESC LIMIT 1",
+                      (PROJECT_ID, CHAPTER))
+        diagnostics = json.loads(attempt["diagnostics_json"])
+        assert (diagnostics.get("first_rejection_support_items") or [{}])[0].get("claim_index") == 7
     finally:
         _cleanup_attempts()
 
@@ -968,6 +993,10 @@ def test_support_failure_after_repair_still_falls_back(monkeypatch):
         diagnostics = json.loads(attempt["diagnostics_json"])
         assert diagnostics.get("support_failed") is True
         assert diagnostics.get("support_unsupported_claims") == 2
+        # 逐条明细随诊断冻结（收口方案 §五"逐条证明"）：主张位置/原因码可直接核对。
+        items = diagnostics.get("support_failed_items") or []
+        assert items and items[0]["claim_index"] == 7
+        assert items[0]["reason_code"] == "missing_record"
     finally:
         _cleanup_attempts()
 

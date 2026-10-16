@@ -5,12 +5,67 @@ import type {
   BondSummary, EntityProfileDetail, EntityProfileReadiness, EntityProfileSummary, ProjectCreatePayload,
   ProjectEntity, ProjectProfileSnapshot, ProjectSummary, ProjectUpdatePayload, ProjectUpdateResult, ReportQuality, ReportSection, ReviewApplyResult, ReviewSummary,
   ReviewTask, Risk, Run, RunNode, RunArtifact, ReportPrompt,
+  ReportOutline, ReportOutlineState,
   ReportSnapshot, ReportSnapshotSummary,
     TableMatrix, TableSummary, TableCellReviewRecord,
 } from "./types";
 
 function headers(token?: string, json = false): HeadersInit {
   return { ...(json ? { "Content-Type": "application/json" } : {}), ...(token ? { "X-Project-Token": token } : {}) };
+}
+
+/** Prompt 保存/重置的乐观并发基准（`PLAN.md` §二 P0-A / §四.2）。
+ *
+ * 两个字段都是**可选**的：客户端不传则后端跳过对应检查（兼容旧客户端）。
+ * 但传空串会被后端当成"预期为空"从而 409，所以下面两个助手在值为空时**整体省略该字段**。
+ */
+export interface PromptConcurrency {
+  /** 该范围当前的配置哈希：项目级用 `config_sha256`，全局级用 `global_config_sha256` */
+  configSha256?: string;
+  /** 该范围读取时的编译器版本（`prompt_contract_version`） */
+  promptContractVersion?: string;
+}
+
+function _concurrencyBody(basis: PromptConcurrency): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (basis.configSha256) body.expected_config_sha256 = basis.configSha256;
+  if (basis.promptContractVersion) body.expected_prompt_contract_version = basis.promptContractVersion;
+  return body;
+}
+
+function _concurrencyQuery(basis: PromptConcurrency): string {
+  // 重置是 DELETE，没有请求体，基准只能走查询参数（后端只检查哈希这一个）。
+  return basis.configSha256
+    ? `?expected_config_sha256=${encodeURIComponent(basis.configSha256)}`
+    : "";
+}
+
+/** 报告目录（report-outline）的乐观并发基准（`docs/report-outline-spec.md` §四/§六）。
+ *
+ * 与 Prompt 同口径：两值都可选，客户端不传则后端跳过检查；但**空值必须整体省略字段**——
+ * 传空串会让后端把"该范围尚无覆盖"误判成冲突并回 409。
+ */
+export interface OutlineConcurrency {
+  /** 该范围已存目录版本（GET 响应的 `outline_version`）；无覆盖时为空串 */
+  expectedOutlineVersion?: string;
+  /** 该范围当前目录指纹（GET 响应的 `config_sha256`）；无覆盖时为空串 */
+  expectedOutlineSha256?: string;
+}
+
+function _outlineConcurrencyBody(basis: OutlineConcurrency): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (basis.expectedOutlineVersion) body.expected_outline_version = basis.expectedOutlineVersion;
+  if (basis.expectedOutlineSha256) body.expected_outline_sha256 = basis.expectedOutlineSha256;
+  return body;
+}
+
+function _outlineConcurrencyQuery(basis: OutlineConcurrency): string {
+  // DELETE 无请求体，基准走查询参数，避免"预期为空"被当成冲突。
+  const params = new URLSearchParams();
+  if (basis.expectedOutlineVersion) params.set("expected_outline_version", basis.expectedOutlineVersion);
+  if (basis.expectedOutlineSha256) params.set("expected_outline_sha256", basis.expectedOutlineSha256);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -150,22 +205,55 @@ export const api = {
     method: "POST", headers: headers(token, true),
     body: JSON.stringify({ chapters, expected_report_revision: expectedRevision, section_hashes: sectionHashes }),
   }),
-  reportPrompts: (id: string, token?: string) => request<ReportPrompt[]>(`/api/projects/${id}/report-prompts`, { headers: headers(token) }),
-  saveReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"] | string, token?: string) => request<ReportPrompt>(`/api/projects/${id}/report-prompts/${chapterKey}`, {
-    method: "PATCH", headers: headers(token, true), body: JSON.stringify(typeof config === "string" ? { prompt: config } : { config }),
-  }),
-  resetReportPrompt: (id: string, chapterKey: string, token?: string) => request<ReportPrompt>(`/api/projects/${id}/report-prompts/${chapterKey}`, {
-    method: "DELETE", headers: headers(token),
-  }),
-  setGlobalReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"] | string, token?: string) => request<ReportPrompt>(`/api/projects/${id}/report-prompts/global/${chapterKey}`, {
-    method: "PATCH", headers: headers(token, true), body: JSON.stringify(typeof config === "string" ? { prompt: config } : { config }),
-  }),
+  // Prompt 编辑支持"项目配置／全局默认"两种范围（PLAN.md §二 P0-A）：
+  // `scope=global` 时后端返回的是**全局链**（全局覆盖 > 出厂 YAML，不掺项目覆盖）。
+  reportPrompts: (id: string, token?: string, scope: "project" | "global" = "project") =>
+    request<ReportPrompt[]>(`/api/projects/${id}/report-prompts?scope=${scope}`, { headers: headers(token) }),
+  // 报告目录配置（report-outline）：三接口挂在项目路径下，读写权限与 P0-A 同一判据。
+  // `scope=global` 时读的是全局链（全局覆盖 > 内置），与 Prompt 的范围语义一致。
+  reportOutline: (id: string, token: string | undefined, scope: "project" | "global") =>
+    request<ReportOutlineState>(`/api/projects/${id}/report-outline?scope=${scope}`, { headers: headers(token) }),
+  // 保存完整目录（PUT）：并发基准随范围取该 scope 的 `outline_version` / `config_sha256`，
+  // 空值整体省略字段（同 P0-A 的 `_concurrencyBody`：传空串会被后端当成"预期为空"而 409）。
+  saveReportOutline: (id: string, token: string | undefined, scope: "project" | "global", outline: ReportOutline, concurrency: OutlineConcurrency = {}) =>
+    request<ReportOutlineState>(`/api/projects/${id}/report-outline?scope=${scope}`, {
+      method: "PUT", headers: headers(token, true),
+      body: JSON.stringify({ outline, ..._outlineConcurrencyBody(concurrency) }),
+    }),
+  // 恢复默认目录（DELETE，幂等）：删该 scope 行后回落全局/内置；基准只能走查询参数。
+  resetReportOutline: (id: string, token: string | undefined, scope: "project" | "global", concurrency: OutlineConcurrency = {}) =>
+    request<ReportOutlineState>(`/api/projects/${id}/report-outline?scope=${scope}${_outlineConcurrencyQuery(concurrency)}`, {
+      method: "DELETE", headers: headers(token),
+    }),
+  // 保存/重置都带**乐观并发基准**（P0-1 / PLAN.md §四.2）：哈希或编译器版本不符时后端返回 409。
+  // 基准为空串时不发送该字段——否则后端会把"尚无覆盖"判成冲突。
+  saveReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"] | string, token?: string, concurrency: PromptConcurrency = {}) =>
+    request<ReportPrompt>(`/api/projects/${id}/report-prompts/${chapterKey}`, {
+      method: "PATCH", headers: headers(token, true),
+      body: JSON.stringify({
+        ...(typeof config === "string" ? { prompt: config } : { config }),
+        ..._concurrencyBody(concurrency),
+      }),
+    }),
+  resetReportPrompt: (id: string, chapterKey: string, token?: string, concurrency: PromptConcurrency = {}) =>
+    request<ReportPrompt>(`/api/projects/${id}/report-prompts/${chapterKey}`, {
+      method: "DELETE", headers: headers(token),
+    }),
+  setGlobalReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"] | string, token?: string, concurrency: PromptConcurrency = {}) =>
+    request<ReportPrompt>(`/api/projects/${id}/report-prompts/global/${chapterKey}`, {
+      method: "PATCH", headers: headers(token, true),
+      body: JSON.stringify({
+        ...(typeof config === "string" ? { prompt: config } : { config }),
+        ..._concurrencyBody(concurrency),
+      }),
+    }),
   previewReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"], token?: string) => request<{ chapter_key: string; prompt: string }>(`/api/projects/${id}/report-prompts/${chapterKey}/preview`, {
     method: "POST", headers: headers(token, true), body: JSON.stringify({ config }),
   }),
-  resetGlobalReportPrompt: (id: string, chapterKey: string, token?: string) => request<ReportPrompt>(`/api/projects/${id}/report-prompts/global/${chapterKey}`, {
-    method: "DELETE", headers: headers(token),
-  }),
+  resetGlobalReportPrompt: (id: string, chapterKey: string, token?: string, concurrency: PromptConcurrency = {}) =>
+    request<ReportPrompt>(`/api/projects/${id}/report-prompts/global/${chapterKey}${_concurrencyQuery(concurrency)}`, {
+      method: "DELETE", headers: headers(token),
+    }),
   citation: (id: string, token?: string) => request<Citation>(`/api/citations/${id}`, { headers: headers(token) }),
   run: (id: string, token?: string) => request<Run>(`/api/runs/${id}`, { headers: headers(token) }),
   latestRun: (projectId: string, token?: string) => request<LatestRun>(`/api/projects/${projectId}/runs/latest`, { headers: headers(token) }),

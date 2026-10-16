@@ -135,28 +135,95 @@ def markdown_blocks(content: str) -> str:
     return "\n\n".join(output)
 
 
-def grouped_sections(sections: list[dict], parts=BOND_CHAPTER_PARTS) -> list[dict]:
+def normalized_outline(project_id: str) -> dict | None:
+    """读取生效目录并做**展示用词规范化**（历史报告只做展示转换，P0-2）。
+
+    网页/导出/快照共用：目录标题里的原材料名在返回副本上替换，目录存储保持原文。
+    """
+    try:
+        from .report_outline_store import effective_outline
+
+        outline = effective_outline(project_id)
+    except Exception:
+        return None
+    return _normalize_outline_titles(project_id, outline)
+
+
+def outline_for_grouping(project_id: str) -> dict | None:
+    """生效目录（展示装饰用，P1）：读取失败返回 None（调用方回退旧行为）。
+
+    返回前对**分部与章节标题**做成品用词规范化（旧计划剩余项 P0-2）——内置目录标题
+    （如 ``评级报告复核及评级差异``）、项目/全局覆盖自定义标题都可能带原材料名，
+    而目录标签直接进网页目录与 MD/Word 导出。只改返回副本，不改目录存储。
+    """
+    return normalized_outline(project_id)
+
+
+def _normalize_outline_titles(project_id: str, outline: dict | None) -> dict | None:
+    if not outline:
+        return outline
+    from .delivery_wording import material_numbers, normalize_report_text
+
+    numbers = material_numbers(project_id)
+    parts: list[dict] = []
+    for part in outline.get("parts") or []:
+        chapters = [
+            {**chapter, "title": normalize_report_text(str(chapter.get("title") or ""), numbers)}
+            for chapter in part.get("chapters") or []
+        ]
+        parts.append({
+            **part,
+            "title": normalize_report_text(str(part.get("title") or ""), numbers),
+            "chapters": chapters,
+        })
+    return {**outline, "parts": parts}
+
+
+def grouped_sections(sections: list[dict], parts=BOND_CHAPTER_PARTS,
+                     outline: dict | None = None) -> list[dict]:
     """按报告分部归集章节并编号。
 
     返回 `[{"part", "label", "chapters": [{"section", "number", "label"}]}]`；
     未列入任何分部的历史章节各自成为一个后续分部（`chapters` 为空，`section` 指向自身）。
+
+    ``outline``（生效目录）提供时按目录分组与排序——章节标题以目录为准（改名立即生效，
+    P1-4）；不在目录中的 section（被删章节的旧正文尚未再生的情形）仍附在最后，保证可见。
     """
     by_key = {section["section_key"]: section for section in sections}
     groups: list[dict] = []
     seen: set[str] = set()
-    for part_title, keys in parts:
-        present = [by_key[key] for key in keys if key in by_key]
-        if not present:
-            continue
-        chapters = []
-        for index, section in enumerate(present, start=1):
-            seen.add(section["section_key"])
-            chapters.append({
-                "section": section,
-                "number": cn_paren(index),
-                "label": chapter_label(index, section["title"]),
-            })
-        groups.append({"part": part_title, "label": part_label(len(groups) + 1, part_title), "chapters": chapters})
+    if outline:
+        for part in outline.get("parts") or []:
+            chapters = []
+            for index, chapter in enumerate(part.get("chapters") or [], start=1):
+                key = str(chapter.get("template_key") or chapter.get("chapter_id") or "")
+                section = by_key.get(key)
+                if not section:
+                    continue
+                seen.add(key)
+                title = str(chapter.get("title") or section["title"])
+                chapters.append({
+                    "section": section,
+                    "number": cn_paren(index),
+                    "label": chapter_label(index, title),
+                })
+            if chapters:
+                part_title = str(part.get("title") or "")
+                groups.append({"part": part_title, "label": part_label(len(groups) + 1, part_title), "chapters": chapters})
+    else:
+        for part_title, keys in parts:
+            present = [by_key[key] for key in keys if key in by_key]
+            if not present:
+                continue
+            chapters = []
+            for index, section in enumerate(present, start=1):
+                seen.add(section["section_key"])
+                chapters.append({
+                    "section": section,
+                    "number": cn_paren(index),
+                    "label": chapter_label(index, section["title"]),
+                })
+            groups.append({"part": part_title, "label": part_label(len(groups) + 1, part_title), "chapters": chapters})
     for section in sections:
         if section["section_key"] in seen:
             continue
@@ -170,10 +237,11 @@ def grouped_sections(sections: list[dict], parts=BOND_CHAPTER_PARTS) -> list[dic
     return groups
 
 
-def section_labels(sections: list[dict], parts=BOND_CHAPTER_PARTS) -> dict[str, dict]:
+def section_labels(sections: list[dict], parts=BOND_CHAPTER_PARTS,
+                   outline: dict | None = None) -> dict[str, dict]:
     """`section_key` → 分部与章的编号信息，供报告 API 与前端展示使用。"""
     labels: dict[str, dict] = {}
-    for group in grouped_sections(sections, parts):
+    for group in grouped_sections(sections, parts, outline=outline):
         part_number = group["label"].split("、", 1)[0]
         for chapter in group["chapters"]:
             labels[chapter["section"]["section_key"]] = {

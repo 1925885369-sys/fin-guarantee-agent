@@ -44,17 +44,52 @@ def test_bond_chapter_metadata_covers_every_chapter_in_order():
     assert set(BOND_CHAPTER_PART) == set(BOND_CHAPTER_KEYS)
 
 
-def test_only_six_high_risk_bond_chapters_use_llm():
-    """直接撰写的模型章节：原 6 个高风险章 **+ governance**。
+def test_only_expected_bond_chapters_use_llm():
+    """直接撰写的模型章节：原 6 个高风险章 **+ governance + operations + proceeds**。
 
-    修订稿 §2/§3.2 明确要求"现有模型章节及 governance 使用 generation_mode=generate"，
-    因此这里从 6 章扩到 7 章——这是**预期变更**，不是放宽校验。
+    修订稿 §2/§3.2 要求"现有模型章节及 governance 使用 generation_mode=generate"，
+    本次 `PLAN_new_p0_p1.md` P0-2 / `PLAN.md` P0-B 再把第一部分 operations、proceeds
+    一并切为模型直接撰写，因此从 7 章扩到 9 章——这是**预期变更**，不是放宽校验。
     """
     enabled = {key for key in BOND_CHAPTER_KEYS if chapter_uses_llm(key)}
     assert enabled == {
-        "governance",
+        "governance", "operations", "proceeds",
         "financial", "cashflow", "debt", "rating", "guarantee", "counter_guarantee",
     }
+
+
+def test_first_part_chapters_use_generate_mode_and_narrative_contract():
+    """P0-2/P0-B：第一部分三章（governance/operations/proceeds）均为直接撰写模式。
+
+    `generation_mode: generate` 才让请求体不带确定性草稿；narrative_contract 给出
+    篇幅目标（2000–4000 字符）与行文约束，且按要求**不写 paragraph_order**。
+    """
+    payload = prompt_config_payload(bond=True)
+    for key in ("governance", "operations", "proceeds"):
+        config = payload["chapters"][key]
+        assert config["llm"] is True, key
+        assert config["generation_mode"] == "generate", key
+        narrative = config["narrative_contract"]
+        assert narrative["preferred_min_chars"] == 2000 and narrative["preferred_max_chars"] == 4000, key
+        assert narrative["tone"] == "professional_due_diligence", key
+        assert not narrative["paragraph_order"], f"{key} 不应强制正文顺序"
+
+
+def test_no_required_phrase_demands_the_legacy_source_wording():
+    """P0-3 回归：任何章节的成品契约都不得再要求逐字输出旧称"募集说明书披露"。
+
+    成品旧称由服务端在写入时统一规范化（delivery_wording），模型侧与成品契约均
+    不应再把它列为 required_phrases——否则模型被逼逐字写旧称，成品又得改回去。
+    """
+    payload = prompt_config_payload(bond=True)
+    offenders = [
+        (key, phrase)
+        for key, config in payload["chapters"].items()
+        for phrase in config["output_contract"]["required_phrases"]
+        if "募集说明书" in phrase
+    ]
+    assert offenders == []
+
 
 
 def test_llm_chapters_define_report_narrative_and_concise_citations():
@@ -1048,6 +1083,80 @@ def test_parenthesised_label_also_registers_bare_subject():
     assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"])
 
 
+def _disclosure_record(label: str, value, unit: str = "", *, status: str = "verified") -> dict:
+    """来自引文的披露记录（单位可缺省——引文窗口常看不到表头单位）。"""
+    record = _table_record(label, value, unit)
+    record.update({
+        "record_id": f"disclosure:{label}:{value}", "record_type": "disclosure", "status": status,
+    })
+    return record
+
+
+def test_blank_unit_disclosure_record_candidates_for_written_money_mention():
+    """⑤b 单位未注明的**披露**记录按金额量纲折算后参与候选（2026-10-16 北投 debt 158.66 亿实测）。
+
+    评级报告到期分布表以文本形态出现在引文里（"公司信用类债券 158.66 …"），单位"（亿元）"
+    印在表头、不在引文窗口内 → 披露记录单位为空。正文写"公司信用类债券158.66亿元"时，
+    该记录若不进候选，数字会改绑到同值的别表记录（"债券融资"，万元）并造出假 label_mismatch。
+    正例：空单位披露记录按亿元折算命中 → 科目兼容 → 无冲突。
+    负例①：fact/metric 的裸数字不跨量纲参与（配置裸数字不得为正文数值背书）；
+    负例②：科目确实写错时仍报冲突。
+    """
+    records = [_disclosure_record("信用类债券", "158.66"), _table_record("债券融资", "1586600")]
+    context = _binding_context(records)
+    content = "债务到期分布显示，公司信用类债券158.66亿元、其他有息债务95.65亿元。披露信息待核验，材料不足。"
+    result = validate_chapter_output(content, ["c-source-1"], context)
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+    # 负例①：同一空单位值挂在 fact 上时不得跨量纲匹配 → 亿元数字按"新数字"拦截。
+    fact_record = _table_record("债券融资", "158.66", "")
+    fact_record.update({"record_id": "fact:x", "record_type": "fact"})
+    result_fact = validate_chapter_output(
+        "公司信用类债券158.66亿元。披露信息待核验，材料不足。",
+        ["c-source-1"], _binding_context([fact_record]),
+    )
+    assert result_fact["unexpected_numbers"], "fact 空单位记录不得跨量纲为亿元数字背书"
+
+    # 负例②：科目确实写错（词表内科目"应付债券"对 158.66 亿元）时仍报冲突。
+    records_with_subject = [*records, _table_record("应付债券", "999999")]
+    result_wrong = validate_chapter_output(
+        "应付债券158.66亿元。披露信息待核验，材料不足。",
+        ["c-source-1"], _binding_context(records_with_subject),
+    )
+    assert any(item["reason"] == "label_mismatch" for item in result_wrong["attribution_conflicts"]), (
+        result_wrong["attribution_conflicts"]
+    )
+
+
+def test_entity_noise_word_stripped_before_label_compatibility():
+    """⑤c 科目名内的主体噪声词（"公司"）两侧去噪后再判包含（2026-10-16 中邮 operations 实测）。
+
+    记录标签（引文截断）为"占公司主营业务收入的比例"，正文写"投资交易业务收入占主营业务
+    收入的比例分别为31.36%、29.31%和35.35%"——原样包含判定失败、三个数字全被判
+    label_mismatch。去噪后两侧同形 → 兼容；后位值（29.31%/35.35%）经"分别"枚举头继承
+    同样命中。
+    负例：其它科目名（"营业收入"）与比率标签仍不兼容，不得借去噪放行。
+    """
+    from backend.app.chapter_guard import _labels_compatible
+
+    assert _labels_compatible("占主营业务收入的比例", "占公司主营业务收入的比例")
+    assert not _labels_compatible("营业收入", "占公司主营业务收入的比例")
+    assert not _labels_compatible("投资收益", "占公司主营业务收入的比例")
+
+    records = [
+        _disclosure_record("占公司主营业务收入的比例", "31.36", "%"),
+        _disclosure_record("占公司主营业务收入的比例", "29.31", "%"),
+        _disclosure_record("占公司主营业务收入的比例", "35.35", "%"),
+    ]
+    content = "投资交易业务收入占主营业务收入的比例分别为31.36%、29.31%和35.35%。披露信息待核验，材料不足。"
+    result = validate_chapter_output(content, ["c-source-1"], _binding_context(records))
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+
 def test_bare_quote_number_with_declared_money_unit_backs_body_written_amount():
     """⑥ 引文表格行"（亿元）…43.40"是裸数字，正文写"43.40 亿元"必须认账。"""
     records = [_table_record("其他项目", "9999")]
@@ -1513,6 +1622,56 @@ def test_ordered_series_period_does_not_hide_a_misplaced_value():
     )
 
 
+def test_ordered_series_period_ignores_thousand_separators():
+    """㉓c 千分位逗号不是值分隔符：'…分别为204,709.77万元、307,496.94万元和405,806.33万元'
+    的第二个值应绑 2024——旧实现把千分位逗号当分隔符、序号 +1 → 误绑 2025，与记录
+    造出假 period_mismatch（中邮 debt 实测）。"""
+    records = [
+        _table_record("应付债券", "204709.77", "万元", period="2023"),
+        _table_record("应付债券", "307496.94", "万元", period="2024"),
+        _table_record("应付债券", "405806.33", "万元", period="2025"),
+    ]
+    context = _binding_context(records)
+    content = (
+        "从应付债券科目看，2023年末、2024年末和2025年末分别为204,709.77万元、307,496.94万元和405,806.33万元。"
+        "披露信息待核验，材料不足。"
+    )
+    result = validate_chapter_output(content, ["c-source-1"], context)
+    assert not any(item["reason"] == "period_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+
+def test_excluded_subject_before_wai_is_not_a_written_label():
+    """㉓d "X外/除X外"里 X 是被**排除**的对象，不当所写科目。
+
+    中邮 debt 实测："银行借款与公司债券外其他公司信用类债券余额之和…占比14.00%"——
+    被排除的"公司债券"误当科目，与记录行"债务融资工具"造出假 label_mismatch。
+    负例：没有"外"的"公司债券占有息负债余额的比例为14.00%"仍照常按科目不匹配拦截。
+    """
+    records = [
+        _table_record("债务融资工具", "201152.73", "万元"),
+        _table_record("债务融资工具", "14", "%"),
+        _table_record("其中：公司债券", "405806.33", "万元"),
+    ]
+    context = _binding_context(records)
+    good = validate_chapter_output(
+        "银行借款与公司债券外其他公司信用类债券余额之和为20.12亿元，"
+        "占有息负债余额的比例为14.00%。披露信息待核验，材料不足。",
+        ["c-source-1"], context,
+    )
+    assert not any(
+        item["reason"] == "label_mismatch" for item in good["attribution_conflicts"]
+    ), good["attribution_conflicts"]
+    bad = validate_chapter_output(
+        "公司债券占有息负债余额的比例为14.00%。披露信息待核验，材料不足。",
+        ["c-source-1"], context,
+    )
+    assert any(
+        item["reason"] == "label_mismatch" for item in bad["attribution_conflicts"]
+    ), bad["attribution_conflicts"]
+
+
 def test_ordinal_format_numbers_are_not_business_values():
     """㉔ 格式序号（"第1个交易日""前1个交易日"）不是业务数值。
 
@@ -1558,3 +1717,138 @@ def test_page_reference_with_fullwidth_dash_is_stripped():
     stripped, _ignored, pages = chapter_guard._strip_format_numbers("详见第77—81页。")
     assert pages == ["77", "81"]
     assert "77" not in stripped and "81" not in stripped
+
+
+def test_ratio_numerator_picks_the_marker_adjacent_amount():
+    """⑰ 同分句多个并列比率：分子取**紧邻本比率标记**的那个金额左侧科目名。
+
+    正文实测（北投 debt #21）：
+    "短期借款以保证借款678,040.93万元、占比63.71%和信用借款386,298.82万元、占比36.29%"
+
+    36.29% 的 16 字窗口只剩"款386,298.82万元、占比"——第一项分子挤出了窗口；
+    旧实现 `_cut_ratio_left` 切在**第一个**"占"上，把第一项分子"保证借款"错配给第二项，
+    制造 label_mismatch 误退。改为取**最后一个**标记左侧的分子后，两项各归其位。
+    """
+    records = [
+        _table_record("保证借款", "63.71", "%", period="2025"),
+        _table_record("信用借款", "36.29", "%", period="2025"),
+        _table_record("保证借款", "678040.93", "万元", period="2025"),
+        _table_record("信用借款", "386298.82", "万元", period="2025"),
+    ]
+    context = _binding_context(records)
+    content = (
+        "短期借款以保证借款678,040.93万元、占比63.71%和信用借款386,298.82万元、"
+        "占比36.29%构成。披露信息待核验，材料不足。"
+    )
+    result = validate_chapter_output(content, ["c-source-1"], context)
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+
+def test_ratio_numerator_multi_marker_does_not_rescue_wrong_subject():
+    """⑱ 负例：多标记取"最右"只补进**该位置真实**的科目名，不为写错的比率背书。
+
+    第二项比率（36.29%）本应属"信用借款"，正文却写成**另一个记录科目**"保证借款"
+    （词表里存在）——取"最右"补进的是"保证借款"，与 36.29% 的信用借款记录不兼容，
+    仍须报冲突（若实现错把第一项位置当分母、或错误放行整段，此断言会失败）。
+    """
+    records = [
+        _table_record("保证借款", "63.71", "%", period="2025"),
+        _table_record("信用借款", "36.29", "%", period="2025"),
+    ]
+    context = _binding_context(records)
+    content = (
+        "短期借款以保证借款678,040.93万元、占比63.71%和信用借款386,298.82万元、"
+        "占比63.71%构成。披露信息待核验，材料不足。"
+    )
+    result = validate_chapter_output(content, ["c-source-1"], context)
+    assert any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+
+def test_period_bucket_labels_never_become_written_subjects():
+    """期间桶标签（"1年以内/1年以上"）不进科目词表（2026-10-16 北投 debt 实测）。
+
+    "银行贷款1年以内131.15亿元、1年以上3,287.00亿元"——第二个值的窗口只剩桶名，
+    桶标签进词表会把它当成"所写科目"，令数值正确（3,287.00 亿元 = 银行贷款记录）
+    的句子被判 label_mismatch。桶是期间维度、不是科目。
+    """
+    records = [
+        _table_record("1年以上", "44017400"),
+        _table_record("银行贷款", "32870000"),
+    ]
+    content = "到期分布中，1年以上3,287.00亿元。披露信息待核验，材料不足。"
+    result = validate_chapter_output(content, ["c-source-1"], _binding_context(records))
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+    # 对照：桶标签**就是候选记录的科目**时（"一年以上到期的有息债务占…94.85%"）仍按科目核对。
+    records_bucket = [_table_record("1年以上", "94.85", "%"), _table_record("有息债务合计", "46409400")]
+    content_bucket = "一年以上到期的长期有息债务为44,017,400万元，占有息债务合计的94.85%。披露信息待核验，材料不足。"
+    result_bucket = validate_chapter_output(content_bucket, ["c-source-1"], _binding_context(records_bucket))
+    assert not any(item["reason"] == "label_mismatch" for item in result_bucket["attribution_conflicts"]), (
+        result_bucket["attribution_conflicts"]
+    )
+
+
+def test_entity_noise_strip_does_not_touch_instrument_names():
+    """去噪不得把"公司债券"剥成"债券"（2026-10-16 中邮 debt 20.00 亿元实测）。
+
+    "本期债券发行金额为不超过人民币20.00亿元"的窗口里有"债券"二字；若"公司债券"
+    被去噪成"债券"，窗口包含判定会把它当成所写科目、对同值的"本期发行规模"记录
+    报假 label_mismatch。工具名（公司债券/公司债）里的"公司"是名字的一部分，不剥。
+    """
+    from backend.app.chapter_guard import _strip_entity_noise
+
+    assert _strip_entity_noise("公司债券") == "公司债券"
+    assert _strip_entity_noise("占公司主营业务收入的比例") == "占主营业务收入的比例"
+
+    records = [_table_record("公司债券", "9999"), _table_record("本期发行规模", "200000")]
+    content = "募集说明书披露，本期债券发行金额为不超过人民币20.00亿元（含20.00亿元）。披露信息待核验，材料不足。"
+    result = validate_chapter_output(content, ["c-source-1"], _binding_context(records))
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+
+def test_total_synonym_asset_total_and_asset_zongji():
+    """“总计”≡“总额”：资产总计/资产总额是同一行的两种写法（2026-10-16 中邮 financial 实测）。"""
+    from backend.app.chapter_guard import _labels_compatible
+
+    assert _labels_compatible("资产总额", "资产总计")
+    assert not _labels_compatible("资产总额", "负债总额")
+
+    records = [_table_record("资产总计", "2729368.97"), _table_record("负债和所有者权益总计", "2729368.97")]
+    content = "母公司口径资产总额2025年末为2,729,368.97万元。披露信息待核验，材料不足。"
+    result = validate_chapter_output(content, ["c-source-1"], _binding_context(records))
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
+
+
+def test_coverage_phrase_binds_metric_alias_and_formula():
+    """覆盖率/覆盖倍数的**谓词短语**并入候选标签（2026-10-16 华辰 debt 0.29 倍/中邮 596.66 倍实测）。
+
+    正文把指标写成"A对B的覆盖倍数"时，窗口词表只剩分子（可用现金）；记录却是指标
+    规范名（现金短债覆盖）＋叙述别名（短期债务的覆盖）。短语并入后经别名/公式路径命中。
+    负例：短语不含记录别名/公式输入项时仍报冲突。
+    """
+    from backend.app.chapter_guard import _coverage_phrase_labels
+
+    assert "可用现金对短期债务的覆盖倍数" in _coverage_phrase_labels("可用现金对短期债务的覆盖倍数为")
+    # 年份尾巴（"2025年偿债覆盖倍数"）剥掉年份后仍保留短语本体。
+    assert "偿债覆盖倍数" in _coverage_phrase_labels("2025年偿债覆盖倍数为")
+
+    metric = _table_record("现金短债覆盖", "0.2927", "倍")
+    metric.update({
+        "record_id": "metric:cash-short-debt", "record_type": "metric", "status": "derived",
+        "formula": "(货币资金-受限资金)/一年内到期债务",
+        "label_aliases": ["短期债务的覆盖", "到期债务的覆盖"],
+    })
+    content = "可用现金对短期债务的覆盖倍数为0.29倍。披露信息待核验，材料不足。"
+    result = validate_chapter_output(content, ["c-source-1"], _binding_context([metric]))
+    assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
+        result["attribution_conflicts"]
+    )
