@@ -341,16 +341,23 @@ CALCULATION_CONTRACT_HINT = (
 RECOMMENDATION_CONTRACT_HINT = (
     '追加 "recommendations":[{"recommendation_id":"r1",'
     '"recommendation_type":"accept|reject|guarantee_amount|guarantee_rate|condition|other",'
-    '"content":"建议内容","basis":"依据","basis_record_ids":["fact:…"],"preconditions":["前提条件"],'
+    '"content":"建议内容","basis":"依据","basis_record_ids":["一年内到期的非流动负债@2025"],'
+    '"preconditions":["前提条件"],'
     '"amount_value":"5000","amount_unit":"万元","rate_value":"1.2","rate_unit":"%",'
     '"content_anchor":"正文中该建议对应的原句"}]；'
     # 2026-10-19 第五轮实证：四个建议章全部把 `basis_record_ids` 填成了正文引用别名
     # （E01/E07/E08/E10/E04），被 `normalize_and_validate` 判"引用了不存在的依据记录"——
     # 每章白烧一次修复机会。别名是**正文引用**，冻结记录 ID 才是依据。
-    "`basis_record_ids` 只能填本章冻结记录的 ID（`科目名@期间`，或 `fact:`/`metric:`/`table:` 开头的记录 ID）；"
-    "**不得填 E01 这类正文引用别名**——别名只用于 citation_ids 与正文，"
-    "填错会被判结构错误并占用本章唯一一次修复；"
-    "不需要时返回 []，**禁止省略该键**。建议只能写成待人工确认的提议。"
+    # 第六轮换了一副面孔：改成 `fact:counter_guarantee_value`、`fact:collateral_rights_issue`
+    # 这类**科目名伪 ID**（该章记录里根本没有这些 fact）。所以示例必须给真实形态
+    # （`科目名@期间`），并明确"对不上就留空、不要编"——留空只进待核验，编 ID 会直接拒稿。
+    "`basis_record_ids` 只能填本章“记录索引”里**真实存在**的 ID（优先 `科目名@期间`，"
+    "或 `fact:`/`metric:`/`table:` 开头的记录 ID）；"
+    "**不得填 E01 这类正文引用别名**（别名只用于 citation_ids 与正文），"
+    "**不得用科目名拼 `fact:` 前缀来猜 ID**——猜错会被判结构错误、占用本章唯一一次修复。"
+    "一条依据都对不上时，把 `basis_record_ids` 留空 `[]` 并把依据写进 `basis`（转人工核验），"
+    "**不要编造 ID**；"
+    "不需要建议时返回 []，**禁止省略该键**。建议只能写成待人工确认的提议。"
 )
 
 
