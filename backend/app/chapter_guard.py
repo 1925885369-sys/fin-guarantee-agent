@@ -2564,12 +2564,25 @@ def _verify_comparison_bound(item: dict, prefix: str, written_labels: set[str],
     return False, f"所写科目的记录并非全部满足「{operator}{item['raw']}」"
 
 
-def _label_excluded_by_wai(text: str, label: str) -> bool:
-    """``text`` 中 ``label`` 的**全部出现**都紧跟"外/以外/之外"（排除语境）时返回 True。
+# 排除语境的前置标记：`扣除客户资金后的高流动性资产`、`不含客户备付金`。
+# 2026-10-19 第五轮实测（中邮 cashflow 169.02 亿元）：同一份稿子里第二次出现写作
+# "募集说明书披露的**扣除客户资金后的**高流动性资产169.02亿元"——"客户资金"前是
+# 扣除项、不是所写科目，但旧实现只认后置"外/以外/之外"，于是把"客户资金"当成科目，
+# 与记录标签"金融投资等高流动性资产"造出假 label_mismatch，整章回退。
+_EXCLUSION_PREFIX_MARKERS = ("扣除", "剔除", "减去", "不含", "不包括", "不包含")
 
-    "X外/除X外"里 X 是**被排除**的对象，不是所写科目。中邮 debt 实测：
-    "银行借款与公司债券外其他公司信用类债券余额之和…占有息负债余额的比例为14.00%"
-    ——被排除的"公司债券"当科目后，与记录行"债务融资工具"造出假 label_mismatch。
+
+def _label_excluded_by_wai(text: str, label: str) -> bool:
+    """``text`` 中 ``label`` 的**全部出现**都处于排除语境时返回 True。
+
+    两种排除语境：
+
+    - **后置**"X外/除X外"：X 是被排除的对象，不是所写科目。中邮 debt 实测：
+      "银行借款与公司债券外其他公司信用类债券余额之和…占有息负债余额的比例为14.00%"
+      ——被排除的"公司债券"当科目后，与记录行"债务融资工具"造出假 label_mismatch。
+    - **前置**"扣除X后的/不含X"：X 是扣除项。见上方 `_EXCLUSION_PREFIX_MARKERS`。
+
+    只要有一处出现不在排除语境里就返回 False（正文可能同时正常引用该科目）；
     没有任何出现 → False（调用方按原有语义处理）。
     """
     found = False
@@ -2579,8 +2592,10 @@ def _label_excluded_by_wai(text: str, label: str) -> bool:
         if position < 0:
             break
         found = True
-        following = text[position + len(label): position + len(label) + 2]
-        if not following.startswith(("外", "以外", "之外")):
+        tail = text[position + len(label): position + len(label) + 2]
+        head = text[max(0, position - 4): position]
+        excluded = tail.startswith(("外", "以外", "之外")) or head.endswith(_EXCLUSION_PREFIX_MARKERS)
+        if not excluded:
             return False
         start = position + len(label)
     return found
@@ -2906,7 +2921,14 @@ def _record_binding(
             else:
                 filters.append(("label",
                     _label_compatible,
-                    {"expected_labels": sorted({str(r.get("label") or "") for r in candidates}),
+                    # 只列**有意义的**科目名：空串与 `:5` 这类去重占位不是科目名
+                    # （2026-10-19 中邮 rating 实测：expected_labels 里混进 ':5'、':6'，
+                    # 让"数值只挂到无标签表格行"看起来像标签解析成功）。
+                    # 过滤只作用于诊断展示，判定仍看完整 candidates，不改变结论。
+                    {"expected_labels": sorted({
+                        str(r.get("label") or "") for r in candidates
+                        if any("\u4e00" <= ch <= "\u9fff" for ch in str(r.get("label") or ""))
+                    }),
                      "written_labels": sorted(written_labels)}))
         if generic_total_label and not any(
             _labels_compatible(label, str(record.get("label") or ""))

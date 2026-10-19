@@ -238,23 +238,32 @@ def _normalize_subject(name: object) -> str:
 # ---------------------------------------------------------------------------
 
 
+# 行键里的**去重占位**（`table_block` 对重复/空 label 用 `f"{label}:{row_index}"` 去重，
+# label 为空时留下 `:5`、`:8` 这类纯序号）。它不是科目名，不能当标签用。
+_ROW_KEY_PLACEHOLDER_RE = re.compile(r"^\s*:\d+\s*$")
+
+
 def _row_label(block, row) -> str:
     """科目名：取**名称类列**的单元格原文（科目列优先，其次名称/机构等 caption 列）。
 
     序号列（role=reference）与数值列不参与。表格第一列若是序号列，取它会得到
     "1"、"2" 这类标签——纯数字标签进 `_record_binding` 词表后，子串匹配会命中
     正文里任何含该数字的句子，把科目正确的数字误判成 label_mismatch（北投实测）。
-    全无名称类列时回退到行键。
+
+    全无名称类列时回退到行键——但**占位行键除外**（2026-10-19 第五轮实测：中邮 rating
+    的 `expected_labels` 里出现 `':5'`、`':6'`，是空 label 行去重后的残骸，看着像脏数据、
+    也让人误以为科目名解析成功）。占位说明该行**没有科目名**：返回空串，
+    记录仍保留（正文引用其数值时不算新数字），只是不参与科目维度比对。
     """
     if not row.cells:
-        return row.row_key
+        return "" if _ROW_KEY_PLACEHOLDER_RE.match(str(row.row_key or "")) else row.row_key
     for index, column in enumerate(block.columns or ()):
         if column.role not in ("subject", "disclosure") or index >= len(row.cells):
             continue
         text = (row.cells[index].raw or "").strip()
         if text:
             return text
-    return row.row_key
+    return "" if _ROW_KEY_PLACEHOLDER_RE.match(str(row.row_key or "")) else row.row_key
 
 
 def _period_of(label: str) -> str:
