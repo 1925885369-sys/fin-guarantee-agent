@@ -1,10 +1,10 @@
-version: "3.3.0"
+version: "3.6.0"
 global_rules:
   missing_data: 缺失信息必须明确写“材料不足”或“无法判断”，不得以零值或模型推断替代。
   conflict: 募集说明书、评级报告、审计和合同存在冲突时必须并列展示全部来源，不得自动选值或据此形成确定结论。
-  evidence: 每个事实、数字、风险和条件必须引用允许来源中的 PDF 页码、Word 段落或 Excel 区域；只能使用确定性草稿和允许主张中已有的内容。
-  calculations: 不得由模型计算金额、比例、覆盖率、评级差异、偿债指标或现金流预测，只能引用系统确定性结果。
-  decisions: 可输出承保、拒保、担保额度、担保费率、债券评级或投资建议。
+  evidence: 每个事实、数字、风险和条件必须引用允许来源中的 PDF 页码、Word 段落或 Excel 区域；只能陈述允许来源与冻结记录中实际存在的内容，不得伪造来源或核验结果，不得错配主体、期间、单位及口径，不得把预测、建议或未决事项写成已确认事实。
+  calculations: 常用指标由系统预计算，可直接引用；计算模式允许时可依据冻结记录自主计算，并在 calculations 中给出名称、定义、公式与输入记录 ID，由系统复算后采用；不得凭空增加增长假设、折扣率或调整值，不得做预测模型。
+  decisions: 可输出承保、拒保、担保额度与担保费率的建议，但须标为待人工复核的提议并说明依据与前提条件，不得写成已核定、已批准或已生效的决定；不得输出投资建议；债券评级只能引用材料已披露的结果。
   terminology: 统一使用发行人、债券、保证人、反担保、偿债来源、募集资金专户、兑付、受托管理人、持有人会议等债券担保术语；不得混用贷款业务术语。
 chapters:
   scope:
@@ -29,7 +29,7 @@ chapters:
       - 保证人、保证范围须标注“拟议”，强调须以签署版保证合同核验，不得表述为保证责任已生效。
     forbidden:
       - 不得把募集说明书的拟议安排描述为已确认事实。
-      - 不得输出承保或担保定价结论。
+      - 不得把承保或担保定价写成已作出的决定（可以给出待复核的建议，须说明依据与前提）。
     input_contract:
       fact_keys: [bond_name, bond_issue_amount, registered_issue_amount, bond_term_years, coupon_rate, interest_frequency, principal_repayment, guarantor_name, guarantee_scope, guarantee_period, guarantee_cap]
       metric_keys: []
@@ -41,7 +41,7 @@ chapters:
       # P0-3：移除“据募集说明书披露”强制项，保留其余必需表述；“拟议”仍是保证声明边界。
       required_phrases: [拟议]
       required_missing_markers: [材料不足]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: prospectus
   governance:
     llm: true
@@ -80,7 +80,7 @@ chapters:
       # P0-3：模型与成品契约不再要求逐字输出旧称。
       required_phrases: []
       required_missing_markers: [材料不足, 待核验]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: prospectus
   operations:
     llm: true
@@ -117,7 +117,7 @@ chapters:
       # P0-3：移除“据募集说明书披露”强制项。
       required_phrases: []
       required_missing_markers: [材料不足, 待核验]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: prospectus
   proceeds:
     llm: true
@@ -154,11 +154,12 @@ chapters:
       # P0-3：移除“募集说明书披露”强制项。
       required_phrases: []
       required_missing_markers: [材料不足, 材料未披露]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: prospectus
   financial:
     llm: true
     generation_mode: generate
+    calculation_mode: model
     role: 财务分析员
     goal: 基于项目冻结主体档案、募集说明书和评级报告的三个完整年度事实，归纳财务结构、盈利质量和应收质量。
     required_inputs: [facts, metrics, cross_checks]
@@ -171,7 +172,7 @@ chapters:
       - 本章的数据表由系统生成并原样附在正文中；正文只写分析，按“重要变化—对偿债来源的影响范围—具体核验动作”组织。
       - 正文不得逐行复述表内数字；需要指代变化时引用已给出的指标或事实，不另行罗列科目金额。
     forbidden:
-      - 不得自创财务科目、公式或盈利趋势结论。
+      - 不得自创财务科目，不得把无依据的趋势或原因写成结论；自主计算的指标须按 calculations 契约声明并由系统复算。
       - 不得改动、重排或重算系统数据表中的任何数值、年度与表注。
       - 不得为变化编造原因；缺乏底稿支持的原因只能写成待核验事项。
       - 不得把冻结主体档案的事实汇总表述为已完成的独立核验。
@@ -188,11 +189,10 @@ chapters:
     output_contract:
       required_phrases: [披露信息待核验]
       required_missing_markers: [材料不足, 披露信息待核验]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       # 财务章试点（计划 §二）：引用上限 3 → 8。财务分析引用处多（合并资产负债表、
       # 利润表、现金流量表、有息债务表各要点），3 条会把合法引用截断成"论据不全"。
       # 超量引用只做去重与截断（`workflow._limit_chapter_citations`），**不作为事实失败理由**。
-      max_citations: 8
       attribution_mode: multi_source_financial
     narrative_contract:
       tone: professional_due_diligence
@@ -207,6 +207,7 @@ chapters:
   cashflow:
     llm: true
     generation_mode: generate
+    calculation_mode: model
     role: 偿债来源分析员
     goal: 分析经营现金流、第一偿债来源和偿债现金流预测的可靠性。
     required_inputs: [facts, metrics, sources]
@@ -214,7 +215,7 @@ chapters:
     preserve_blocks: [预测归因声明, 勾稽声明, 材料不足声明]
     rules:
       - 第一偿债来源优先引用材料明确的偿债安排；经营现金流只能作为支撑分析，不能代替偿债安排。
-      - 历史现金流只使用三个完整年度；模型不得自行计算现金转化或偿债覆盖指标。
+      - 历史现金流只使用三个完整年度；现金转化与偿债覆盖等指标以系统预计算为准，如需另算须按 calculations 契约声明并由系统复算。
       - 偿债现金流预测值只引用确定性值，并注明“预测值须与银行流水、订单回款和偿债专户逐期勾稽”。
     forbidden:
       - 不得把经营性现金流预测直接等同于可偿付现金。
@@ -229,8 +230,7 @@ chapters:
       # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
       required_phrases: []
       required_missing_markers: [材料不足, 待核验]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议, 可偿付现金]
-      max_citations: 3
+      forbidden_patterns: [投资建议, 可偿付现金]
       attribution_mode: repayment
     narrative_contract:
       tone: professional_due_diligence
@@ -245,6 +245,7 @@ chapters:
   debt:
     llm: true
     generation_mode: generate
+    calculation_mode: model
     role: 债务结构分析员
     goal: 分析发行人债务结构、到期集中度和本期债券偿付压力。
     required_inputs: [facts, checks, metrics]
@@ -267,8 +268,7 @@ chapters:
       # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
       required_phrases: []
       required_missing_markers: [材料不足, 待核验]
-      forbidden_patterns: [建议承保, 建议拒绝, 授信获批]
-      max_citations: 3
+      forbidden_patterns: [授信获批]
       attribution_mode: prospectus
     narrative_contract:
       tone: professional_due_diligence
@@ -283,6 +283,7 @@ chapters:
   rating:
     llm: true
     generation_mode: generate
+    calculation_mode: model
     role: 评级报告复核员
     goal: 复核主体评级、债项评级、展望和评级关注因素，但明确评级意见的边界。
     required_inputs: [rating_facts, sources]
@@ -294,7 +295,7 @@ chapters:
       - 必须保留“评级机构意见不等同于担保机构独立判断”的边界声明。
     forbidden:
       - 不得复述或强化评级下调理由作为担保判断依据。
-      - 不得输出债券评级或投资建议。
+      - 不得自行评定债券评级或输出投资建议（评级只能引用材料已披露的结果）。
     input_contract:
       fact_keys: [issuer_rating, bond_rating, rating_outlook, rating_agency, rating_date, rating_downgrade_trigger, rating_revenue, rating_total_debt, rating_issue_amount]
       metric_keys: []
@@ -305,8 +306,7 @@ chapters:
     output_contract:
       required_phrases: [评级机构认为, 不等同于担保机构独立判断]
       required_missing_markers: [材料不足, 材料未披露]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议, 担保机构认为]
-      max_citations: 2
+      forbidden_patterns: [投资建议, 担保机构认为]
       attribution_mode: rating
     narrative_contract:
       tone: professional_due_diligence
@@ -341,11 +341,12 @@ chapters:
       # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
       required_phrases: []
       required_missing_markers: [材料不足, 材料未披露]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: prospectus
   guarantee:
     llm: true
     generation_mode: generate
+    recommendation_mode: structured
     role: 保证责任审查员
     goal: 核验拟议保证人、保证范围、保证期间和责任上限，并标注合同状态。
     required_inputs: [guarantee_facts, sources]
@@ -367,8 +368,7 @@ chapters:
     output_contract:
       required_phrases: [拟议, 未取得签署版保证合同]
       required_missing_markers: [材料不足, 未生效]
-      forbidden_patterns: [建议承保, 建议拒绝, 保证责任已经生效]
-      max_citations: 2
+      forbidden_patterns: [保证责任已经生效]
       attribution_mode: guarantee
     narrative_contract:
       tone: professional_due_diligence
@@ -383,6 +383,7 @@ chapters:
   counter_guarantee:
     llm: true
     generation_mode: generate
+    recommendation_mode: structured
     role: 反担保权利审查员
     goal: 评估反担保措施的覆盖程度、权利状态和可执行性，标注待验证事项。
     required_inputs: [counter_guarantee_facts, sources]
@@ -393,7 +394,7 @@ chapters:
       - 仅当 guarantee_applicable=true 时撰写；明确无增信时本章由确定性模板输出“不适用”。
       - 未取得合同、权证、估值和登记文件时，写“无法判断可执行性或变现能力”，不得表述为已具备可执行覆盖。
     forbidden:
-      - 不得自行设定折扣率或虚构反担保措施。
+      - 不得自行设定折扣率、估值假设或虚构反担保措施（计算口径须按 calculations 契约声明）。
     input_contract:
       fact_keys: [counter_guarantee_value, counter_guarantee_priority, counter_guarantee_rights, collateral_rights_issue]
       metric_keys: [collateral_coverage]
@@ -405,8 +406,7 @@ chapters:
       # P0-3：移除“募集说明书披露”强制项；成品旧称由服务端统一规范化。
       required_phrases: []
       required_missing_markers: [材料不足, 无法判断可执行性]
-      forbidden_patterns: [建议承保, 建议拒绝]
-      max_citations: 2
+      forbidden_patterns: []
       attribution_mode: counter_guarantee
     narrative_contract:
       tone: professional_due_diligence
@@ -440,7 +440,7 @@ chapters:
     output_contract:
       required_phrases: [材料不足]
       required_missing_markers: [材料不足, 待核验]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: legal
   risk_matrix:
     llm: false
@@ -482,7 +482,7 @@ chapters:
     output_contract:
       required_phrases: [待核验]
       required_missing_markers: [材料不足, 材料未披露]
-      forbidden_patterns: [建议承保, 建议拒绝, 投资建议]
+      forbidden_patterns: [投资建议]
       attribution_mode: monitoring
   evidence:
     llm: false

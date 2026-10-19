@@ -79,8 +79,9 @@ def _synthetic_custom_chapter_config() -> dict:
         },
         "output_contract": {
             "required_phrases": [], "required_missing_markers": ["材料不足", "待核验"],
-            "forbidden_patterns": ["建议承保", "建议拒绝", "投资建议"],
-            "max_citations": 3, "attribution_mode": "neutral",
+            # 方案 §一：承保/拒保建议允许，只有投资建议仍禁；引用不设上限（§二）。
+            "forbidden_patterns": ["投资建议"],
+            "max_citations": 0, "attribution_mode": "neutral",
         },
         "narrative_contract": {
             "tone": "professional_due_diligence",
@@ -192,7 +193,9 @@ class ChapterOutputContract(BaseModel):
     required_phrases: list[str] = Field(default_factory=list)
     required_missing_markers: list[str] = Field(default_factory=list)
     forbidden_patterns: list[str] = Field(default_factory=list)
-    max_citations: int = Field(default=3, ge=0, le=12)
+    # **0 表示不限制**（方案 §二："取消固定引用条数上限，允许引用本次实际提供的全部合法证据"）。
+    # 保留字段是为了兼容历史上显式设过上限的全局/项目覆盖；新配置不再下发上限。
+    max_citations: int = Field(default=0, ge=0)
     attribution_mode: str = Field(default="neutral", min_length=2, max_length=40)
 
 
@@ -223,32 +226,220 @@ class NarrativeContract(BaseModel):
 # 主张边界句：**改写模式**保持原措辞（模型只能在确定性草稿范围内改善表达）；
 # **直接撰写模式**换成真生成边界——允许自主组织与表达，但事实/数字/主体/年度/评级
 # 仍只能来自系统材料（修订稿 §2、§3.2）。
+# 方案 §二 line 18：移除"确定性草稿是**唯一**边界"。冻结记录（fact/table/metric/rule/
+# calculation）同样构成事实边界——否则改写模式里模型无法引用草稿之外、但已被系统冻结的
+# 记录，等于把"有据可查"当成"越界"。
 REWRITE_BOUNDARY_SENTENCE = (
-    "确定性草稿是允许主张的唯一边界；只能改善表达，不得增加、删除或改变事实、数字、规则状态和风险状态。"
+    "确定性草稿与冻结记录共同构成本章的事实边界；只改善表达，"
+    "不得增加、删除或改变事实、数字、规则状态和风险状态。"
 )
 # Prompt 契约编译版本（三项遗留修复方案 §二）：4 = 系统表格由服务端拼接、模型只回正文。
-PROMPT_CONTRACT_VERSION = "4"
+PROMPT_CONTRACT_VERSION = "5"
 GENERATE_BOUNDARY_SENTENCE = (
     "本章为**直接撰写**模式：请基于系统事实、指标、规则核验结果、证据原文与冲突披露自主组织并撰写完整分析正文；"
-    "允许自由组织与表达，但只能陈述上述材料已支持的内容，不得引入材料中没有的数字、主体、年度或评级，"
-    "不得自行计算或换算金额、比例、覆盖率、偿债指标或评级差异；系统表格、冲突披露块与来源边界块由服务端在正文后"
+    "允许自由组织与表达，但只能陈述上述材料已支持的内容，不得引入材料中没有的数字、主体、年度或评级；"
+    "系统表格、冲突披露块与来源边界块由服务端在正文后"
     "原样附加——只返回分析正文和引用ID，不要输出、复制或重写系统表格，正文不重复逐行列示；"
-    "冲突事实必须并列，缺失信息必须写“材料不足”；"
-    "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议。"
+    "冲突事实必须并列，缺失信息必须写“材料不足”。"
 )
+# ⚠️ 计算与建议规则**不写在本句里**：它们由 `calculation_boundary_sentence` /
+# `recommendation_boundary_sentence` 按模式拼装（见 `claim_boundary_sentence`）。
+# 写死在这里会出现"本句禁止自算、后面又允许自算"的自相矛盾——那正是上一轮的病根。
 # 旧编译句迁移（三项遗留修复方案 §二）：只替换系统自动编译的旧矛盾句——
 # "系统数据表…必须逐字保留"与"表格一律由系统附入、不得自行绘制"并存，诱导模型把 24k
 # 的表格块抄进正文。用户自定义的业务目标/结构/篇幅不在替换范围内（只删这两句本身）。
 LEGACY_BOUNDARY_SENTENCES = (
     "系统数据表、冲突披露块与来源边界块必须逐字保留，表格一律由系统附入、不得自行绘制；",
     "系统数据表、冲突披露块与来源边界块必须逐字保留；",
+    # 上一版 rewrite 边界句（"**唯一**边界"）。它属于**边界句**，两种生成模式都要剥，
+    # 不能放进 LEGACY_DECISION_SENTENCES（那里只在允许建议时才剥）。
+    "确定性草稿是允许主张的唯一边界；只能改善表达，不得增加、删除或改变事实、数字、规则状态和风险状态。",
+)
+# 方案 §二 line 18 / §三.1：旧的计算与建议禁令（只替换**系统编译**的旧句；
+# 用户自己写的业务要求不在替换范围内）。这些句子随契约版本升级必须清掉，
+# 否则库里已存的覆盖文本会继续与新模式打架。
+LEGACY_CALCULATION_SENTENCES = (
+    "不得由模型计算金额、比例、覆盖率、评级差异、偿债指标或现金流预测，只能引用系统确定性结果。",
+    "不得自行计算或换算金额、比例、覆盖率、偿债指标或评级差异；",
+    "模型不得自行计算现金转化或偿债覆盖指标。",
+)
+LEGACY_DECISION_SENTENCES = (
+    "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议。",
+    "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议；",
 )
 
 
+# 业务规则的默认值：与 B1 新增的可编辑字段同源，B1 之前任何配置都落到这两个保守分支。
+DEFAULT_CALCULATION_MODE = "system_only"     # off | system_only | model
+DEFAULT_RECOMMENDATION_MODE = "off"          # off | qualitative | structured
+
+CALCULATION_SENTENCE_SYSTEM_ONLY = (
+    "不得自行计算或换算金额、比例、覆盖率、偿债指标或评级差异，只能引用系统预计算结果。"
+)
+CALCULATION_SENTENCE_MODEL = (
+    "常用指标已由系统预计算，可直接引用；资料未覆盖的指标可自行定义并计算，"
+    "但必须在 calculations 中给出名称、定义、公式与冻结记录 ID，由系统复算后采用——"
+    "不得引入未冻结的输入，不得叠加增长假设、折扣率或调整值，不得做预测模型。"
+)
+CALCULATION_SENTENCE_OFF = "本章不启用自主计算：只能引用系统预计算结果。"
+
+RECOMMENDATION_SENTENCE_STRUCTURED = (
+    "可以给出承保、拒保、担保额度与担保费率的建议，但必须写入 recommendations 结构并写明"
+    "依据、前提条件与建议参数，由服务端渲染为待人工确认的建议草案；"
+    "不得写成已核定、已批准或已生效的决定；不得输出投资建议；"
+    "债券评级只能引用材料已披露的评级，不得自行评定。"
+)
+RECOMMENDATION_SENTENCE_OFF = (
+    "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议。"
+)
+
+
+def calculation_boundary_sentence(config: dict) -> str:
+    """计算规则：**同一份口径**供模型请求、修复指令与后端校验使用（方案 §二 line 18）。"""
+    mode = str(config.get("calculation_mode") or DEFAULT_CALCULATION_MODE)
+    if mode == "model":
+        return CALCULATION_SENTENCE_MODEL
+    if mode == "off":
+        return CALCULATION_SENTENCE_OFF
+    return CALCULATION_SENTENCE_SYSTEM_ONLY
+
+
+def recommendation_boundary_sentence(config: dict) -> str:
+    """建议规则（§一：允许承保/拒保/额度/费率建议，须人工复核；投资建议仍禁）。"""
+    mode = str(config.get("recommendation_mode") or DEFAULT_RECOMMENDATION_MODE)
+    if mode in ("structured", "qualitative"):
+        return RECOMMENDATION_SENTENCE_STRUCTURED
+    return RECOMMENDATION_SENTENCE_OFF
+
+
+# 输出契约里"结构化数组"的字段提示。**只在该模式启用时才拼进 Prompt**：
+# 默认 off 时一个字都不加——否则每个章节的 Prompt 白背 600 字，还会诱导模型
+# 输出空数组。方案 §三.1 要求"同一次响应返回"，所以措辞必须明确"追加到同一 JSON"。
+# ⚠️ 这段是"模型能不能自己算"的唯一说明书，2026-10-17 真实试跑证明三件事必须写死：
+# ① **后果**——不说"不声明会被判新数字/整章退回"，模型会把差值直接写进正文；
+# ② **哪些要声明**——只说"可自行定义并计算"时，模型认为"已有指标做减法"不算自主计算；
+# ③ **禁止把 record_id 写进正文**——给了 record_id 之后，模型会把它当引用别名写进句子
+#    （"…回落约1.22个百分点（metric:debt_ratio:2023、metric:debt_ratio:2024）"）。
+CALCULATION_CONTRACT_HINT = (
+    "【必须遵守】正文里凡是**由你算出来**的数值——两数相减的差值、多项相加的合计、"
+    "相除得到的比率或占比、取整与单位换算——都要逐条写入 calculations。"
+    "未声明的计算值会被判为\"材料之外的新数字\"，整章退回；材料原文直接给出的数值不必声明。"
+    "公式里怎么引用输入：按 input_record_ids 的**顺序**写 v1、v2…（第 1 个写作 v1，第 2 个写作 v2），"
+    "同名科目跨期时必须用位置别名，否则系统分不清是哪一期；只有一个输入时也可以直接用科目名。"
+    "公式的**方向要与正文表述一致**：写\"回落 1.22 个百分点\"就用 v1-v2 或 abs(v1-v2)，"
+    "写成反号会被判复算不符。"
+    "三条硬规则：① input_record_ids **优先写 `科目名@期间`**——科目名照抄“科目索引”里的 "
+    "label（如 `一年内到期的非流动负债@2025`），单位与期间以索引为准，系统会解析成唯一记录；"
+    "**不要手写 record_id 去猜行号**（`r05c01` 这类编号认不出对应哪个科目，"
+    "实测会把“流动负债合计”当成“一年内到期的非流动负债”，复算必然不符）；"
+    "**同一个输入不要填两遍**，两个不同科目必须对应两条不同记录；"
+    "② content_anchor 必须是正文中出现该数值的那句原话；③ value 写你的结果，系统会独立复算，"
+    "不一致即判错。formula 只能用 + - * / ( ) 与 avg/abs/min/max。"
+    "⚠️ 正文**不要**出现 fact:/metric:/table:/calc: 这类记录 ID——它们只用于 "
+    "calculations.input_record_ids；正文引用只用 E01 这类别名，写进正文会被判内部字段泄露。"
+)
+RECOMMENDATION_CONTRACT_HINT = (
+    '追加 "recommendations":[{"recommendation_id":"r1",'
+    '"recommendation_type":"accept|reject|guarantee_amount|guarantee_rate|condition|other",'
+    '"content":"建议内容","basis":"依据","basis_record_ids":["fact:…"],"preconditions":["前提条件"],'
+    '"amount_value":"5000","amount_unit":"万元","rate_value":"1.2","rate_unit":"%",'
+    '"content_anchor":"正文中该建议对应的原句"}]；'
+    # 2026-10-19 第五轮实证：四个建议章全部把 `basis_record_ids` 填成了正文引用别名
+    # （E01/E07/E08/E10/E04），被 `normalize_and_validate` 判"引用了不存在的依据记录"——
+    # 每章白烧一次修复机会。别名是**正文引用**，冻结记录 ID 才是依据。
+    "`basis_record_ids` 只能填本章冻结记录的 ID（`科目名@期间`，或 `fact:`/`metric:`/`table:` 开头的记录 ID）；"
+    "**不得填 E01 这类正文引用别名**——别名只用于 citation_ids 与正文，"
+    "填错会被判结构错误并占用本章唯一一次修复；"
+    "不需要时返回 []，**禁止省略该键**。建议只能写成待人工确认的提议。"
+)
+
+
+# 输出 JSON 的**字面形状**。2026-10-18 实测教训：只在句尾"追加一段说明"，模型会照着
+# 前面的 {content, citation_ids} 就收尾——连续 3 次首稿 calculations 都是 0 条。
+# 所以开新模式时，必须把数组**写进顶层示例本身**。
+_CALC_SHAPE = (
+    ',"calculations":[{"calculation_id":"c1","name":"指标名","definition":"分子/分母与解释边界",'
+    '"formula":"v1+v2","input_record_ids":["一年内到期的非流动负债@2025"],'
+    '"value":"0","unit":"万元","subject":"","period":"2025","scope":"合并口径",'
+    '"precision":2,"content_anchor":"正文里出现该数值的原句"}]'
+)
+_REC_SHAPE = (
+    ',"recommendations":[{"recommendation_id":"r1","recommendation_type":"accept",'
+    '"content":"建议内容","basis":"依据","basis_record_ids":["<record_id>"],'
+    '"preconditions":["前提条件"],"content_anchor":"正文里该建议对应的原句"}]'
+)
+
+
+def extra_shape_keys(config: dict) -> str:
+    """顶层 JSON 需要额外出现的键片段（含前导逗号）；未启用时返回空串。"""
+    parts = ""
+    if str(config.get("calculation_mode") or DEFAULT_CALCULATION_MODE) == "model":
+        parts += _CALC_SHAPE
+    if str(config.get("recommendation_mode") or DEFAULT_RECOMMENDATION_MODE) in ("structured", "qualitative"):
+        parts += _REC_SHAPE
+    return parts
+
+
+def structured_json_shape(config: dict) -> str:
+    """输出契约句：把当前模式要求的数组直接写进字面示例。"""
+    extra = extra_shape_keys(config)
+    if not extra:
+        return '输出严格 JSON：{"content":"Markdown正文","citation_ids":["允许的引用ID"]}。'
+    return (
+        '输出严格 JSON：{"content":"Markdown正文","citation_ids":["E01","E02"]'
+        + extra
+        + '}。数组没有内容时写 []，**禁止省略这些键**。'
+    )
+
+
+def structured_array_contract(config: dict) -> str:
+    """按计算/建议模式拼出"结构化数组"的输出要求；两者都关闭时返回空串。"""
+    parts: list[str] = []
+    if str(config.get("calculation_mode") or DEFAULT_CALCULATION_MODE) == "model":
+        parts.append(CALCULATION_CONTRACT_HINT)
+    if str(config.get("recommendation_mode") or DEFAULT_RECOMMENDATION_MODE) in ("structured", "qualitative"):
+        parts.append(RECOMMENDATION_CONTRACT_HINT)
+    return "".join(parts)
+
+
+def business_rules_sentence(config: dict) -> str:
+    """业务生成规则层：材料范围与分析期间。
+
+    计算/建议模式不在这里——它们由 `claim_boundary_sentence` 的对应句表述，
+    避免同一件事在 Prompt 里说两遍（说两遍就会漂移）。
+
+    ⚠️ 不把 `document_ids` 的 UUID 写进 Prompt：模型不需要它，写进去只是泄露内部 ID
+    并白占预算；用文件数量表达"只用了其中几份"即可。
+    """
+    scope = config.get("material_scope") or {}
+    period = config.get("analysis_period") or {}
+    parts: list[str] = []
+    kinds = [str(item) for item in (scope.get("source_kinds") or []) if str(item).strip()]
+    roles = [str(item) for item in (scope.get("material_roles") or []) if str(item).strip()]
+    documents = [str(item) for item in (scope.get("document_ids") or []) if str(item).strip()]
+    periods = [str(item) for item in (period.get("periods") or []) if str(item).strip()]
+    if kinds:
+        parts.append("材料类型限定为" + "、".join(kinds))
+    if roles:
+        parts.append("材料角色限定为" + "、".join(roles))
+    if documents:
+        parts.append(f"只使用指定的 {len(documents)} 份材料文件")
+    if periods and str(period.get("mode") or "materials") == "configured":
+        parts.append("分析期间限定为" + "、".join(periods))
+    if not parts:
+        return ""
+    return "（业务生成规则：" + "；".join(parts) + "。）"
+
+
 def claim_boundary_sentence(config: dict) -> str:
-    """按生成模式给出主张边界句。"""
+    """按生成模式给出主张边界句，并拼上计算与建议规则。
+
+    三段拼装而非写死一句：生成模式决定"能写什么"，计算/建议模式决定"能不能自算/提建议"，
+    三者互不覆盖。`GENERATE_BOUNDARY_SENTENCE` 保持为连续子串，运行时替换逻辑依赖它。
+    """
     mode = str(config.get("generation_mode") or "rewrite")
-    return GENERATE_BOUNDARY_SENTENCE if mode == "generate" else REWRITE_BOUNDARY_SENTENCE
+    base = GENERATE_BOUNDARY_SENTENCE if mode == "generate" else REWRITE_BOUNDARY_SENTENCE
+    return f"{base} {calculation_boundary_sentence(config)} {recommendation_boundary_sentence(config)}"
 
 
 def preserve_blocks_sentence(config: dict, blocks: list) -> str:
@@ -277,6 +468,24 @@ class ChapterPromptConfig(BaseModel):
     # ``generate``＝模型基于事实/证据**直接撰写**，请求体不再携带草稿作创作边界
     # （草稿在服务端保留为备用）。**不进网页可编辑键**，避免界面误切换。
     generation_mode: str = "rewrite"
+    # 业务生成规则（《风控约束分层》§二 line 16）：出厂可按章指定，项目/全局可再覆盖。
+    # 默认值刻意保持"不改变既有行为"——只有显式配置的章节才启用新能力。
+    calculation_mode: str = "system_only"       # off | system_only | model
+    recommendation_mode: str = "off"            # off | qualitative | structured
+
+    @field_validator("calculation_mode")
+    @classmethod
+    def calculation_mode_in_enum(cls, value: str) -> str:
+        if value not in {"off", "system_only", "model"}:
+            raise ValueError("calculation_mode 只能是 off / system_only / model")
+        return value
+
+    @field_validator("recommendation_mode")
+    @classmethod
+    def recommendation_mode_in_enum(cls, value: str) -> str:
+        if value not in {"off", "qualitative", "structured"}:
+            raise ValueError("recommendation_mode 只能是 off / qualitative / structured")
+        return value
 
     @field_validator("generation_mode")
     @classmethod
@@ -416,6 +625,9 @@ def chapter_system_prompt(chapter_key: str) -> str:
     preserve_blocks = config.get("preserve_blocks") or []
     if preserve_blocks:
         lines.append(preserve_blocks_sentence(config, preserve_blocks))
+    business = business_rules_sentence(config)
+    if business:
+        lines.append(business)
     lines.append(claim_boundary_sentence(config))
     rules = config.get("rules") or []
     if rules:
@@ -443,16 +655,20 @@ def chapter_system_prompt(chapter_key: str) -> str:
         prohibited_terms = narrative.get("prohibited_terms") or []
         if prohibited_terms:
             lines.append("不得出现以下系统术语：" + "、".join(prohibited_terms) + "。")
-    lines.append("输出严格 JSON：{\"content\":\"Markdown正文\",\"citation_ids\":[\"允许的引用ID\"]}。")
+    lines.append(structured_json_shape(config) + structured_array_contract(config))
     return " ".join(lines)
 
 
-EDITABLE_PROMPT_KEYS = ("role", "goal", "required_sections", "rules", "narrative_contract")
+# `calculation_mode` / `recommendation_mode` 是**业务规则**（方案 §二 line 16），
+# 由 `global_rules` 之外单独控制：B0 先让编译链读到（默认值见 DEFAULT_*），
+# B1 再把它们升级为可编辑字段。
+EDITABLE_PROMPT_KEYS = ("role", "goal", "required_sections", "rules", "narrative_contract",
+                        "calculation_mode", "recommendation_mode")
 
 # Bump when the model-facing chapter context changes shape (field projections,
 # citation aliases). It travels with the context, so it lands in ``input_hash`` and
 # in ``llm_attempts.request_hash``, which is how evaluations tell payload versions apart.
-CONTEXT_SCHEMA_VERSION = "2"
+CONTEXT_SCHEMA_VERSION = "3"
 TONE_LABELS = {
     "professional_due_diligence": "审慎、客观的尽调报告书面语",
     "professional_credit_review": "审慎的信用审查书面语",
@@ -479,6 +695,11 @@ def editable_config_from_factory(chapter_key: str) -> dict:
             "list_mode": narrative.get("list_mode", "limited"),
         },
         "additional_requirements": "",
+        # 业务生成规则默认值：与 `DEFAULT_CALCULATION_MODE` / `DEFAULT_RECOMMENDATION_MODE` 同源。
+        "material_scope": {"source_kinds": [], "material_roles": [], "document_ids": []},
+        "analysis_period": {"periods": [], "mode": "materials"},
+        "calculation_mode": str(config.get("calculation_mode") or DEFAULT_CALCULATION_MODE),
+        "recommendation_mode": str(config.get("recommendation_mode") or DEFAULT_RECOMMENDATION_MODE),
     }
 
 
@@ -495,6 +716,12 @@ def _merge_editable(base: dict, editable: dict) -> dict:
     narrative = dict(base.get("narrative_contract") or {})
     narrative.update(editable.get("narrative_contract") or {})
     merged["narrative_contract"] = narrative
+    # 嵌套的业务规则同样深合并：历史覆盖可能只写了 `source_kinds`，
+    # 浅替换会把 `material_roles` 等默认值抹成缺失。
+    for key in ("material_scope", "analysis_period"):
+        nested = dict(base.get(key) or {})
+        nested.update(editable.get(key) or {})
+        merged[key] = nested
     return merged
 
 
@@ -570,6 +797,9 @@ def compile_structured_prompt(chapter_key: str, editable: dict) -> str:
         lines.append("证据仅可来自章节白名单材料类型：" + "、".join(source_kinds) + "。")
     if merged.get("preserve_blocks"):
         lines.append(preserve_blocks_sentence(merged, merged["preserve_blocks"]))
+    business = business_rules_sentence(merged)
+    if business:
+        lines.append(business)
     lines.append(claim_boundary_sentence(merged))
     if merged.get("forbidden"):
         lines.append("禁止事项：" + "；".join(merged["forbidden"]))
@@ -579,9 +809,11 @@ def compile_structured_prompt(chapter_key: str, editable: dict) -> str:
     if readonly_narrative.get("prohibited_terms"):
         lines.append("不得出现以下系统术语：" + "、".join(readonly_narrative["prohibited_terms"]) + "。")
     output_contract = base.get("output_contract") or {}
-    if output_contract.get("max_citations") is not None:
-        lines.append(f"本章最多引用 {output_contract['max_citations']} 条允许的引用 ID。")
-    lines.append("输出严格 JSON：{\"content\":\"Markdown正文\",\"citation_ids\":[\"允许的引用ID\"]}。")
+    # 引用不再设上限：模型可以引用本次实际提供的全部合法证据（方案 §二）。
+    # 只有历史覆盖显式写了正数上限时才提示，0/缺省一律不提，避免模型自我设限。
+    if int(output_contract.get("max_citations") or 0) > 0:
+        lines.append(f"本章最多引用 {int(output_contract['max_citations'])} 条允许的引用 ID。")
+    lines.append(structured_json_shape(merged) + structured_array_contract(merged))
     return " ".join(lines)
 
 
@@ -700,7 +932,14 @@ def global_prompt_edit_state(chapter_key: str) -> tuple[dict, str, str]:
         return factory, "system", "structured"
     merged = _merge_override(factory, global_row)
     if merged:
-        return merged[0], "global", merged[1]
+        config = merged[0]
+        # 全局链**不保留项目文件 ID**（历史脏行也在这里清掉）：全局是部署级配置，
+        # 文件 ID 只对某次项目解析有效，留给别的项目就是越权引用。
+        scope = dict(config.get("material_scope") or {})
+        if scope.get("document_ids"):
+            scope["document_ids"] = []
+            config["material_scope"] = scope
+        return config, "global", merged[1]
     return factory, "system", "structured"
 
 

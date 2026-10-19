@@ -243,6 +243,30 @@ class PromptNarrativeConfig(BaseModel):
         return self
 
 
+class PromptMaterialScope(BaseModel):
+    """材料范围（方案 §二 line 16 / §四 line 56）：约束检索、事实、指标、规则与计算输入。
+
+    全部默认为空 = 不额外收窄（沿用章节契约的 `input_contract`）。
+    ⚠️ `document_ids` 只允许出现在**项目级**配置：全局默认存项目文件 ID 没有意义，
+    保存时会剥离（`_compile_prompt_payload` / `normalize_outline`）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_kinds: list[str] = Field(default_factory=list, max_length=28)
+    material_roles: list[str] = Field(default_factory=list, max_length=20)
+    document_ids: list[str] = Field(default_factory=list, max_length=30)
+
+
+class PromptAnalysisPeriod(BaseModel):
+    """分析期间：`materials` = 跟随材料实际期间；`configured` = 只按 `periods` 分析。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    periods: list[str] = Field(default_factory=list, max_length=8)
+    mode: Literal["materials", "configured"] = "materials"
+
+
 class PromptEditableConfig(BaseModel):
     """Business-writing fields that may be changed without changing guardrails."""
 
@@ -254,6 +278,12 @@ class PromptEditableConfig(BaseModel):
     rules: list[str] = Field(default_factory=list, max_length=30)
     narrative_contract: PromptNarrativeConfig = Field(default_factory=PromptNarrativeConfig)
     additional_requirements: str = Field(default="", max_length=12000)
+    # 业务生成规则（B1 新增）：默认值与 `chapter_prompts.DEFAULT_*` 一致，
+    # 历史 `structured_json` 缺这些键时按默认值解析（向后兼容）。
+    material_scope: PromptMaterialScope = Field(default_factory=PromptMaterialScope)
+    analysis_period: PromptAnalysisPeriod = Field(default_factory=PromptAnalysisPeriod)
+    calculation_mode: Literal["off", "system_only", "model"] = "system_only"
+    recommendation_mode: Literal["off", "qualitative", "structured"] = "off"
 
     @field_validator("role", "goal", "additional_requirements")
     @classmethod
@@ -322,6 +352,21 @@ class ReportOutlineUpdate(BaseModel):
         return value
 
 
+class ReportRecommendationDecision(BaseModel):
+    """建议的逐条复核结论（方案 §四 line 54）。
+
+    `confirmed` 只表示"报告采用该建议"，**不代表业务担保审批**——这一点由
+    `decision_scope='report_adoption'` 落库固定，不接受客户端改写。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["confirmed", "rejected"]
+    note: str = Field(default="", max_length=500)
+    # 乐观并发：客户端带上它读到的正文哈希，正文已变则 409（避免给旧正文背书）。
+    expected_section_sha256: Optional[str] = Field(default=None, max_length=128)
+
+
 class ReportTableRefresh(BaseModel):
     chapters: list[Literal["financial", "cashflow", "debt", "rating"]] = Field(min_length=1, max_length=4)
     expected_report_revision: int = Field(ge=0)
@@ -348,14 +393,88 @@ class LlmSubsection(BaseModel):
     citation_ids: list[str] = Field(default_factory=list)
 
 
+class LlmCalculation(BaseModel):
+    """模型自主返回的一条计算（《风控约束分层》方案 §三.1）。
+
+    ⚠️ 输入字段名**必须是 `input_record_ids`，不能叫 `source_ids`**：
+    `llm._unknown_source_ids`（llm.py:379）会递归扫描 `source_ids`/`citation_ids` 等键并
+    按 citation 别名做白名单校验，取名 `source_ids` 会让整章被判 `invalid_source`。
+
+    ⚠️ 约束**刻意放宽**（只限长度，不设 min_length）：结构不完整应走"同一次结构修复"并带上
+    可读原因，而不是在 Pydantic 层变成 `schema_error` 盲改。业务校验在
+    `chapter_calculations.prepare_candidate`（B2）用 `verify_calculation` 做。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    calculation_id: str = Field(default="", max_length=32)
+    name: str = Field(default="", max_length=120)
+    definition: str = Field(default="", max_length=400)
+    formula: str = Field(default="", max_length=400)
+    input_record_ids: list[str] = Field(default_factory=list, max_length=12)
+    value: str = Field(default="", max_length=40)
+    unit: str = Field(default="", max_length=20)
+    subject: str = Field(default="", max_length=120)
+    period: str = Field(default="", max_length=20)
+    scope: str = Field(default="", max_length=40)
+    precision: Optional[int] = Field(default=None, ge=0, le=6)
+    cross_period_reason: str = Field(default="", max_length=300)
+    # 正文里依赖该指标的原句：B2 用它定位"哪句分析必须跟着改"，也为人工复核指路。
+    content_anchor: str = Field(default="", max_length=300)
+    applies_to: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _coerce_value_to_text(cls, value: Any) -> str:
+        """模型常把数值写成 number：统一转字符串，保留它给的精度（不在这里做舍入）。"""
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return ""
+        if isinstance(value, (int, float)):
+            return repr(value)
+        return str(value)
+
+
+class LlmRecommendation(BaseModel):
+    """承保/拒保/额度/费率建议（方案 §四 line 52）。
+
+    建议值是**提议**，不是披露事实；`basis` 里的主张仍走支持校验（B3）。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    recommendation_id: str = Field(default="", max_length=32)
+    recommendation_type: str = Field(default="other", max_length=32)
+    content: str = Field(default="", max_length=800)
+    basis: str = Field(default="", max_length=800)
+    basis_record_ids: list[str] = Field(default_factory=list, max_length=12)
+    preconditions: list[str] = Field(default_factory=list, max_length=8)
+    amount_value: str = Field(default="", max_length=40)
+    amount_unit: str = Field(default="", max_length=20)
+    rate_value: str = Field(default="", max_length=40)
+    rate_unit: str = Field(default="", max_length=20)
+    parameters: dict[str, str] = Field(default_factory=dict)
+    content_anchor: str = Field(default="", max_length=200)
+
+
 class LlmSection(BaseModel):
     # ``content``/``citation_ids`` 放宽为带默认值（P1-2）：有小节配置时模型只返回
     # ``subsections``。空值/缺失的强约束由 ``llm._finalize_report_section`` 承接
     # （缺失小节 → report_repair_required 走唯一一次结构修复），避免 Pydantic 层
     # 把合法的小节响应直接判成 schema_error。
+    #
+    # `extra="ignore"` 是**显式契约**：模型可能多返回字段，静默忽略优于报错；
+    # 但要收下的字段必须在下面声明——Pydantic v2 默认也是 ignore，不声明就会在
+    # `llm.py:687` 的 `model_dump()` 里被丢掉（B1 前 `calculations` 正是这样丢的）。
+    model_config = ConfigDict(extra="ignore")
+
     content: str = ""
     citation_ids: list[str] = Field(default_factory=list)
     subsections: list[LlmSubsection] = Field(default_factory=list)
+    # 方案 §三.1 / §四：与正文**同一次响应**返回，不额外增加模型调用。
+    calculations: list[LlmCalculation] = Field(default_factory=list)
+    recommendations: list[LlmRecommendation] = Field(default_factory=list)
 
 
 class ExtractedFact(BaseModel):
