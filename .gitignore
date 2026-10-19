@@ -16,6 +16,9 @@ frontend/playwright-report/
 .data-probe*
 .data-e2e/
 .data-*/
+# 一次性清理的暂存区：先改名后删（可随时还原），绝不入库。
+# 不忽略的话 git 会去扫几十 GB 的隔离库，status 会明显变慢。
+.trash-*/
 *.db
 *.sqlite*
 *.log
@@ -57,6 +60,7 @@ docs/报告重写版_北投/
 旧MD计划剩余项收口执行方案.md
 第三点细化方案PLAN.md
 财务章prompt及生成校验修复PLAN.md
+风控约束分层与模型分析能力调整方案.md
 electric-nebula-babbage-spVyZpwI.md
 docs/assets/pilot-ji
 
