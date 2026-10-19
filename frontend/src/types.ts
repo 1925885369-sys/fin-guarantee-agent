@@ -309,6 +309,23 @@ export interface PromptNarrativeConfig {
   list_mode: "allowed" | "limited" | "prohibited" | string;
 }
 
+/** 业务生成设置 · 材料范围（《风控约束分层》§二 line 16 / §四 line 56）。
+ *
+ *  三项全部为空 = 不额外收窄，沿用章节契约；`document_ids` 只允许出现在**项目级**配置，
+ *  全局默认保存时服务端会剥离（前端也禁用该控件，避免用户以为存进去了）。
+ */
+export interface PromptMaterialScope {
+  source_kinds: string[];
+  material_roles: string[];
+  document_ids: string[];
+}
+
+/** 业务生成设置 · 分析期间：`materials` 跟随材料实际期间，`configured` 只按列出期间。 */
+export interface PromptAnalysisPeriod {
+  periods: string[];
+  mode: "materials" | "configured";
+}
+
 export interface PromptEditableConfig {
   role: string;
   goal: string;
@@ -316,6 +333,12 @@ export interface PromptEditableConfig {
   rules: string[];
   narrative_contract: PromptNarrativeConfig;
   additional_requirements: string;
+  // 业务生成设置（三层里的第二层）。**可选**：历史配置没有这些键，
+  // 前端不补默认值就写回，避免把"未设置"悄悄变成"显式默认值"。
+  material_scope?: PromptMaterialScope;
+  analysis_period?: PromptAnalysisPeriod;
+  calculation_mode?: "off" | "system_only" | "model";
+  recommendation_mode?: "off" | "qualitative" | "structured";
 }
 
 export interface PromptConstraints {
@@ -737,6 +760,64 @@ export interface ReportTableBlock {
 /** 章内分块：Markdown 分块与受控数据表块共存，按 kind 与字段形态区分。 */
 export type ReportBlock = ReportMarkupBlock | ReportTableBlock;
 
+/** 一条模型自主计算及其复算结论（《风控约束分层》§三.1 / §三.2）。
+ *
+ *  `status` 是**系统复算**的结论，不是模型的自我声明：
+ *  `verified` 已通过复算、`needs_review` 算得出但口径/输入待核验、`rejected` 被否决。
+ *  `value` 是模型声明的值，`computed` 是系统复算值——两者不一致时以 `computed` 为准。
+ */
+export interface ReportCalculation {
+  calculation_id: string;
+  name: string;
+  definition?: string;
+  formula: string;
+  input_record_ids?: string[];
+  value: string;
+  computed?: string;
+  unit?: string;
+  subject?: string;
+  period?: string;
+  scope?: string;
+  precision?: number;
+  status: "verified" | "needs_review" | "rejected";
+  reason_code?: string;
+  content_anchor?: string;
+}
+
+/** 承保/拒保/额度/费率**建议草案**（《风控约束分层》§四 line 52~55）。
+ *
+ *  `confirmed` 只表示"报告采用该建议"，**不代表业务担保审批**（`decision_scope` 固定
+ *  `report_adoption`）；正文或依据变化后服务端会把已确认的置为 `stale`。
+ */
+export interface ReportRecommendation {
+  id: string;
+  recommendation_id: string;
+  section_key: string;
+  recommendation_type: string;
+  content: string;
+  basis: string;
+  basis_record_ids: string[];
+  preconditions: string[];
+  parameters?: Record<string, string>;
+  amount_value: string;
+  amount_unit: string;
+  rate_value: string;
+  rate_unit: string;
+  draft_text: string;
+  status: "pending" | "confirmed" | "rejected" | "stale" | "superseded";
+  decision_scope: string;
+  decision_note?: string;
+  decided_by?: string;
+  decided_at?: string | null;
+}
+
+export interface ReportCalculationSummary {
+  count: number;
+  verified: number;
+  needs_review: number;
+  rejected: number;
+}
+
 export interface ReportSection {
   id: string;
   section_key: string;
@@ -802,6 +883,12 @@ export interface ReportSection {
   length_policy?: LengthPolicy;
   report_revision?: number;
   system_tables?: { snapshot_hash: string; current_hash: string; rule_version: string; updated_at: string | null; outdated: boolean };
+  /** 计算轨迹与复算结论（随正文冻结；回退到确定性正文时为空） */
+  calculations?: ReportCalculation[];
+  calculation_summary?: ReportCalculationSummary;
+  calculation_trace_hash?: string;
+  /** 建议草案（仅当前有效的：pending/confirmed/stale；历史 superseded 不进报告） */
+  recommendations?: ReportRecommendation[];
 }
 
 export interface Citation {

@@ -1017,6 +1017,10 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [constraintModalOpen, setConstraintModalOpen] = useState(false);
+  // 业务生成设置要能"按具体文件缩小范围"，需要本项目的已解析材料清单。
+  // 载入失败**不阻断** Prompt 编辑：文件选择器降级为空列表并给一句说明即可，
+  // 不能因为材料接口抖一下就让整页不能保存配置。
+  const [projectDocuments, setProjectDocuments] = useState<{ id: string; filename: string }[]>([]);
   // 报告目录：基准状态与整份草稿都按范围缓存（切换章节/范围都不丢未保存的目录编辑）。
   const [outlineStates, setOutlineStates] = useState<Record<string, ReportOutlineState>>({});
   const [outlineDrafts, setOutlineDrafts] = useState<Record<string, ReportOutline>>({});
@@ -1188,12 +1192,28 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   }, [constraintModalOpen]);
 
   const updateRow = (chapterKey: string, values: Partial<ReportPrompt>) => setPrompts((current) => current.map((item) => item.chapter_key === chapterKey ? { ...item, ...values } : item));
-  type PromptDraftPatch = Omit<Partial<PromptEditableConfig>, "narrative_contract"> & { narrative_contract?: Partial<PromptEditableConfig["narrative_contract"]> };
+  type PromptDraftPatch = Omit<Partial<PromptEditableConfig>, "narrative_contract" | "material_scope" | "analysis_period"> & {
+    narrative_contract?: Partial<PromptEditableConfig["narrative_contract"]>;
+    material_scope?: Partial<NonNullable<PromptEditableConfig["material_scope"]>>;
+    analysis_period?: Partial<NonNullable<PromptEditableConfig["analysis_period"]>>;
+  };
   const updateDraft = (chapterKey: string, value: PromptDraftPatch) => setDrafts((current) => {
     const key = draftKey(chapterKey);
     const base = current[key] || prompts.find((item) => item.chapter_key === chapterKey)?.editable_config;
     if (!base) return current;
-    return { ...current, [key]: { ...base, ...value, narrative_contract: value.narrative_contract ? { ...base.narrative_contract, ...value.narrative_contract } : base.narrative_contract } };
+    const merged: PromptEditableConfig = {
+      ...base, ...value,
+      narrative_contract: value.narrative_contract ? { ...base.narrative_contract, ...value.narrative_contract } : base.narrative_contract,
+      // 业务生成设置的两个嵌套对象必须**深合并**：只切一个材料类型时浅合并会把
+      // `document_ids` 一起抹掉——筛选会悄悄失效，而界面看起来"只是加了个类型"。
+      material_scope: value.material_scope
+        ? { ...(base.material_scope || { source_kinds: [], material_roles: [], document_ids: [] }), ...value.material_scope }
+        : base.material_scope,
+      analysis_period: value.analysis_period
+        ? { ...(base.analysis_period || { periods: [], mode: "materials" }), ...value.analysis_period }
+        : base.analysis_period,
+    };
+    return { ...current, [key]: merged };
   });
   const sourceText = (item: ReportPrompt) => item.source === "project" ? "项目自定义" : item.source === "global" ? "全局默认" : "系统默认";
   const canEdit = Boolean(active?.llm && !readOnly);
@@ -1281,6 +1301,27 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   };
 
   const constraints: PromptConstraints = active?.constraints || { required_inputs: [], input_contract: {}, preserve_blocks: [], forbidden: [], output_contract: {}, global_rules: {} };
+  useEffect(() => {
+    let cancelled = false;
+    api.inventory(project.id, token)
+      .then((data) => { if (!cancelled) setProjectDocuments((data.documents || []).map((item) => ({ id: item.id, filename: item.filename }))); })
+      .catch(() => { if (!cancelled) setProjectDocuments([]); });
+    return () => { cancelled = true; };
+  }, [project.id, token]);
+  // 业务生成设置的当前值。历史配置没有这些键 → UI 侧补空默认，但**不写回草稿**
+  // （写回会把"未设置"变成"显式默认值"，保存后行为就变了）。
+  const emptyScope = { source_kinds: [] as string[], material_roles: [] as string[], document_ids: [] as string[] };
+  const draftScope = activeDraft?.material_scope || emptyScope;
+  const draftPeriod = activeDraft?.analysis_period || { periods: [] as string[], mode: "materials" as "materials" | "configured" };
+  const draftCalculationMode = activeDraft?.calculation_mode || "system_only";
+  const draftRecommendationMode = activeDraft?.recommendation_mode || "off";
+  const chapterSourceKinds = constraints.input_contract.source_kinds || [];
+  const toggleScopeValue = (field: "source_kinds" | "material_roles" | "document_ids", value: string) => {
+    if (!active) return;
+    const current = draftScope[field] || [];
+    const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
+    updateDraft(active.chapter_key, { material_scope: { ...draftScope, [field]: next } });
+  };
   // 篇幅口径由后端计算（length_policy），前端只做"最小值不大于最大值"的即时提醒；
   // 系统已无字符硬上限，不再有"越硬顶"这种前端判断。
   const draftPreferredMax = activeDraft?.narrative_contract.preferred_max_chars ?? 0;
@@ -1408,6 +1449,15 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
         <div className="prompt-tabs" role="tablist"><button className={tab === "structured" ? "active" : ""} role="tab" aria-selected={tab === "structured"} onClick={() => setTab("structured")}><SlidersHorizontal size={16} />结构化配置</button><button className={tab === "preview" ? "active" : ""} role="tab" aria-selected={tab === "preview"} onClick={() => setTab("preview")}><Eye size={16} />完整 Prompt</button></div>
         {tab === "structured" ? <div className="prompt-structured"><fieldset disabled={!canEdit}>
           <section className="prompt-card"><div className="prompt-card-head"><strong>写作视角</strong></div><div className="prompt-field-grid"><section className="prompt-field"><label htmlFor="prompt-role">角色</label><small>定义本章的业务写作视角</small><input id="prompt-role" value={activeDraft.role} onChange={(event) => updateDraft(active.chapter_key, { role: event.target.value })} /></section><section className="prompt-field"><label htmlFor="prompt-tone">行文语气</label><small>在正式尽调语言范围内调整表达</small><input id="prompt-tone" value={activeDraft.narrative_contract.tone} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { tone: event.target.value } })} /></section></div></section>
+          <section className="prompt-card prompt-business"><div className="prompt-card-head"><strong>业务生成设置</strong><small>控制本章能看到哪些材料、能不能自主计算与提建议；属于业务规则层，不与只读事实底线重叠</small></div><div className="prompt-card-body">
+            <section className="prompt-field"><div className="prompt-field-head"><div><label>材料类型</label><small>不选=沿用本章契约允许的全部类型；只选其中几类会同时收窄检索、事实、指标与计算输入</small></div></div><div className="prompt-chip-row">{chapterSourceKinds.length ? chapterSourceKinds.map((kind) => <button key={kind} type="button" className={`prompt-chip ${draftScope.source_kinds.includes(kind) ? "active" : ""}`} aria-pressed={draftScope.source_kinds.includes(kind)} onClick={() => toggleScopeValue("source_kinds", kind)}>{kind}</button>) : <span className="prompt-field-hint">本章契约未限定材料类型</span>}</div></section>
+            <section className="prompt-field"><div className="prompt-field-head"><div><label>具体文件</label><small>{scope === "global" ? "全局默认不保存项目文件 ID（保存时会被剥离），请到项目范围设置" : `只选其中几份材料时，其余文件的证据与数字不会进入本章；已解析 ${projectDocuments.length} 份`}</small></div></div>{scope === "global" ? <p className="prompt-field-hint">全局范围仅支持材料类型与角色。</p> : projectDocuments.length ? <div className="prompt-chip-row prompt-chip-scroll">{projectDocuments.map((document) => <button key={document.id} type="button" className={`prompt-chip ${draftScope.document_ids.includes(document.id) ? "active" : ""}`} aria-pressed={draftScope.document_ids.includes(document.id)} title={document.filename} onClick={() => toggleScopeValue("document_ids", document.id)}>{document.filename}</button>)}</div> : <p className="prompt-field-hint">尚未载入到可选择的材料文件。</p>}{draftScope.document_ids.length > 0 && <p className="prompt-field-hint">已选 {draftScope.document_ids.length} 份：模型只会看到这些文件的证据。</p>}</section>
+            <div className="prompt-field-grid">
+              <section className="prompt-field"><label htmlFor="prompt-calculation-mode">计算模式</label><small>系统预计算之外的指标是否允许模型自主计算（结果一律由系统复算）</small><select id="prompt-calculation-mode" value={draftCalculationMode} onChange={(event) => updateDraft(active.chapter_key, { calculation_mode: event.target.value as PromptEditableConfig["calculation_mode"] })}><option value="off">关闭：只引用系统预计算结果</option><option value="system_only">仅系统预计算（默认）</option><option value="model">允许自主计算并声明口径</option></select></section>
+              <section className="prompt-field"><label htmlFor="prompt-recommendation-mode">建议模式</label><small>承保/拒保/额度/费率建议必须结构化，并逐条人工确认后才可最终交付</small><select id="prompt-recommendation-mode" value={draftRecommendationMode} onChange={(event) => updateDraft(active.chapter_key, { recommendation_mode: event.target.value as PromptEditableConfig["recommendation_mode"] })}><option value="off">关闭：不输出建议</option><option value="qualitative">仅定性建议</option><option value="structured">结构化建议（需逐条确认）</option></select></section>
+            </div>
+            <section className="prompt-field"><div className="prompt-field-head"><div><label>分析期间</label><small>跟随材料实际期间，或只分析指定年度</small></div></div><div className="prompt-narrative-grid"><label>期间来源<select value={draftPeriod.mode} onChange={(event) => updateDraft(active.chapter_key, { analysis_period: { ...draftPeriod, mode: event.target.value as "materials" | "configured" } })}><option value="materials">跟随材料实际期间</option><option value="configured">只分析指定年度</option></select></label><label>指定年度<input value={(draftPeriod.periods || []).join("、")} placeholder="例如：2023、2024、2025" onChange={(event) => updateDraft(active.chapter_key, { analysis_period: { ...draftPeriod, periods: event.target.value.split(/[、,，\s]+/).map((item) => item.trim()).filter(Boolean).slice(0, 8) } })} /></label></div></section>
+          </div></section>
           <section className="prompt-card"><div className="prompt-card-head"><label htmlFor="prompt-goal">章节目标</label><small>说明本章需要回答的业务问题</small></div><textarea id="prompt-goal" rows={3} value={activeDraft.goal} onChange={(event) => updateDraft(active.chapter_key, { goal: event.target.value })} /></section>
           <details className="prompt-card prompt-collapsible"><summary><div><strong>内容要求</strong></div><span className="prompt-card-brief">必需 {activeDraft.required_sections.length} 项 · 规则 {activeDraft.rules.length} 项</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><PromptStringListEditor label="必需报告内容" hint="生成内容必须覆盖这些业务区块" items={activeDraft.required_sections} disabled={!canEdit} placeholder="例如：偿债来源" onChange={(required_sections) => updateDraft(active.chapter_key, { required_sections })} /><PromptStringListEditor label="写作规则" hint="约束本章的表述方式和分析重点" items={activeDraft.rules} disabled={!canEdit} placeholder="例如：明确披露口径与待核验事项" onChange={(rules) => updateDraft(active.chapter_key, { rules })} /></div></details>
           <details className="prompt-card prompt-collapsible"><summary><div><strong>行文组织</strong></div><span className="prompt-card-brief">顺序 {activeDraft.narrative_contract.paragraph_order.length} 项</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><PromptStringListEditor label="行文顺序" hint="按顺序组织自然段" items={activeDraft.narrative_contract.paragraph_order} disabled={!canEdit} placeholder="例如：财务概览" onChange={(paragraph_order) => updateDraft(active.chapter_key, { narrative_contract: { paragraph_order } })} /><section className="prompt-field"><div className="prompt-field-head"><div><label>篇幅</label><small>控制分析正文长度，不改变证据、引用与结论边界</small></div></div><div className="prompt-narrative-grid"><label>目标最小字符<input type="number" min="0" value={activeDraft.narrative_contract.preferred_min_chars} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { preferred_min_chars: Number(event.target.value) } })} /></label><label>目标最大字符<input type="number" min="200" value={activeDraft.narrative_contract.preferred_max_chars} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { preferred_max_chars: Number(event.target.value) } })} /></label><label>列表使用<select value={activeDraft.narrative_contract.list_mode} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { list_mode: event.target.value } })}><option value="allowed">允许</option><option value="limited">仅限必要事项</option><option value="prohibited">不使用列表</option></select></label></div></section>
@@ -1421,7 +1471,7 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
           <details className="prompt-card prompt-collapsible prompt-extra"><summary><div><strong>补充业务要求</strong><HelpTip label="补充业务要求说明">用于保留历史整段 Prompt，或录入本章额外的写作要求。</HelpTip></div><span className="prompt-card-brief">{activeDraft.additional_requirements.trim() ? `已填写 ${activeDraft.additional_requirements.trim().length} 字` : "未填写"}</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><textarea id="prompt-extra" aria-label="补充业务要求" rows={8} value={activeDraft.additional_requirements} onChange={(event) => updateDraft(active.chapter_key, { additional_requirements: event.target.value })} placeholder="输入补充要求；系统仍会执行下方只读风控约束。" /></div></details>
         </fieldset>
           {!active.llm && <div className="deterministic-prompt-note"><ShieldCheck size={17} /><div><strong>本章配置只读</strong><p>可查看章节配置全文，不能修改业务写作要求。</p></div></div>}{readOnly && active.llm && <p className="prompt-readonly">{scopeEditReason || (scope === "global" ? "当前环境不允许修改全局默认 Prompt。" : "当前环境不允许修改本项目 Prompt 配置。")}</p>}
-          <section className="prompt-constraints-summary"><div><ShieldCheck size={16} /><div><strong>只读风控约束</strong><HelpTip label="只读风控约束说明">证据边界、禁止事项和引用规则由系统固定执行，不随章节配置改变。</HelpTip></div></div><button className="secondary-button small" type="button" onClick={() => setConstraintModalOpen(true)}>查看详情</button></section>
+          <section className="prompt-constraints-summary"><div><ShieldCheck size={16} /><div><strong>只读风控约束</strong><HelpTip label="只读风控约束说明">固定事实底线（不得伪造来源与核验结果、不得把建议写成已确认事实）由系统强制校验；写作要求、结构与篇幅可在上方编辑，文风偏差只提示不退回。</HelpTip></div></div><button className="secondary-button small" type="button" onClick={() => setConstraintModalOpen(true)}>查看详情</button></section>
           {active.llm && !readOnly && <footer className="prompt-action-bar"><span>{isChanged ? "存在未保存的修改" : effectiveUpdatedAt ? `当前配置已保存 · 最近更新：${formatPromptUpdatedAt(effectiveUpdatedAt)}` : "当前使用系统默认配置"}</span><div>{scope === "global"
               ? <>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : null}撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存全局默认</button></>
               : <>{active.overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>撤销项目覆盖</button>}<button className="secondary-button" disabled={!canSetGlobalDefault} onClick={setGlobalDefault}>{active.global_overridden ? "更新全局默认" : "设为全局默认"}</button>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={resetGlobalDefault}>撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存项目配置</button></>}</div></footer>}
@@ -1436,7 +1486,14 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
         {outlineActionBar}
       </main>
     </section>}
-    {constraintModalOpen && <div className="prompt-constraint-modal-backdrop" role="presentation" onClick={() => setConstraintModalOpen(false)}><section className="prompt-constraint-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-constraint-modal-title" onClick={(event) => event.stopPropagation()}><header className="prompt-constraint-modal-head"><div><strong id="prompt-constraint-modal-title">只读风控约束</strong><span>不可编辑 · 由系统固定执行</span></div><button className="icon-button" type="button" aria-label="关闭风控约束详情" title="关闭" onClick={() => setConstraintModalOpen(false)}><X size={16} /></button></header><div className="prompt-constraint-modal-body"><div className="prompt-constraints-body"><PromptConstraintGroup title="必须保留" values={constraints.preserve_blocks} /><PromptConstraintGroup title="禁止事项" values={constraints.forbidden} /><PromptConstraintGroup title="允许材料类型" values={constraints.input_contract.source_kinds || []} /><PromptConstraintGroup title="输入字段" values={[...(constraints.input_contract.fact_keys || []), ...(constraints.input_contract.metric_keys || []), ...(constraints.input_contract.rule_keys || [])]} /><PromptConstraintGroup title="输出必备表述" values={[...(constraints.output_contract.required_phrases || []), ...(constraints.output_contract.required_missing_markers || [])]} /><div className="prompt-constraint-group"><strong>引用规则</strong><p>最多 {constraints.output_contract.max_citations ?? 0} 条引用 · 篇幅由本章 Prompt 的目标字符范围决定</p></div><div className="prompt-constraint-group global-rules"><strong>全局规则</strong>{Object.entries(constraints.global_rules).map(([key, value]) => <p key={key}>{value}</p>)}</div></div></div></section></div>}
+    {constraintModalOpen && <div className="prompt-constraint-modal-backdrop" role="presentation" onClick={() => setConstraintModalOpen(false)}><section className="prompt-constraint-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-constraint-modal-title" onClick={(event) => event.stopPropagation()}><header className="prompt-constraint-modal-head"><div><strong id="prompt-constraint-modal-title">只读风控约束</strong><span>不可编辑 · 证据与禁止事项由系统校验</span></div><button className="icon-button" type="button" aria-label="关闭风控约束详情" title="关闭" onClick={() => setConstraintModalOpen(false)}><X size={16} /></button></header><div className="prompt-constraint-modal-body"><div className="prompt-constraints-body">
+            {/* 三层拆分（《风控约束分层》§四 line 57）：① 系统强制、② 可在业务生成设置卡片编辑、
+                ③ 证据与校验诊断。分组只改呈现，**不合并也不隐藏**任何一条约束——
+                隐藏约束等于让人在不知情的情况下踩线。 */}
+            <div className="prompt-layer prompt-layer-fixed"><h3>① 固定事实底线<span>系统强制校验，不可编辑</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="必须保留" values={constraints.preserve_blocks} /><PromptConstraintGroup title="禁止事项" values={constraints.forbidden} /></div><div className="prompt-constraint-group"><strong>承保建议</strong><p>允许输出承保、拒保、担保额度与担保费率的「建议」，但必须写明为待人工复核的提议、说明依据与前提条件；不得写成已核定、已批准或已生效的决定。投资建议仍不允许。</p></div><div className="prompt-constraint-group global-rules"><strong>全局规则</strong>{Object.entries(constraints.global_rules).map(([key, value]) => <p key={key}>{value}</p>)}</div></div>
+            <div className="prompt-layer prompt-layer-business"><h3>② 业务生成设置<span>在上方「业务生成设置」卡片中编辑</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="本章契约允许的材料类型" values={constraints.input_contract.source_kinds || []} /><div className="prompt-constraint-group"><strong>当前生效的业务规则</strong><p>材料范围：{draftScope.source_kinds.length ? `仅 ${draftScope.source_kinds.join("、")}` : "不限类型"}{draftScope.document_ids.length ? ` · 指定 ${draftScope.document_ids.length} 份文件` : ""}</p><p>计算模式：{draftCalculationMode === "model" ? "允许自主计算（结果由系统复算）" : draftCalculationMode === "off" ? "关闭（只引用系统预计算结果）" : "仅系统预计算"}</p><p>建议模式：{draftRecommendationMode === "structured" ? "结构化建议（需逐条人工确认）" : draftRecommendationMode === "qualitative" ? "仅定性建议" : "不输出建议"}</p><p>分析期间：{draftPeriod.mode === "configured" && draftPeriod.periods.length ? `仅 ${draftPeriod.periods.join("、")}` : "跟随材料实际期间"}</p></div></div></div>
+            <div className="prompt-layer prompt-layer-diagnostics"><h3>③ 证据与校验诊断<span>系统实际执行的输入、引用与错误口径</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="输入字段" values={[...(constraints.input_contract.fact_keys || []), ...(constraints.input_contract.metric_keys || []), ...(constraints.input_contract.rule_keys || [])]} /><PromptConstraintGroup title="建议用语（写作提示，不作为退回理由）" values={[...(constraints.output_contract.required_phrases || []), ...(constraints.output_contract.required_missing_markers || [])]} /><div className="prompt-constraint-group"><strong>引用规则</strong><p>{Number(constraints.output_contract.max_citations ?? 0) > 0 ? `最多 ${constraints.output_contract.max_citations} 条引用` : "不限条数：可引用本次实际提供的全部合法证据"} · 篇幅由本章 Prompt 的目标字符范围决定</p><p>来源、冲突与材料缺口边界由服务端按实际状态附加，正文只需在具体判断处说明，无需逐字复述固定声明。</p></div></div></div>
+          </div></div></section></div>}
   </div>;
 }
 
@@ -1712,6 +1769,98 @@ function ReportBlocks({ section, openCitation }: { section: ReportSection; openC
   })}</>;
 }
 
+/** 计算轨迹：模型自主算了什么、系统复算结果如何（《风控约束分层》§三.1 / §四）。
+ *
+ *  刻意**折叠**展示：计算轨迹是复核用的后台信息，不该抢占正文阅读。
+ *  `rejected` 的条目照样列出来——"被否决的计算"本身就是复核要找的东西，
+ *  藏起来会让人误以为模型没算过。
+ */
+function ReportCalculationTrace({ section }: { section: ReportSection }) {
+  const calculations = section.calculations || [];
+  if (!calculations.length) return null;
+  const summary = section.calculation_summary || {
+    count: calculations.length,
+    verified: calculations.filter((item) => item.status === "verified").length,
+    needs_review: calculations.filter((item) => item.status === "needs_review").length,
+    rejected: calculations.filter((item) => item.status === "rejected").length,
+  };
+  return <details className="report-calc-trace">
+    <summary>
+      <strong>计算轨迹</strong>
+      <span className="report-calc-counts">
+        {summary.verified > 0 && <i className="verified">已复算 {summary.verified}</i>}
+        {summary.needs_review > 0 && <i className="review">待核验 {summary.needs_review}</i>}
+        {summary.rejected > 0 && <i className="rejected">未通过 {summary.rejected}</i>}
+      </span>
+      <ChevronDown size={14} />
+    </summary>
+    <div className="report-calc-body">
+      {calculations.map((item) => <div className={`report-calc-row ${item.status}`} key={item.calculation_id}>
+        <div className="report-calc-head">
+          <strong>{item.name || item.calculation_id}</strong>
+          <span className={`report-calc-status ${item.status}`}>
+            {item.status === "verified" ? "已复算" : item.status === "needs_review" ? "待核验" : "未通过"}
+          </span>
+          <span className="report-calc-value">{item.computed || item.value}{item.unit || ""}</span>
+        </div>
+        <p className="report-calc-formula">{item.formula}{item.period ? ` · ${item.period}` : ""}{item.scope ? ` · ${item.scope}` : ""}</p>
+        {item.definition && <p className="report-calc-definition">{item.definition}</p>}
+        {item.reason_code && <p className="report-calc-reason">{item.reason_code}</p>}
+      </div>)}
+    </div>
+  </details>;
+}
+
+const RECOMMENDATION_STATUS_LABELS: Record<string, string> = {
+  pending: "待确认",
+  confirmed: "已确认采用",
+  rejected: "已驳回",
+  stale: "需重新确认",
+  superseded: "已被新一轮生成取代",
+};
+
+/** 建议草案与逐条确认（《风控约束分层》§四 line 52~55）。
+ *
+ *  三件事必须一眼看懂：①这是**草案**不是审批；②未确认会**阻断最终交付**；
+ *  ③`stale` 说明正文或依据变了、原确认失效——不是"已确认"。
+ */
+function ReportRecommendationList({ projectId, section, token, refresh }: { projectId: string; section: ReportSection; token?: string; refresh: () => Promise<void> }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const recommendations = section.recommendations || [];
+  const decide = async (id: string, decision: "confirmed" | "rejected") => {
+    setBusy(id); setError("");
+    try {
+      await api.reviewRecommendation(projectId, id, decision, token, "", section.content_sha256 || "");
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "建议复核失败");
+    } finally { setBusy(""); }
+  };
+  const pending = recommendations.filter((item) => item.status === "pending" || item.status === "stale").length;
+  return <section className="report-recommendations">
+    <header>
+      <strong>建议草案</strong>
+      <span>{pending > 0 ? `${pending} 条待人工确认，确认前不能最终交付` : "均已处理"}</span>
+    </header>
+    {error && <div className="report-rec-error" role="alert"><AlertTriangle size={14} />{error}</div>}
+    {recommendations.map((item) => <article className={`report-rec-card ${item.status}`} key={item.id}>
+      <div className="report-rec-head">
+        <span className={`report-rec-status ${item.status}`}>{RECOMMENDATION_STATUS_LABELS[item.status] || item.status}</span>
+        <p>{item.draft_text || item.content}</p>
+      </div>
+      {item.basis && <p className="report-rec-basis">依据：{item.basis}</p>}
+      {item.preconditions?.length > 0 && <p className="report-rec-basis">前提：{item.preconditions.join("；")}</p>}
+      {(item.amount_value || item.rate_value) && <p className="report-rec-params">{item.amount_value ? `额度 ${item.amount_value}${item.amount_unit || ""}` : ""}{item.amount_value && item.rate_value ? " · " : ""}{item.rate_value ? `费率 ${item.rate_value}${item.rate_unit || ""}` : ""}</p>}
+      {(item.status === "pending" || item.status === "stale") && <div className="report-rec-actions">
+        <button className="primary-button small" disabled={busy === item.id} onClick={() => decide(item.id, "confirmed")}>{busy === item.id ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}确认采用</button>
+        <button className="text-button" disabled={busy === item.id} onClick={() => decide(item.id, "rejected")}>驳回</button>
+        <small>确认仅表示报告采用该建议，不代表业务担保审批。</small>
+      </div>}
+    </article>)}
+  </section>;
+}
+
 function Report({ project, bondSummary, sections, quality, snapshot, token, openCitation, refresh, hasOpenMajor }: { project: Project; bondSummary: BondSummary | null; sections: ReportSection[]; quality: ReportQuality | null; snapshot: ProjectProfileSnapshot | null; token?: string; openCitation: (id: string) => void; refresh: () => Promise<void>; hasOpenMajor: boolean }) {
   const [editing, setEditing] = useState<string | null>(null); const [draft, setDraft] = useState(""); const [busy, setBusy] = useState<string | null>(null);
   const [tableRefreshError, setTableRefreshError] = useState("");
@@ -1740,7 +1889,7 @@ function Report({ project, bondSummary, sections, quality, snapshot, token, open
   const finalWordReady = canExport && quality?.status === "passed" && !project.analysis_stale && !project.report_stale && project.report_state === "final_ready";
   const wordReady = draftWordReady;
   const wordExportTitle = "导出草稿 Word；最终版需应用最新复核、通过校验并标记已复核";
-  return <div className="view-content report-view"><div className="page-heading"><div><span className="eyebrow">人工复核工作区</span><h1>尽调报告</h1></div><div className="export-group"><span className={`report-quality-chip ${quality?.status === "passed" ? "passed" : "warning"}`}><ShieldCheck size={14} />事实支持率 {quality ? `${Math.round(quality.support_rate * 100)}%` : "待校验"}</span>{canExport ? <><button className="secondary-button export-action" onClick={() => api.exportReport(project.id, "md", reportTitle, token, Boolean(bondSummary))}><Download size={16} />Markdown</button><button className="primary-button export-action" disabled={!wordReady} title={wordExportTitle} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "draft")}><Download size={16} />导出 Word</button></> : <span className="export-restricted"><LockKeyhole size={14} />真实材料默认不提供导出</span>}<button className="secondary-button export-action" disabled={!markReviewedReady || busy === "__report-review__"} title={markReviewedReady ? "标记当前报告为已复核" : "需先应用复核、通过校验并关闭重大事项"} onClick={markReviewed}>{busy === "__report-review__" ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}标记已复核</button><button className="secondary-button export-action" disabled={!finalWordReady} title={finalWordReady ? "导出最终已复核 Word" : "需应用最新复核、通过校验、关闭重大事项并标记已复核"} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "final")}><FileCheck2 size={16} />最终 Word</button></div></div>{staleTableSections.length > 0 && <div className="report-block-warning"><FileSpreadsheet size={16} /><span>{staleTableSections.length} 个章节的系统表格需要更新。更新会保留分析正文并将相关章节设为待复核，不调用模型。</span><button className="secondary-button small" disabled={busy === "__table-refresh__" || Boolean(project.archived_at)} onClick={refreshSystemTables}>{busy === "__table-refresh__" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}更新系统表格</button></div>}{quality?.regeneration_requirement === "full_report" && <div className="report-block-warning"><AlertTriangle size={16} /><span>报告目录的二级结构已变更（章节增删或排序），单章再生无法使报告与目录一致；请整份重新生成报告。</span></div>}{quality?.regeneration_requirement === "chapter" && <div className="report-block-warning"><AlertTriangle size={16} /><span>{`报告目录有 ${quality.outline_changed_chapters?.length || 1} 个章节的小节配置已变化，按章再生对应章节即可更新（不影响其他章节）。`}</span></div>}{tableRefreshError && <div className="report-block-warning" role="alert"><AlertTriangle size={16} />{tableRefreshError}</div>}<div className="report-layout"><aside className="report-toc"><strong>报告目录</strong>{sections.map((section, index) => { const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <span className="toc-part">{section.part_label}</span>}<a href={`#section-${section.section_key}`}><span>{section.chapter_number || (standalone || !section.chapter_label ? "" : String(index + 1).padStart(2, "0"))}</span>{standalone ? section.part_label : section.title}</a></Fragment>; })}</aside><main className="report-paper"><div className="report-cover"><span>{reportLabel}</span><h2>{reportTitle}</h2>{bondSummary?.reportLevel && <p>报告状态：{bondSummary.reportLevel}</p>}{snapshot && <p>主体档案快照：v{snapshot.version} · 基准日 {snapshot.baseline_date || "待确认"}</p>}<p>募集说明书与评级报告版本：本次运行所用已解析文件</p><p>Agent 初稿 · 等待人工复核</p>{project.data_class === "real_reference" && <p>真实公开材料本地参考 · 不属于评测案例</p>}{hasOpenMajor && <strong className="cover-warning"><AlertTriangle size={16} />存在未决重大事项</strong>}</div><div className={`report-quality-line ${quality?.status === "passed" ? "passed" : "warning"}`}><div><strong>{quality?.supported_claims ?? 0}/{quality?.factual_claims ?? 0}</strong><span>事实性主张已获得证据支持</span></div><div><strong>{quality?.invalid_citations ?? 0}</strong><span>无效引用</span></div><div><strong>{quality?.unsupported_claims ?? 0}</strong><span>无证据主张</span></div></div>{quality?.status === "warning" && <div className="report-block-warning"><AlertTriangle size={16} />存在无证据事实或无效引用，相关章节不能标记为已复核，Word 导出已禁用。</div>}{project.analysis_stale && <div className="report-block-warning"><RefreshCw size={16} />{(project.report_stale_reasons || []).includes("project_info_changed") ? "项目基础信息已变更，请重新运行尽调" : "材料或主体快照已变化，需要重新运行 Agent"}；重跑前 Word 导出已禁用。</div>}<div className={`report-notice ${hasOpenMajor ? "major" : ""}`}><AlertTriangle size={17} />{hasOpenMajor ? "本报告包含未处理冲突、高风险候选项或高优先级任务，详见摘要与附录。" : "本报告为风险审查辅助材料，不构成自动审批意见。"}</div>{sections.map((section, index) => { const citationsExpanded = expandedCitations.has(section.section_key); const sectionExpanded = expandedSections.has(section.section_key); const visibleCitations = citationsExpanded ? section.citation_ids : section.citation_ids.slice(0, 3); const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <h3 className="report-part-heading">{section.part_label}</h3>}<section className={`report-section ${sectionExpanded ? "mobile-expanded" : "mobile-collapsed"}`} id={`section-${section.section_key}`}><div className="section-heading"><h2 className="section-title">{section.chapter_number ? <span className="section-number">{section.chapter_number}</span> : null}<span className="section-name">{standalone ? section.part_label : section.title}</span></h2><div className="section-status"><span className={`section-quality ${section.validation_status === "passed" ? "passed" : "warning"}`}>{Math.round((section.support_rate ?? 0) * 100)}% 支持</span>{reportLengthBadge(section)}{reportGenerationBadge(section)}{reportDeliveryBadge(section)}</div><button className="mobile-section-toggle icon-button" title={sectionExpanded ? "收起章节" : "展开章节"} onClick={() => setExpandedSections((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}><ChevronDown size={16} /></button><div className="section-tools"><button className="icon-button" title="重新生成" onClick={() => regenerate(section)} disabled={busy === section.section_key}><RefreshCw className={busy === section.section_key ? "spin" : ""} size={16} /></button><button className="icon-button" title="编辑章节" onClick={() => { setEditing(section.section_key); setDraft(section.content); }}><Pencil size={16} /></button></div></div><div className="section-collapsible">{editing === section.section_key ? <div className="editor"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="text-button" onClick={() => setEditing(null)}>取消</button><button className="primary-button small" onClick={() => save(section)}>保存修改</button></div></div> : <div className="section-content"><ReportBlocks section={section} openCitation={openCitation} /></div>}<div className="citation-row">{visibleCitations.map((id) => <button key={id} onClick={() => openCitation(id)}>{id.slice(-8)}</button>)}{section.citation_ids.length > 3 && <button className="citation-more" onClick={() => setExpandedCitations((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}>{citationsExpanded ? "收起引用" : `查看全部 ${section.citation_ids.length} 条`}</button>}{section.review_status === "reviewed" ? <span className="reviewed"><Check size={13} />已复核</span> : <button className="mark-reviewed" disabled={section.validation_status !== "passed" || hasOpenMajor} title={section.validation_status !== "passed" ? "证据校验未通过" : hasOpenMajor ? "存在未决重大事项" : "标记已复核"} onClick={() => { setDraft(section.content); save(section, true); }}><Check size={13} />标记已复核</button>}</div></div></section></Fragment>; })}</main></div></div>;
+  return <div className="view-content report-view"><div className="page-heading"><div><span className="eyebrow">人工复核工作区</span><h1>尽调报告</h1></div><div className="export-group"><span className={`report-quality-chip ${quality?.status === "passed" ? "passed" : "warning"}`}><ShieldCheck size={14} />事实支持率 {quality ? `${Math.round(quality.support_rate * 100)}%` : "待校验"}</span>{canExport ? <><button className="secondary-button export-action" onClick={() => api.exportReport(project.id, "md", reportTitle, token, Boolean(bondSummary))}><Download size={16} />Markdown</button><button className="primary-button export-action" disabled={!wordReady} title={wordExportTitle} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "draft")}><Download size={16} />导出 Word</button></> : <span className="export-restricted"><LockKeyhole size={14} />真实材料默认不提供导出</span>}<button className="secondary-button export-action" disabled={!markReviewedReady || busy === "__report-review__"} title={markReviewedReady ? "标记当前报告为已复核" : "需先应用复核、通过校验并关闭重大事项"} onClick={markReviewed}>{busy === "__report-review__" ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}标记已复核</button><button className="secondary-button export-action" disabled={!finalWordReady} title={finalWordReady ? "导出最终已复核 Word" : "需应用最新复核、通过校验、关闭重大事项并标记已复核"} onClick={() => api.exportReport(project.id, "docx", reportTitle, token, Boolean(bondSummary), "final")}><FileCheck2 size={16} />最终 Word</button></div></div>{staleTableSections.length > 0 && <div className="report-block-warning"><FileSpreadsheet size={16} /><span>{staleTableSections.length} 个章节的系统表格需要更新。更新会保留分析正文并将相关章节设为待复核，不调用模型。</span><button className="secondary-button small" disabled={busy === "__table-refresh__" || Boolean(project.archived_at)} onClick={refreshSystemTables}>{busy === "__table-refresh__" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}更新系统表格</button></div>}{quality?.regeneration_requirement === "full_report" && <div className="report-block-warning"><AlertTriangle size={16} /><span>报告目录的二级结构已变更（章节增删或排序），单章再生无法使报告与目录一致；请整份重新生成报告。</span></div>}{quality?.regeneration_requirement === "chapter" && <div className="report-block-warning"><AlertTriangle size={16} /><span>{`报告目录有 ${quality.outline_changed_chapters?.length || 1} 个章节的小节配置已变化，按章再生对应章节即可更新（不影响其他章节）。`}</span></div>}{tableRefreshError && <div className="report-block-warning" role="alert"><AlertTriangle size={16} />{tableRefreshError}</div>}<div className="report-layout"><aside className="report-toc"><strong>报告目录</strong>{sections.map((section, index) => { const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <span className="toc-part">{section.part_label}</span>}<a href={`#section-${section.section_key}`}><span>{section.chapter_number || (standalone || !section.chapter_label ? "" : String(index + 1).padStart(2, "0"))}</span>{standalone ? section.part_label : section.title}</a></Fragment>; })}</aside><main className="report-paper"><div className="report-cover"><span>{reportLabel}</span><h2>{reportTitle}</h2>{bondSummary?.reportLevel && <p>报告状态：{bondSummary.reportLevel}</p>}{snapshot && <p>主体档案快照：v{snapshot.version} · 基准日 {snapshot.baseline_date || "待确认"}</p>}<p>募集说明书与评级报告版本：本次运行所用已解析文件</p><p>Agent 初稿 · 等待人工复核</p>{project.data_class === "real_reference" && <p>真实公开材料本地参考 · 不属于评测案例</p>}{hasOpenMajor && <strong className="cover-warning"><AlertTriangle size={16} />存在未决重大事项</strong>}</div><div className={`report-quality-line ${quality?.status === "passed" ? "passed" : "warning"}`}><div><strong>{quality?.supported_claims ?? 0}/{quality?.factual_claims ?? 0}</strong><span>事实性主张已获得证据支持</span></div><div><strong>{quality?.invalid_citations ?? 0}</strong><span>无效引用</span></div><div><strong>{quality?.unsupported_claims ?? 0}</strong><span>无证据主张</span></div></div>{quality?.status === "warning" && <div className="report-block-warning"><AlertTriangle size={16} />存在无证据事实或无效引用，相关章节不能标记为已复核，Word 导出已禁用。</div>}{project.analysis_stale && <div className="report-block-warning"><RefreshCw size={16} />{(project.report_stale_reasons || []).includes("project_info_changed") ? "项目基础信息已变更，请重新运行尽调" : "材料或主体快照已变化，需要重新运行 Agent"}；重跑前 Word 导出已禁用。</div>}<div className={`report-notice ${hasOpenMajor ? "major" : ""}`}><AlertTriangle size={17} />{hasOpenMajor ? "本报告包含未处理冲突、高风险候选项或高优先级任务，详见摘要与附录。" : "本报告为风险审查辅助材料，不构成自动审批意见。"}</div>{sections.map((section, index) => { const citationsExpanded = expandedCitations.has(section.section_key); const sectionExpanded = expandedSections.has(section.section_key); const visibleCitations = citationsExpanded ? section.citation_ids : section.citation_ids.slice(0, 3); const showPart = Boolean(section.part_label) && section.part_label !== sections[index - 1]?.part_label; const standalone = Boolean(section.part_label) && !section.chapter_label; return <Fragment key={section.id}>{showPart && !standalone && <h3 className="report-part-heading">{section.part_label}</h3>}<section className={`report-section ${sectionExpanded ? "mobile-expanded" : "mobile-collapsed"}`} id={`section-${section.section_key}`}><div className="section-heading"><h2 className="section-title">{section.chapter_number ? <span className="section-number">{section.chapter_number}</span> : null}<span className="section-name">{standalone ? section.part_label : section.title}</span></h2><div className="section-status"><span className={`section-quality ${section.validation_status === "passed" ? "passed" : "warning"}`}>{Math.round((section.support_rate ?? 0) * 100)}% 支持</span>{reportLengthBadge(section)}{reportGenerationBadge(section)}{reportDeliveryBadge(section)}</div><button className="mobile-section-toggle icon-button" title={sectionExpanded ? "收起章节" : "展开章节"} onClick={() => setExpandedSections((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}><ChevronDown size={16} /></button><div className="section-tools"><button className="icon-button" title="重新生成" onClick={() => regenerate(section)} disabled={busy === section.section_key}><RefreshCw className={busy === section.section_key ? "spin" : ""} size={16} /></button><button className="icon-button" title="编辑章节" onClick={() => { setEditing(section.section_key); setDraft(section.content); }}><Pencil size={16} /></button></div></div><div className="section-collapsible">{editing === section.section_key ? <div className="editor"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="text-button" onClick={() => setEditing(null)}>取消</button><button className="primary-button small" onClick={() => save(section)}>保存修改</button></div></div> : <div className="section-content"><ReportBlocks section={section} openCitation={openCitation} /></div>}<ReportCalculationTrace section={section} />{section.recommendations && section.recommendations.length > 0 && <ReportRecommendationList projectId={project.id} section={section} token={token} refresh={refresh} />}<div className="citation-row">{visibleCitations.map((id) => <button key={id} onClick={() => openCitation(id)}>{id.slice(-8)}</button>)}{section.citation_ids.length > 3 && <button className="citation-more" onClick={() => setExpandedCitations((current) => { const next = new Set(current); if (next.has(section.section_key)) next.delete(section.section_key); else next.add(section.section_key); return next; })}>{citationsExpanded ? "收起引用" : `查看全部 ${section.citation_ids.length} 条`}</button>}{section.review_status === "reviewed" ? <span className="reviewed"><Check size={13} />已复核</span> : <button className="mark-reviewed" disabled={section.validation_status !== "passed" || hasOpenMajor} title={section.validation_status !== "passed" ? "证据校验未通过" : hasOpenMajor ? "存在未决重大事项" : "标记已复核"} onClick={() => { setDraft(section.content); save(section, true); }}><Check size={13} />标记已复核</button>}</div></div></section></Fragment>; })}</main></div></div>;
 }
 
 /* 证据原文重排。抽取出来的整页文本本身就是一行一条记录，只是浏览器把换行折叠掉了，

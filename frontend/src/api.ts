@@ -3,7 +3,7 @@ import type {
   AuditEvent, CandidateFinding, Citation, CrossCheck, EvidenceGraphSummary, Fact, FactGroup, MaterialQAResponse,
   FinancialMetric, FinancialTieOut, Health, Inventory, LatestRun, MetricTrace, PolicyInfo, Project,
   BondSummary, EntityProfileDetail, EntityProfileReadiness, EntityProfileSummary, ProjectCreatePayload,
-  ProjectEntity, ProjectProfileSnapshot, ProjectSummary, ProjectUpdatePayload, ProjectUpdateResult, ReportQuality, ReportSection, ReviewApplyResult, ReviewSummary,
+  ProjectEntity, ProjectProfileSnapshot, ProjectSummary, ProjectUpdatePayload, ProjectUpdateResult, ReportQuality, ReportRecommendation, ReportSection, ReviewApplyResult, ReviewSummary,
   ReviewTask, Risk, Run, RunNode, RunArtifact, ReportPrompt,
   ReportOutline, ReportOutlineState,
   ReportSnapshot, ReportSnapshotSummary,
@@ -168,6 +168,14 @@ export const api = {
   reviewSummary: (id: string, token?: string) => request<ReviewSummary>(`/api/projects/${id}/review-summary`, { headers: headers(token) }),
   applyReview: (id: string, token?: string) => request<ReviewApplyResult>(`/api/projects/${id}/review/apply`, { method: "POST", headers: headers(token) }),
   markReportReviewed: (id: string, token?: string) => request<ReviewSummary>(`/api/projects/${id}/report/mark-reviewed`, { method: "POST", headers: headers(token) }),
+  // 建议逐条复核（《风控约束分层》§四 line 54）：`confirmed` 只表示报告采用该建议，
+  // 不代表业务担保审批（后端把 decision_scope 固定为 report_adoption）。
+  // 带 `expected_section_sha256` 做乐观并发：正文已变则 409，避免给旧正文背书。
+  reviewRecommendation: (id: string, recommendationId: string, decision: "confirmed" | "rejected", token?: string, note = "", expectedSectionSha256 = "") =>
+    request<ReportRecommendation>(`/api/projects/${id}/report-recommendations/${recommendationId}`, {
+      method: "PATCH", headers: headers(token, true),
+      body: JSON.stringify({ decision, note, expected_section_sha256: expectedSectionSha256 || null }),
+    }),
   inventory: (id: string, token?: string) => request<Inventory>(`/api/projects/${id}/document-inventory`, { headers: headers(token) }),
   materialQA: (id: string, question: string, documentIds: string[] = [], token?: string) =>
     request<MaterialQAResponse>(`/api/projects/${id}/material-qa`, {
