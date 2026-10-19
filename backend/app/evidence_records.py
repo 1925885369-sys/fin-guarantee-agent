@@ -28,8 +28,9 @@ import re
 from decimal import Decimal, InvalidOperation
 
 # 记录契约版本：随章节正文一起冻结，接口与审计可见（方案 §一"support_record_version"）。
-RECORD_VERSION = "evidence-records-v1"
-RECORD_TYPES = ("fact", "table", "metric", "rule", "disclosure")
+RECORD_VERSION = "evidence-records-v2"
+# v2 新增 `calculation`：模型自主计算、经系统复算通过的派生记录（风控约束分层 §三.2）。
+RECORD_TYPES = ("fact", "table", "metric", "rule", "disclosure", "calculation")
 RECORD_STATUSES = ("verified", "derived", "needs_review", "conflict")
 # 事实/指标里的 scope 是英文枚举；表格块里的口径是中文标签。统一成中文口径展示口径，
 # 供 ``_record_binding`` 的口径维度直接比对。
@@ -120,9 +121,16 @@ def _record(*, record_id: str, record_type: str, value, unit: str = "", raw: str
 
 
 def _traceable(record: dict) -> bool:
-    """可追溯：有来源 ID、冻结主体档案快照，或页级定位（表格记录）。"""
-    return bool(record.get("source_ids") or record.get("profile_snapshot_id")
-                or record.get("locator") or record.get("page"))
+    """可追溯：有来源 ID、冻结主体档案快照、页级定位（表格记录），
+    或**输入链 + 公式**（派生计算）。
+
+    ⚠️ 必须有 `formula` 才认 `source_fact_ids`：裸 ID 列表不足以证明"这个值是怎么算出来的"，
+    认了会让任意记录靠拼 ID 混进"可支持"集。metric/calculation 两类都走这条。
+    """
+    if record.get("source_ids") or record.get("profile_snapshot_id") \
+            or record.get("locator") or record.get("page"):
+        return True
+    return bool(record.get("source_fact_ids") and str(record.get("formula") or "").strip())
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +421,22 @@ _SERIES_VALUE_RE = re.compile(r"(-?\d[\d,]*(?:\.\d+)?)\s*(亿元|万元|元|%|�
 # 系列句续项：单值句的值之后紧跟 "、19.26%" / "和14.76%" / "及55.36亿元" 形态 → 该值是
 # 枚举首项（不是独立命名值），交 ④ 系列抽取处理。
 _SERIES_CONTINUATION_RE = re.compile(r"\s*(?:[、，,]|和|及|与)\s*-?\d")
+# ⑩ 汇总句与占比句（2026-10-16 第四轮试跑复核新增）：两类"引文有、记录无"的常见形态
+#    （中邮 cashflow #20 实测）——
+#    ① 汇总：`…金融投资等高流动性资产，合计达169.02亿元`（科目与汇总词之间夹逗号，
+#       既有 ③ 命名值句的连接词位不含标点 → 整句漏抽）；
+#    ② 占比：`占总资产（扣除代理买卖证券款）的比重达73.55%`（"占…的比重"整段是科目，
+#       不是"比例"类名词后缀 → 既有 ③ 覆盖不到）。
+#    两者都只在**科目短语 ≥4 字**时登记，避免把"合计达…"抽成无主语的裸记录。
+_AGGREGATE_VALUE_RE = re.compile(
+    r"(?P<head>[^，。；、]{2,40})[，,]?\s*(?:合计|总计|共计|累计)\s*(?:达|为|至)\s*"
+    r"(?P<value>-?[\d,]+(?:\.\d+)?)\s*(?P<unit>亿元|万元|元)"
+)
+_COVERAGE_VALUE_RE = re.compile(
+    r"(?P<label>占[^，。；]{2,40}?的?(?:比重|比例|占比))\s*(?:达|为|是)?\s*"
+    r"(?P<value>-?[\d,]+(?:\.\d+)?)\s*(?P<unit>%|％)"
+)
+
 # ⑤ "科目：X 单位" 冒号式单值（"反担保折后价值：16,000万元"，华辰 guarantee 实测）。
 _COLON_VALUE_RE = re.compile(
     r"(?P<head>[^，。；、\s|:：]{2,20})[：:]\s*"
@@ -741,6 +765,50 @@ def _quote_semicolon_series(flat: str) -> list[dict]:
     return entries
 
 
+def _quote_aggregate_facts(flat: str) -> list[dict]:
+    """⑩-① 汇总句："…金融投资等高流动性资产，合计达169.02亿元"（2026-10-16 中邮 cashflow #20）。
+
+    科目取"合计/总计"前**最后一个分句**，并剥括号补充说明；短语 <4 字时丢弃（宁漏不错）。
+    """
+    entries: list[dict] = []
+    for found in _AGGREGATE_VALUE_RE.finditer(flat):
+        head = str(found.group("head") or "").split("、")[-1]
+        label = _disclosure_label(head)
+        if len(label) < 4:
+            continue
+        entries.append({
+            "label": label, "value": found.group("value"), "unit": found.group("unit"),
+            "period": "", "raw": found.group(0)[:120], "status": "needs_review",
+        })
+    return entries
+
+
+def _quote_coverage_facts(flat: str) -> list[dict]:
+    """⑩-② 占比句："占总资产（扣除代理买卖证券款）的比重达73.55%"（2026-10-16 中邮 cashflow #20）。
+
+    与 `chapter_guard._coverage_phrase_labels` 同形（"占…的(比重|比例|占比)"），
+    正文与记录两侧用同一短语，归属不依赖"比例"类名词后缀。
+    """
+    entries: list[dict] = []
+    for found in _COVERAGE_VALUE_RE.finditer(flat):
+        # **保留括号口径**（不做 `_disclosure_label` 的括号剥离）：正文写的是
+        # "占总资产（扣除代理买卖证券款）的比重"，记录若存成"占总资产的比重"，
+        # 两侧包含判定会因括号插入而失配（中邮 cashflow #20 实测）。
+        label = re.sub(r"[\s\u3000]+", "", str(found.group("label") or ""))
+        if len(label) < 4:
+            continue
+        # 单值句的值后面紧跟枚举续项（"…的比例为10.11%、19.26%和14.76%"）时它是系列句
+        # 首项，交 ④ 处理——否则同一句会多出一条 ⑩ 记录（既有系列测试实测）。
+        if _SERIES_CONTINUATION_RE.match(flat[found.end():]):
+            continue
+        unit = "％" if found.group("unit") == "％" else "%"
+        entries.append({
+            "label": label, "value": found.group("value"), "unit": unit,
+            "period": "", "raw": found.group(0)[:120], "status": "needs_review",
+        })
+    return entries
+
+
 def _quote_space_rows(quote: str) -> list[dict]:
     """⑥ "科目 值1 值2 值3" 空格分列表格行（2026-10-16 复验新增）。
 
@@ -797,6 +865,11 @@ def _disclosure_records(evidence) -> list[dict]:
         # 华辰 debt #10 实测）。
         entries.extend(_quote_comparison_back_facts(flat))
         entries.extend(_quote_semicolon_series(flat))
+        # 2026-10-16 第四轮试跑复核新增：⑩-① 汇总句（"…资产，合计达X亿元"）与
+        # ⑩-② 占比句（"占…的比重达X%"）——中邮 cashflow #20 的 169.02 亿元 / 73.55%
+        # 在材料里（p23/p122/p133）却因连接词位不含标点、科目是"占…的比重"整段而漏抽。
+        entries.extend(_quote_aggregate_facts(flat))
+        entries.extend(_quote_coverage_facts(flat))
         for entry in entries:
             label = str(entry.get("label") or "").strip()
             if not label:
@@ -818,6 +891,75 @@ def _disclosure_records(evidence) -> list[dict]:
             if record["value"] == "":
                 continue
             records.append(record)
+    return records
+
+
+def build_calculation_records(verdicts, calculations, *, section_key: str,
+                             frozen_records=()) -> list[dict]:
+    """把**复算通过**的模型计算装配成 `calculation` 记录（方案 §三.2）。
+
+    三条硬规则：
+
+    1. **`value` 用系统复算值 `computed`，不是模型声明值**——声明值只进 `raw`/`extra.declared`。
+       若用声明值，一个算错的数会以"已冻结记录"的身份进入正文的数字允许集，
+       等于自己给自己背书；
+    2. `source_ids` / `locator` / `page` / `profile_snapshot_id` **从输入记录汇总**：
+       计算不直连 PDF 页，只能靠输入链追溯；且只有"全部输入一致"时才复制定位，
+       否则会给出错误的归属；
+    3. `rejected` 不落记录（被否决的计算不得为正文任何数字背书）。
+    """
+    by_id = {str(item.get("record_id")): item for item in (frozen_records or [])}
+    records: list[dict] = []
+    for verdict, calc in zip(verdicts or [], calculations or []):
+        status = str(verdict.get("status") or "")
+        if status not in {"verified", "needs_review"}:
+            continue
+        input_ids = [str(item) for item in (calc.get("input_record_ids") or []) if str(item).strip()]
+        inputs = [by_id[item] for item in input_ids if item in by_id]
+        source_ids: list[str] = []
+        for item in inputs:
+            for source_id in item.get("source_ids") or []:
+                if source_id and str(source_id) not in source_ids:
+                    source_ids.append(str(source_id))
+
+        def _unanimous(key: str):
+            """全部输入在某一字段上一致时返回该值，否则 None（避免给出错误归属）。"""
+            values = {str(item.get(key)) for item in inputs if item.get(key)}
+            return values.pop() if len(values) == 1 else None
+
+        page = _unanimous("page")
+        records.append(_record(
+            record_id=f"calc:{section_key}:{calc.get('calculation_id') or ''}",
+            record_type="calculation",
+            # ⚠️ 复算值，不是声明值
+            value=verdict.get("computed"),
+            unit=str(calc.get("unit") or ""),
+            raw=str(calc.get("value") or ""),
+            label=str(calc.get("name") or "").strip(),
+            period=str(calc.get("period") or "") or (_unanimous("period") or ""),
+            subject=str(calc.get("subject") or "") or (_unanimous("subject") or ""),
+            scope=str(calc.get("scope") or "") or (_unanimous("scope") or ""),
+            source_ids=source_ids,
+            page=page,
+            locator=dict(inputs[0].get("locator") or {}) if inputs and _unanimous("page") else None,
+            source_fact_ids=input_ids,
+            formula=str(calc.get("formula") or ""),
+            # verified → derived（与 metric/rule 同一语义：系统派生）；待核验保持 needs_review
+            status="derived" if status == "verified" else "needs_review",
+            origin_type="model_calculation",
+            rule_version=str((verdict.get("rule_version") or "calculations-v1")),
+            extra={
+                "calculation_id": str(calc.get("calculation_id") or ""),
+                "definition": str(calc.get("definition") or ""),
+                "precision": calc.get("precision"),
+                "cross_period_reason": str(calc.get("cross_period_reason") or ""),
+                "declared": str(calc.get("value") or ""),
+                "computed": str(verdict.get("computed") or ""),
+                "reason_code": str(verdict.get("reason_code") or ""),
+                "content_anchor": str(calc.get("content_anchor") or ""),
+                "input_record_ids": input_ids,
+            },
+        ))
     return records
 
 

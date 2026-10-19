@@ -32,7 +32,7 @@ FACT_REGISTRY: dict[str, FactDefinition] = {
     "operating_inflow": FactDefinition("经营性流入", "流水", ("银行经营性流入", "银行经营流入", "经营性流入", "经营流入", "销售回款")),
     "operating_outflow": FactDefinition("经营性流出", "流水", ("银行经营性流出", "经营性流出", "采购付款")),
     "net_profit": FactDefinition("净利润", "财务", ("净利润",)),
-    "operating_cash_flow": FactDefinition("经营现金流净额", "财务", ("经营活动现金流量净额", "经营活动现金流净额", "经营现金流净额", "经营现金流")),
+    "operating_cash_flow": FactDefinition("经营现金流净额", "财务", ("经营活动现金流量净额", "经营活动产生的现金流量净额", "经营活动现金流净额", "经营现金流净额", "经营现金流")),
     "accounts_receivable": FactDefinition("应收账款", "财务", ("应收账款余额", "应收账款", "应收")),
     "inventory": FactDefinition("存货", "财务", ("存货余额", "存货")),
     "prepayments": FactDefinition("预付款项", "财务", ("预付款项", "预付账款")),

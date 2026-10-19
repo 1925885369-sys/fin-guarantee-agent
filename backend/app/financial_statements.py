@@ -30,7 +30,7 @@
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -40,8 +40,15 @@ def _d(value: Decimal | int | str) -> Decimal:
 
 
 def _q(value: Decimal | int | str) -> Decimal:
-    """量化到整数万元，与旧实现保持同一舍入方式。"""
-    return Decimal(str(value)).quantize(Decimal("1"))
+    """量化到整数万元，与旧实现保持同一舍入方式。
+
+    与 `chapter_guard._round_half_up` 同样的坑：未捕获的 `InvalidOperation` 会让整章
+    以"模型调用失败"回退，而真正原因是数值精度，不是模型。这里同样兜住。
+    """
+    try:
+        return Decimal(str(value)).quantize(Decimal("1"))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
 
 
 YEAR_SCALES = ((2023, _d("0.82")), (2024, _d("0.91")), (2025, _d("1")))

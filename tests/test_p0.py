@@ -482,3 +482,47 @@ def test_gap_and_declaration_forms_do_not_trip_support_check():
     # 反例⑤：会计处理事实句（"计提"不豁免）仍判缺记录。
     status5, reason5, _ = outcome("公司未对其他应收款计提坏账准备。")
     assert status5 == "unsupported" and reason5 == "missing_record", (status5, reason5)
+
+
+def test_boundary_declaration_and_horizon_window_are_not_fact_claims():
+    """边界声明新形态与"未来N个月"核验建议句（2026-10-16 第四轮试跑实测）。
+
+    正例：
+      ① "本章未对发行人偿债能力作出任何倾向性判断，亦未就…形成意见"（中邮 financial #32）；
+      ② "…未对债券评级、担保额度、担保费率或任何承保倾向发表意见"（cashflow #34）；
+      ③ "就核验动作而言，建议…核对未来12个月到期债务规模…"（financial #28）——判 requirement。
+    负例：
+      ④ 正面判断句"本章对发行人偿债能力作出判断"不得被声明正则命中；
+      ⑤ "未来12个月到期债务为500万元"仍按数字事实判定（窗口词只剔除通用时间窗）。
+    """
+    from backend.app.p0 import (
+        NON_FACTUAL_CLAIM_TYPES, _CLAIM_DECLARATION_RE, _claim_support_outcome, _claim_type,
+    )
+
+    records = [{"record_type": "fact"}]
+
+    def outcome(claim: str, key: str = "financial"):
+        ctype = _claim_type(claim)
+        return ctype, _claim_support_outcome(
+            "", key, claim, ctype, ["s-1"], {"s-1": "任意文本"}, records, "model")[:2]
+
+    boundary = ("需要明确的是，本章未对发行人偿债能力作出任何倾向性判断，"
+                "亦未就债券评级、担保额度或担保费率形成意见。")
+    ctype, (status, reason) = outcome(boundary)
+    assert status != "unsupported", (ctype, status, reason)
+
+    boundary2 = ("审查边界上，本章仅就募集说明书披露的偿债来源安排、三个完整年度的历史现金流数据及"
+                 "既有风险提示作出分析，未对债券评级、担保额度、担保费率或任何承保倾向发表意见。")
+    ctype, (status, reason) = outcome(boundary2, "cashflow")
+    assert status != "unsupported", (ctype, status, reason)
+
+    requirement = ("就核验动作而言，建议取得发行人经审计的2023—2025年度财务报表原件，核对合并资产负债表、"
+                   "合并利润表与合并现金流量表之间的勾稽关系；取得有息负债到期分布台账，核对未来12个月"
+                   "到期债务规模；就应收款项账龄结构与主要欠款方向发行人函证或取得明细表。")
+    ctype, _ = outcome(requirement)
+    assert ctype in NON_FACTUAL_CLAIM_TYPES and ctype == "requirement", ctype
+
+    # 反例④：正面判断句不得命中声明正则。
+    assert _CLAIM_DECLARATION_RE.search("本章对发行人偿债能力作出判断。") is None
+    # 反例⑤：带业务数值的"未来12个月"句仍判数字事实。
+    assert _claim_type("公司未来12个月到期债务为500万元。") == "numeric_fact"

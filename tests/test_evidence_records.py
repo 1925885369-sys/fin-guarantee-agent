@@ -905,3 +905,30 @@ def test_disclosure_named_fact_accepts_zhanbi_single_value():
     ratio = [item for item in records if item["value"] == "81.61" and item["unit"] == "%"]
     assert ratio, "单值占比句未落记录"
     assert "占比" in ratio[0]["label"]
+
+
+def test_disclosure_aggregate_and_coverage_value_forms():
+    """⑩-① 汇总句与 ⑩-② 占比句落记录（2026-10-16 中邮 cashflow #20 实测）。
+
+    正例（材料 p23/p122/p133 原文）：
+      "…金融投资等高流动性资产，合计达169.02亿元"（科目与"合计"之间夹逗号，③ 漏抽）；
+      "占总资产（扣除代理买卖证券款）的比重达73.55%"（"占…的比重"整段是科目）。
+    负例：无科目（"合计达100万元"）或科目过短（"该公司合计达100万元"）不登记。
+    """
+    from backend.app.evidence_records import build_evidence_records
+
+    quote = ("截至2025 年末，公司货币资金（扣除客户资金存款）、结算备付金（扣除客户备付金）、"
+             "金融投资等高流动性资产，合计达169.02 亿元，占总资产（扣除代理买卖证券款）的"
+             "比重达73.55%。")
+    records = build_evidence_records(evidence=[{"quote": quote, "source_id": "s-1"}])
+    labels = {item["label"]: item for item in records}
+    assert labels.get("金融投资等高流动性资产", {}).get("value") == "169.02"
+    assert labels.get("金融投资等高流动性资产", {}).get("unit") == "亿元"
+    assert labels.get("占总资产（扣除代理买卖证券款）的比重", {}).get("value") == "73.55"
+    assert labels["占总资产（扣除代理买卖证券款）的比重"]["unit"] == "%"
+    # 负例①：没有科目短语的裸汇总值不登记。
+    bare = build_evidence_records(evidence=[{"quote": "合计达100万元。", "source_id": "s-1"}])
+    assert not [item for item in bare if item["value"] == "100"]
+    # 负例②：科目短语 <4 字不登记（避免"该公司"类指代被当成科目）。
+    short = build_evidence_records(evidence=[{"quote": "该公司合计达100万元。", "source_id": "s-1"}])
+    assert not [item for item in short if item["value"] == "100"]

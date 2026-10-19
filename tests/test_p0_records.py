@@ -134,7 +134,12 @@ def test_number_bound_to_same_frozen_record_with_matching_context_is_supported()
 
 
 def test_number_only_in_page_text_not_in_frozen_records_is_unsupported():
-    """负例：数字只在页面原文（evidence_text）里、不在冻结记录里 → unsupported，禁用整页数值池。"""
+    """负例：数字只在页面原文、不在冻结记录里 → **不得放行**（禁用整页数值池）。
+
+    2026-10-17 口径调整（《风控约束分层》§二 line 23）：这类数字不再直接判 `unsupported`
+    （读起来像"模型编造"），而是**补建 `needs_review` 的 disclosure 记录**降为待核验。
+    硬度不变——`supported_claims` 仍是 0、仍计入未决、仍阻断最终交付；变的是归因。
+    """
     project_id = _project()
     try:
         citation = _fixture(project_id, "2025年营业收入100万元，净利润10万元。")
@@ -143,8 +148,12 @@ def test_number_only_in_page_text_not_in_frozen_records_is_unsupported():
             _record("营业收入", "2025", "200"),
         ])
         valid = validate_report_support(project_id)
-        assert valid["unsupported_claims"] == 1 and valid["supported_claims"] == 0
-        assert _find(_status(project_id, section_id), "营业收入为100万元") == "unsupported"
+        # 关键不变量：**不放行**——既不 supported，也不进 supported_claims。
+        assert valid["supported_claims"] == 0
+        assert _find(_status(project_id, section_id), "营业收入为100万元") == "needs_review"
+        assert valid["needs_review_claims"] == 1
+        # 补建记录（可追溯，但仍是 needs_review）
+        assert valid["backfilled_records"] == 1
         assert report_quality(project_id)["status"] == "warning"
     finally:
         _cleanup(project_id)
@@ -289,5 +298,42 @@ def test_needs_review_status_is_persisted_in_report_claims():
             (project_id,),
         )
         assert len(stored) == 1
+    finally:
+        _cleanup(project_id)
+
+
+def test_registered_label_in_other_wording_with_citation_is_needs_review():
+    """科目写法与登记名不同、但句子带合法引用 → **待核验**，不判"无证据"。
+
+    2026-10-17 北投 cashflow 实测：模型写"经营现金流净额"、材料写"经营活动产生的现金流量净额"，
+    逐字比对落空被判 `missing_record`，整章被回退 —— 属正确披露被误退。
+    这类差异只降为未决（仍计入未决、仍阻断最终交付），不再把整章打回模板。
+    """
+    project_id = _project()
+    try:
+        # 证据里刻意不出现任何登记别名
+        citation = _fixture(project_id, "本期经营活动现金流入较大，投资活动净流出规模扩大。")
+        section_id = _section(project_id, "经营现金流净额较上年增加（E01）。", citation, [
+            _record("营业收入", "2025", "200"),
+        ])
+        valid = validate_report_support(project_id)
+        assert _find(_status(project_id, section_id), "经营现金流净额较上年增加") == "needs_review"
+        assert valid["unsupported_claims"] == 0
+        assert valid["needs_review_claims"] == 1
+    finally:
+        _cleanup(project_id)
+
+
+def test_registered_label_missing_without_citation_still_unsupported():
+    """同一句话**没有引用** → 仍是无支持（"凭空写材料里没有的科目"必须硬拦）。"""
+    project_id = _project()
+    try:
+        citation = _fixture(project_id, "本期经营活动现金流入较大，投资活动净流出规模扩大。")
+        section_id = _section(project_id, "经营现金流净额较上年增加。", citation, [
+            _record("营业收入", "2025", "200"),
+        ])
+        valid = validate_report_support(project_id)
+        assert _find(_status(project_id, section_id), "经营现金流净额较上年增加") == "unsupported"
+        assert valid["unsupported_claims"] == 1
     finally:
         _cleanup(project_id)

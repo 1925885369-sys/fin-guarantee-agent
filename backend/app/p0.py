@@ -59,7 +59,21 @@ _GAP_EDGE_RE = re.compile(
 _CLAIM_DECLARATION_RE = re.compile(
     r"未对[^。；]{0,60}(?:进行|作出)(?:自行)?(?:计算|换算|勾稽)"
     r"|不对[^。；]{0,30}作出(?:确定性|结论性)?(?:结论|判断)"
+    # 2026-10-16 第四轮试跑复核：边界声明补"未对/未就 + 作出/形成/发表/提出 +
+    # （任何|倾向性|确定性…）+ 判断/结论/意见"（中邮 financial #32"未对…作出任何
+    # 倾向性判断，亦未就…形成意见"、cashflow #34"未对…发表意见"）。**必须带否定前缀**
+    # （未/不），正面表述"对…作出判断"不受影响；带数字的句子仍走数字判定，
+    # 本正则只跳过科目存在性闸门。
+    r"|(?:未对|未就|不对|不就)[^。；]{0,50}(?:作出|形成|发表|提出)"
+    r"(?:任何|相关|倾向性|确定性|结论性|明确的?)*(?:判断|结论|意见|评价|评论|倾向)"
 )
+
+# 通用时间窗口（"未来12个月""未来3年"）不是业务数值：核验动作/建议句里出现它，
+# 不应把句子从 requirement 拉回数字分支（中邮 financial #28"核对未来12个月到期债务规模"
+# 实测：仅因"12"被读成业务数值，整句建议清单落进 risk_judgment 并撞科目存在性闸门）。
+# 只在本判定（`_claim_type` 的"是否含可核验数值"）里剔除；数字判定链（`_number_mentions`）
+# 不受影响——"未来12个月到期债务为500万元"仍会核对 500。
+_HORIZON_WINDOW_RE = re.compile(r"未来\s*\d{1,3}\s*个?月|未来\s*\d{1,2}\s*年")
 
 POINT_IN_TIME_KEYS = {
     "accounts_receivable", "inventory", "prepayments", "other_receivables", "cash", "fixed_assets",
@@ -349,7 +363,7 @@ def _claim_type(text: str) -> str:
     事实放过去。原实现把边界词无条件判成 narrative，等于让带数值的边界句逃过核验，
     这里一并收紧。
     """
-    if not _numbers(text):
+    if not _numbers(_HORIZON_WINDOW_RE.sub("", text)):
         if any(phrase in text for phrase in _BOUNDARY_PHRASES):
             return "boundary"
         if _REQUIREMENT_RE.search(text):
@@ -636,10 +650,101 @@ def _label_present_in_sources(names, evidence_lookup: str, evidence_labels: set,
     return False
 
 
+# ------------------------------------------------------- 引文已有数字的补建记录 --
+# 方案 §二 line 23：「引文已有数字但尚未建记录时，先补建可追溯记录，不能直接认定模型捏造」。
+#
+# ⚠️ 落点在**支持层**，不在章节校验：章节校验的数字允许集第一项就是 evidence 的 quotes
+# （`chapter_guard._allowed_texts`），这类数字根本进不了 `unexpected_numbers`；真正把它
+# 判成"编造"的是后置支持层的 `missing_record`（无冻结记录可核对 → 计无证据声明）。
+_BACKFILL_COMPACT_RE = re.compile(r"[\s\u3000,，]")
+
+
+def _locate_mention_in_sources(mention: dict, source_ids: list[str],
+                               source_texts: dict[str, str]) -> str:
+    """数字是否**逐字**出现在本章已实际发送的原文里；返回命中的 source_id（空=没找到）。
+
+    比较前去掉空白与千分位：引文与页文本是 PDF 回流（"169.02 亿元"可能被空格/换行拆开）。
+    只做检索，不改写任何文本。
+    """
+    raw = str(mention.get("raw") or "").strip()
+    if not raw:
+        return ""
+    target = _BACKFILL_COMPACT_RE.sub("", _lookup_normalize(raw))
+    if not target:
+        return ""
+    for source_id in source_ids or []:
+        text = str(source_texts.get(source_id) or "")
+        if not text:
+            continue
+        if target in _BACKFILL_COMPACT_RE.sub("", _lookup_normalize(text)):
+            return str(source_id)
+    return ""
+
+
+def _backfill_disclosure_records(section_key: str, claim: str, mentions: list[dict],
+                                 source_ids: list[str],
+                                 source_texts: dict[str, str],
+                                 records: list[dict] | None = None) -> list[dict]:
+    """为"引文里有、记录里没有"的数字补建 `disclosure` 记录。
+
+    三条自我约束（否则补建会变成"给所有找不到的数字开后门"）：
+
+    1. **必须逐字命中**本章已发送原文，且每个数字都要命中——有一个没命中就整句不补建；
+    2. 状态一律 `needs_review`：补建只把"疑似捏造"降为"待核验"，**不升为可支持**，
+       所以它仍然计入未决项、仍然阻断最终交付；
+    3. `origin_type="citation_backfill"` + `extra.backfilled_from_citation=True`：
+       验收时能单独统计"有多少数字是靠补建救回来的"，而不是混进正常记录。
+    """
+    from .evidence_records import _record
+
+    # 已被冻结记录接住的数字**不需要**再证明它在原文里：它已经有据可查
+    # （2026-10-18 北投 financial 实测：`3,689,393.72万元` 来自系统表格、原文是
+    # 另一写法，要求它逐字命中会让整句放弃补建，而同句的 `368.48亿元` 本可补建）。
+    covered = {
+        str(record.get("value")).replace(",", "").strip()
+        for record in (records or [])
+        if str(record.get("value") or "").strip()
+    }
+    located: list[tuple[dict, str]] = []
+    for mention in mentions:
+        if str(mention.get("normalized_value") or "") in covered:
+            continue
+        source_id = _locate_mention_in_sources(mention, source_ids, source_texts)
+        if not source_id:
+            return []
+        located.append((mention, source_id))
+
+    records: list[dict] = []
+    for mention, source_id in located:
+        value = str(mention.get("normalized_value") or "")
+        unit = str(mention.get("normalized_unit") or "")
+        digest = hashlib.sha1(
+            f"{section_key}|{source_id}|{value}|{unit}".encode("utf-8")
+        ).hexdigest()[:16]
+        records.append(_record(
+            record_id=f"disclosure:backfill:{digest}",
+            record_type="disclosure",
+            value=value,
+            unit=unit,
+            raw=str(mention.get("raw") or ""),
+            # 补建记录**不带科目/期间/主体**：原文里能看到数字不等于是这个科目的值，
+            # 填了反而会给出错误的归属（正是"字段歧义"该由人工裁的地方）。
+            status="needs_review",
+            source_ids=[source_id],
+            origin_type="citation_backfill",
+            extra={
+                "backfilled_from_citation": True,
+                "claim_excerpt": (claim or "")[:120],
+            },
+        ))
+    return records
+
+
 def _claim_support_outcome(
     project_id: str, section_key: str, claim: str, claim_type: str,
     source_ids: list[str], source_texts: dict[str, str],
     records: list[dict] | None = None, content_origin: str = "",
+    supplemental: list[dict] | None = None,
 ) -> tuple[str, str, list[str]]:
     """单条主张的**支持状态 + 失败原因码 + 匹配记录**（收口方案 §三）。
 
@@ -726,12 +831,34 @@ def _claim_support_outcome(
         for names in claim_labels
     ):
         # 科目在证据与记录里都查无 → 缺记录（不是"数字错"，是"记录没建/没进证据"）。
+        #
+        # 但要区分两种情况（2026-10-17 北投 cashflow 实测）：
+        # - 句子**带合法引用**：多半是写法差异——模型写"经营现金流净额"，材料写
+        #   "经营活动产生的现金流量净额"，登记名逐字比对必然落空。此时降为待核验：
+        #   仍计入未决、仍阻断最终交付，但不再当成"无证据声明"把整章打回模板
+        #   （两章因此回退，属正确披露被误退）；
+        # - 句子没有引用：维持无支持（"凭空写了个材料里没有的科目"必须硬拦）。
+        from .chapter_guard import CITATION_ALIAS_RE
+
+        if CITATION_ALIAS_RE.search(claim):
+            return "needs_review", "label_variant_unverified", []
         return "unsupported", "missing_record", []
     mentions = _number_mentions(claim)
     if mentions:
         # 确定性内容**带数字**时仍按业务事实校验（方案 §一"带数字的…仍按业务事实校验"）；
         # 数字无对账输入的问题由来源空分支与 SYSTEM_SECTIONS 两道口径处理，不在此放宽。
-        return _numeric_binding_outcome(project_id, records or [], claim, mentions, claim_type)
+        outcome = _numeric_binding_outcome(project_id, records or [], claim, mentions, claim_type)
+        if outcome[1] == "missing_record":
+            # 方案 §二 line 23：材料里明明写着、只是没抽成记录 —— 先补建可追溯记录，
+            # 不能直接当"捏造"。补建只降到待核验（仍阻断最终交付），不放宽为可支持。
+            backfilled = _backfill_disclosure_records(
+                section_key, claim, mentions, source_ids, source_texts, records)
+            if backfilled:
+                if supplemental is not None:
+                    supplemental.extend(backfilled)
+                return "needs_review", "quote_number_without_record", [
+                    str(item["record_id"]) for item in backfilled]
+        return outcome
     if claim_type == "risk_judgment":
         return "derived", "", []
     return "direct", "", []
@@ -788,6 +915,9 @@ def assess_section_claims(project_id: str, section: dict, citation_map: dict,
         if block and block in content:
             content = content.replace(block, "")
     claims, factual, supported, needs_review = [], 0, 0, 0
+    # 方案 §二 line 23：本句"引文有、记录无"的数字补建记录（纯计算，**不写库**——
+    # 本函数要保持可在内存里对比原正文与候选稿）。
+    supplemental_records: list[dict] = []
     # **统一冻结记录**（fact/table/metric/rule）是该章数字支持的唯一来源（第三点细化方案
     # §二.2 + 三项遗留修复方案 §一）：只读这一份冻结输入，不重取页面数值池；旧章节
     # 兼容迁移，缺记录标 legacy_unfrozen。
@@ -810,7 +940,7 @@ def assess_section_claims(project_id: str, section: dict, citation_map: dict,
             factual += 1
             status, reason_code, matched_record_ids = _claim_support_outcome(
                 project_id, section["section_key"], claim, claim_type, source_ids, source_texts,
-                records, content_origin,
+                records, content_origin, supplemental=supplemental_records,
             )
             if status in SUPPORTED_STATUSES:
                 supported += 1
@@ -852,7 +982,31 @@ def assess_section_claims(project_id: str, section: dict, citation_map: dict,
         # 三项遗留修复方案 §一：记录规模与版本随评估结果输出（接口/验收可见）。
         "evidence_record_count": len(records),
         "support_record_version": record_version,
+        # 待落库的补建记录（`disclosure`/`needs_review`）；由 `validate_report_support`
+        # 与章节记录合并后写回，接口/导出据此显示"已补建但待核验"。
+        "supplemental_records": supplemental_records,
     }
+
+
+def _merge_supplemental_records(project_id: str, conn, section: dict,
+                                records: list[dict]) -> int:
+    """把补建记录并入该章已冻结记录（按 `record_id` **幂等**，重复运行不叠加）。
+
+    写回 `evidence_records_json` 而不是另开存储：补建记录与其它记录必须走**同一套**
+    允许集/绑定/支持判定，分表存会让后置复查读不到它、下次又判一次 `missing_record`。
+    `input_hash` 不变——它是模型输入侧的摘要，补建属于**输出后的证据补齐**，
+    与已冻结的计算记录同理。
+    """
+    existing, _ = _frozen_evidence_records(project_id, section)
+    known = {str(item.get("record_id")) for item in existing if item.get("record_id")}
+    fresh = [item for item in records if str(item.get("record_id") or "") not in known]
+    if not fresh:
+        return 0
+    conn.execute(
+        "UPDATE report_sections SET evidence_records_json=? WHERE id=?",
+        (json_dump([*existing, *fresh]), section["id"]),
+    )
+    return len(fresh)
 
 
 def validate_report_support(project_id: str) -> dict:
@@ -864,6 +1018,7 @@ def validate_report_support(project_id: str) -> dict:
     total_factual = total_supported = invalid_citations = 0
     total_needs_review = 0
     disclosure_missing = needs_review_sections = 0
+    backfilled_records = 0
     needs_review_items: list[dict] = []
     with connect() as conn:
         conn.execute("DELETE FROM report_claims WHERE project_id=?", (project_id,))
@@ -873,6 +1028,11 @@ def validate_report_support(project_id: str) -> dict:
             total_supported += assessment["supported"]
             total_needs_review += assessment["needs_review_claims"]
             invalid_citations += assessment["invalid_citations"]
+            # 引文有数字但没建记录 → 补建 `needs_review` 记录并写回本章记录集
+            # （方案 §二 line 23：不直接认定模型捏造，但也**不**升为可支持）。
+            if assessment["supplemental_records"]:
+                backfilled_records += _merge_supplemental_records(
+                    project_id, conn, section, assessment["supplemental_records"])
             for item in assessment["needs_review_claim_items"]:
                 needs_review_items.append({
                     "section_id": section["id"], "section_key": section["section_key"], **item,
@@ -919,6 +1079,8 @@ def validate_report_support(project_id: str) -> dict:
         "needs_review_claim_items": needs_review_items,
         "support_rate": round(total_supported / total_factual, 4) if total_factual else 1.0,
         "invalid_citations": invalid_citations,
+        # 补建记录数（验收口径：「有多少数字是靠补建从疑似捏造降为待核验的」）。
+        "backfilled_records": backfilled_records,
         "disclosure_missing_sections": disclosure_missing,
         "needs_review_sections": needs_review_sections,
         "status": (
@@ -1094,6 +1256,15 @@ def report_quality(project_id: str) -> dict:
         for status in ("passed", "warning", "insufficient")
     }
     quality["entities"] = row("SELECT COUNT(*) count FROM project_entities WHERE project_id=?", (project_id,))["count"]
+    # 方案 §二 line 23 的验收口径：有多少个数字是靠"引文补建记录"从疑似捏造降为待核验的。
+    # 单独统计而不是混进记录总数——否则无法回答"补建到底救回了多少"，也无法发现补建过滥。
+    quality["backfilled_records"] = sum(
+        1
+        for section in rows("SELECT evidence_records_json FROM report_sections WHERE project_id=?",
+                            (project_id,))
+        for record in json_load(section.get("evidence_records_json") or "[]")
+        if isinstance(record, dict) and record.get("origin_type") == "citation_backfill"
+    )
     # 交付一致性统计：独立于支持率，专门暴露"模型被采用/被回退/待人工复核/披露缺失/
     # 正文与校验哈希不一致"。旧指标里这些问题会被"支持率 100%"掩盖。
     from .chapter_prompts import chapter_uses_llm
