@@ -44,7 +44,6 @@ replay/
 scripts/_debug_*.py
 scripts/_replay_*.py
 scripts/replay_*.py
-scripts/stage6_acceptance.py
 scripts/stage3_table_checks.py
 *.pem
 *.key
