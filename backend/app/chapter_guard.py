@@ -748,18 +748,33 @@ def _labels_compatible(written_label: str, record_label: str) -> bool:
     return bool(written_category) and written_category == record_category
 
 
+# 主体名尾部的括注（"华东汽车集团股份有限公司（虚构）"）不属于注册名本身。
+_ENTITY_TRAILING_PAREN_RE = re.compile(r"[（(][^（()）]*[)）]\s*$")
+
+
 def _party_compatible(written: str, subject: str, registry: dict[str, str] | None = None) -> bool:
-    """主体名兼容判定：**全等 / 包含 / 登记简称**三类（移除"共享后缀"放行）。
+    """主体名兼容判定：**全等 / 包含 / 尾部完整命中 / 登记简称**四类。
 
     修订稿 §3.1 要求移除"仅凭后缀相似就放行"：近名公司（华辰新能源 vs 华辰精密制造）
-    不再因为共享长后缀而被当作同一主体。保留的三种关系：
+    不再因为共享长后缀而被当作同一主体。保留的四种关系：
       ① 全等；② 任一方包含另一方（覆盖 ENTITY_RE 吃进上下文头部的情形）；
-      ③ 通过项目主体登记表（规范名称 + 登记简称）解析到同一主体。
+      ③ **尾部完整命中**（见下，只用来消化窗口截断，不是通用后缀放行）；
+      ④ 通过项目主体登记表（规范名称 + 登记简称）解析到同一主体。
     任一侧缺失时按兼容处理（不判定）。
+
+    ③ 的必要性：16 字归属窗口会把长主体名**截头**——华辰 financial 实测，正文
+    "其中关联方华东汽车集团股份有限公司（虚构）余额1,921万元"提取出
+    "联方华东汽车集团股份有限公司"，与记录标签"华东汽车集团股份有限公司（虚构）"
+    两边互不包含，1,921 万元（完全正确）被判 party_mismatch。判据是**整个规范名**
+    （去尾括号后 ≥8 字）出现在 written 末尾，因此"华辰新能源有限公司"仍不能靠
+    "有限公司"蒙混过关。
     """
     if not written or not subject:
         return True
     if written == subject or written in subject or subject in written:
+        return True
+    core = _ENTITY_TRAILING_PAREN_RE.sub("", subject or "").strip()
+    if len(core) >= 8 and written.endswith(core):
         return True
     if registry:
         resolved = registry.get(written)
