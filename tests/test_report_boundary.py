@@ -31,17 +31,31 @@ def test_disclosure_wording_around_forbidden_word_is_allowed():
 
 
 def test_our_own_guarantee_conclusion_is_still_blocked():
-    """我方做出的承保结论 → 必须拦截（负例，防止放宽过头）。"""
+    """我方**已作出**的承保结论 → 必须拦截（负例，防止放宽过头）。
+
+    ⚠️ "建议提供担保/建议拒绝担保"是**建议**（《风控约束分层》§一 允许承保、拒保建议），
+    已从禁止表移除，属下方 `test_underwriting_recommendations_are_allowed` 的正例。
+    """
     for content in (
-        "建议提供担保",
         "同意担保该笔业务",
         "本所同意担保本次发行",
         "审批通过本期债券",
         "核定担保额度为5亿元",
-        "建议拒绝担保",
         "审批倾向为通过",
     ):
         assert _report_boundary_safe(content) is False, content
+
+
+def test_underwriting_recommendations_are_allowed():
+    """方案 §一：允许承保、拒保、额度与费率**建议**——只是提议，须人工复核。"""
+    for content in (
+        "建议提供担保",
+        "建议拒绝担保",
+        "建议通过担保，待人工复核",
+        "建议核定担保额度为5亿元（提议）",
+        "建议担保费率为1.2%，需复核",
+    ):
+        assert _report_boundary_safe(content) is True, content
 
 
 def test_material_shortage_statement_is_allowed():

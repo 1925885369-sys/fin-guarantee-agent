@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,8 @@ from pathlib import Path
 from .database import connect, execute, json_dump, json_load, now_iso, row, rows
 from .bond_tranches import extract_bond_tranches, tranches_input_hash_component
 from .bond_sections import build_section_extraction_plans, contract_sha256, load_extraction_contract, offering_term_sources
+from . import chapter_calculations
+from . import recommendations as recommendation_rules
 from .chapter_prompts import chapter_uses_llm, load_chapter_config
 from .chapter_guard import (
     assess_chapter_length, build_chapter_context, fallback_reason_code, validate_chapter_output,
@@ -933,6 +936,9 @@ def _add_usage(total: LlmUsage, current: LlmUsage) -> None:
     total.output_tokens += current.output_tokens
     total.latency_ms += current.latency_ms
     total.cost += current.cost
+    # 与 `input_tokens` **同口径累加**：重试时两者一起翻倍，`字符/token` 比保持不变。
+    # 漏掉这一行，接口与台账里的 `input_chars` 永远是 0（2026-10-18 实测）。
+    total.input_chars += current.input_chars
 
 
 def _reject_last_llm_attempt(run_id: str, node_key: str, error_type: str, message: str) -> None:
@@ -968,16 +974,19 @@ def _citations(project_id: str, source_ids: list[str]) -> list[str]:
 
 def _limit_chapter_citations(citation_ids: list[str], context: dict | None = None,
                              chapter_key: str | None = None) -> list[str]:
-    """Keep report citations concise without restricting the evidence visible to the model.
+    """规整章节引用：只保留**允许集合内**的、按模型顺序去重。
 
-    ``allowed_citation_ids`` preserves the deterministic evidence ranking from the
-    chapter context.  It is deliberately used only as a fallback: when the model
-    returns valid references, its ordering remains visible in the final report.
+    ⚠️ 函数名保留（调用方与测试沿用），但它**不再截断，也不再补足**：
+
+    - **不截断**：方案 §二「取消固定引用条数上限，允许引用本次实际提供的全部合法证据」。
+      旧实现在此按 `max_citations`（默认 3）截断，把模型合法引用的第 4 条起全部丢掉，
+      导致"论据不全"式的假象。
+    - **不补足**：旧实现还会把模型**没选**的允许引用追加到上限，等于服务端替模型
+      背书证据——报告引用了模型从未依据的来源。要"每个事实都有引用"，应让模型自己引，
+      或用既有的"章节未返回引用"硬失败暴露问题，而不是静默补。
+
+    `context`/`chapter_key` 参数保留仅为兼容既有调用签名。
     """
-    config = (context or {}).get("prompt_config") or load_chapter_config(chapter_key or "")
-    limit = int((config.get("output_contract") or {}).get("max_citations", 3))
-    if limit <= 0:
-        return []
     allowed_order = (
         list((context or {}).get("allowed_citation_ids") or [])
         if context is not None
@@ -988,10 +997,7 @@ def _limit_chapter_citations(citation_ids: list[str], context: dict | None = Non
     for citation_id in citation_ids:
         if citation_id in allowed and citation_id not in selected:
             selected.append(citation_id)
-    for citation_id in allowed_order:
-        if citation_id not in selected:
-            selected.append(citation_id)
-    return selected[:limit]
+    return selected
 
 
 def _source_ids(items: list[dict]) -> list[str]:
@@ -1096,8 +1102,10 @@ def _report_boundary_safe(content: str) -> bool:
     出现委托/决策方主语（建议/公司同意/本所/本报告…）才算决策结论；
     出现在"担保函/担保合同/条款/约定/视为/认购"这类**材料与条款语境**里则放行。
     """
+    # ⚠️ "建议提供/通过/暂缓/拒绝担保"已从禁止表移除：方案 §一 明确允许**承保、拒保建议**，
+    # 它们只是提议（须人工复核），不是既成决定。仍保留"同意/拒绝担保"等**冒充已决定**的表述。
     prohibited = (
-        "建议提供担保", "建议通过担保", "建议暂缓担保", "建议拒绝担保", "同意担保", "拒绝担保",
+        "同意担保", "拒绝担保",
         "审批通过", "核定担保额度", "核定担保费率", "审批倾向",
     )
     for item in prohibited:
@@ -1110,10 +1118,15 @@ def _report_boundary_safe(content: str) -> bool:
 
 
 # 我方做出决策时的主语/语境记号：与这些词同分句出现才算越权结论。
+# 我方**已作出**决策时的主语/语境记号。⚠️ 不含"建议/拟同意"——方案 §一 允许承保、拒保、
+# 额度与费率**建议**，它们只是提议；把它们算作决策主语会把合法建议判成越权结论。
 _BOUNDARY_DECISION_MARKERS = (
-    "建议", "本所", "本报告", "报告认为", "我们认为", "审核意见", "评审意见",
-    "同意以", "同意为", "决定", "决议", "批复", "拟同意",
+    "本所", "本报告", "报告认为", "我们认为", "审核意见", "评审意见",
+    "同意以", "同意为", "决定", "决议", "批复",
 )
+# 提议记号：与禁止词同分句出现时按"建议"处理，直接放行（不判越权结论）。
+# 只收**明确表示提议**的词（"倾向/主张"太宽："审批倾向为通过"是陈述审批进程）。
+_BOUNDARY_RECOMMENDATION_MARKERS = ("建议", "提议", "拟同意")
 # 材料与条款语境记号：出现在这些词附近说明是在复述原文/描述条款，不是我们的结论。
 _BOUNDARY_QUOTE_MARKERS = (
     "担保函", "保证合同", "担保合同", "担保协议", "条款", "约定", "视为",
@@ -1134,6 +1147,10 @@ def _boundary_hit_is_decision(content: str, index: int, item: str) -> bool:
     clause = content[start:end]
     # 引用/条款语境优先：材料里"视为同意担保函条款"不是我们的决策。
     if any(marker in clause for marker in _BOUNDARY_QUOTE_MARKERS):
+        return False
+    # 提议其次：与 `_decision_classification` 同序（引用 → 提议 → 决策），"建议同意担保"
+    # 是建议而非已同意。
+    if any(marker in clause for marker in _BOUNDARY_RECOMMENDATION_MARKERS):
         return False
     if any(marker in clause for marker in _BOUNDARY_DECISION_MARKERS):
         return True
@@ -1210,7 +1227,9 @@ def _apply_dropped_evidence(chapter_context: dict, drop_report: dict | None) -> 
 def repair_chapter_length(title: str, content: str, evidence: list[dict], *, chapter_key: str,
                           chapter_context: dict, call_context: LlmCallContext,
                           original_result: "LlmSection", original_validation: dict,
-                          drop_report: dict | None = None) -> tuple["LlmSection", dict, LlmUsage, str]:
+                          drop_report: dict | None = None,
+                          blocked_calculations: dict | None = None,
+                          first_round_calc: dict | None = None) -> tuple["LlmSection", dict, LlmUsage, str]:
     """篇幅超出目标上限时的一次定向压缩。完整生成与单章再生成共用这一份口径。
 
     返回 ``(采用的正文, 校验结果, 本次用量, 真实压缩响应)``：
@@ -1234,12 +1253,20 @@ def repair_chapter_length(title: str, content: str, evidence: list[dict], *, cha
     )
     # 压缩调用若又丢弃证据，先收窄上下文再重检——裁剪掉的证据不能为压缩稿背书。
     _apply_dropped_evidence(chapter_context, drop_report)
+    # 复算必须在**采纳判定之前**：本函数内部就调 `validate_chapter_output` 并立即决定
+    # 采用压缩稿还是回退原稿，挂到 workflow 收口处一律无效。
+    # `blocked_calculations` 是首稿被否决的计算签名：原样重发即判继承（方案 §三.3）。
+    calc_prep = chapter_calculations.prepare_candidate(
+        repaired, chapter_context, round_no=2, blocked=blocked_calculations)
+    chapter_calculations.apply_round(chapter_context, calc_prep)
     # 台账要存**模型原始压缩输出**；下面补边界块会改写 `repaired.content`，所以先留一份。
     repair_response = repaired.content
     # 先量"模型有没有漏掉来源边界块"，再补齐——补齐之后这个判断恒为真。
     attribution_restored = _attribution_block_missing(repaired.content, chapter_context)
     repaired.content = _preserve_chapter_boundaries(repaired.content, chapter_context)
     revalidation = validate_chapter_output(repaired.content, repaired.citation_ids, chapter_context)
+    # 修复稿的复算结论也要并入：只改正文不改计算 → 该计算仍按新候选被复算与判定。
+    revalidation = chapter_calculations.merge_validation(revalidation, calc_prep)
     revalidation["source_attribution_restored"] = attribution_restored
     if not _report_boundary_safe(repaired.content):
         revalidation["reasons"].append("章节包含禁止的承保或审批结论")
@@ -1247,6 +1274,9 @@ def repair_chapter_length(title: str, content: str, evidence: list[dict], *, cha
         revalidation["length_only_failure"] = False
     if revalidation["status"] == "passed":
         return repaired, revalidation, usage, repair_response
+    # 回退原稿：记录集必须切回第 1 轮，否则后续支持评估与写库会串用被拒稿的计算。
+    if first_round_calc is not None:
+        chapter_calculations.apply_round(chapter_context, first_round_calc)
     return original_result, {
         **original_validation,
         "length_repair_failed": True,
@@ -1257,7 +1287,9 @@ def repair_chapter_length(title: str, content: str, evidence: list[dict], *, cha
 def repair_chapter_safety(title: str, content: str, evidence: list[dict], *, chapter_key: str,
                           chapter_context: dict, call_context: LlmCallContext,
                           original_result: "LlmSection", original_validation: dict,
-                          drop_report: dict | None = None) -> tuple["LlmSection", dict, LlmUsage, str]:
+                          drop_report: dict | None = None,
+                          blocked_calculations: dict | None = None,
+                          first_round_calc: dict | None = None) -> tuple["LlmSection", dict, LlmUsage, str]:
     """章节被安全校验拒绝时的一次定向修复。完整生成与单章再生成共用这一份口径。
 
     返回 ``(采用的正文, 校验结果, 本次用量, 真实修复响应)``：
@@ -1285,12 +1317,18 @@ def repair_chapter_safety(title: str, content: str, evidence: list[dict], *, cha
     )
     # 修复调用若又丢弃证据，先收窄上下文再重检——裁剪掉的证据不能为修复稿背书。
     _apply_dropped_evidence(chapter_context, drop_report)
+    # 复算必须在**采纳判定之前**（本函数内部就决定采用修复稿还是回退被拒稿）。
+    calc_prep = chapter_calculations.prepare_candidate(
+        repaired, chapter_context, round_no=2, blocked=blocked_calculations)
+    chapter_calculations.apply_round(chapter_context, calc_prep)
     # 台账要存**模型原始修复输出**；下面补边界块会改写 `repaired.content`，所以先留一份。
     repair_response = repaired.content
     # 先量"模型有没有漏掉来源边界块"，再补齐——修复稿也要重跑全部检查。
     attribution_restored = _attribution_block_missing(repaired.content, chapter_context)
     repaired.content = _preserve_chapter_boundaries(repaired.content, chapter_context)
     revalidation = validate_chapter_output(repaired.content, repaired.citation_ids, chapter_context)
+    # 修复稿的复算结论也要并入：只改正文不改计算 → 该计算仍按新候选被复算与判定。
+    revalidation = chapter_calculations.merge_validation(revalidation, calc_prep)
     revalidation["source_attribution_restored"] = attribution_restored
     if not _report_boundary_safe(repaired.content):
         revalidation["reasons"].append("章节包含禁止的承保或审批结论")
@@ -1300,6 +1338,9 @@ def repair_chapter_safety(title: str, content: str, evidence: list[dict], *, cha
     # （收口方案 §三）。未决项由调用方按三态收口为 `model_needs_review`，不计合格采用率。
     if revalidation["status"] in {"passed", "needs_review"}:
         return repaired, revalidation, usage, repair_response
+    # 回退被拒稿：记录集切回第 1 轮（防串档，同篇幅修复）。
+    if first_round_calc is not None:
+        chapter_calculations.apply_round(chapter_context, first_round_calc)
     return original_result, {
         **original_validation,
         "safety_repair_failed": True,
@@ -1422,6 +1463,9 @@ def _json_repair_section(title: str, deterministic_content: str, evidence: list[
 def _attempt_result(*, content: str, citation_ids: list[str] | None, usage: "LlmUsage", validation: dict,
                     generation_status: str, fallback_reason: str, fallback_stage: str,
                     repair_attempted: bool) -> dict:
+    # 计算轨迹从 validation 派生（`merge_validation` 已写入），签名不再加参数——
+    # 完整生成与单章再生两个入口都经过这里，少一处传参就少一处漏。
+    calculation_trace = list(validation.get("calculation_trace") or [])
     return {
         "content": content,
         "citation_ids": citation_ids,
@@ -1431,6 +1475,11 @@ def _attempt_result(*, content: str, citation_ids: list[str] | None, usage: "Llm
         "fallback_reason": fallback_reason,
         "fallback_stage": fallback_stage,
         "repair_attempted": repair_attempted,
+        "calculations": calculation_trace,
+        "calculation_summary": dict(validation.get("calculation_summary") or {}),
+        "calculation_trace_hash": chapter_calculations.trace_hash(calculation_trace),
+        # 建议草案（已归一、已渲染成 draft_text）：写库时随正文同事务落 `report_recommendations`。
+        "recommendations": list(validation.get("recommendation_items") or []),
     }
 
 
@@ -1503,6 +1552,11 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
                 diagnostics.setdefault("first_rejection_reasons", list(first_rejection))
             if first_rejection_support:
                 diagnostics.setdefault("first_rejection_support_items", list(first_rejection_support))
+            # 计算轨迹进台账：回答"这一稿算了什么、哪条被否决"（方案 §三.3 的指标统计）。
+            calculation_trace = list(validation.get("calculation_trace") or [])
+            if calculation_trace:
+                diagnostics.setdefault("calculations", calculation_trace)
+                diagnostics.setdefault("calculation_summary", validation.get("calculation_summary") or {})
             attempt_id = record_chapter_attempt(
                 project_id=project_id, section_key=chapter_key, run_id=run_id,
                 status=status, stage=stage, repair_type=repair_type, adopted=adopted,
@@ -1514,6 +1568,9 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
                 code_fingerprint=_code_fingerprint(),
                 frozen_input=_frozen_input_snapshot(chapter_context, chapter_key=chapter_key, expected=expected),
                 expected=expected,
+                # 输出侧摘要与输入哈希分开：输入哈希在调用前算定，输出只有这里才知道。
+                calculation_trace_hash=chapter_calculations.trace_hash(
+                    validation.get("calculation_trace") or []),
             )
         return {
             **_attempt_result(content=content, citation_ids=citation_ids, usage=usage_total,
@@ -1558,6 +1615,11 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
         draft_content = draft_content or result.content
         attribution_restored = _attribution_block_missing(result.content, chapter_context)
         result.content = _preserve_chapter_boundaries(result.content, chapter_context)
+        # 模型自主计算：**按候选**复算后并入记录集，**再**走章节校验。
+        # 顺序不能反——章节校验的数字允许集读 `chapter_context["evidence_records"]`，
+        # 计算值若在校验之后才并入，正文里的它会被判成"新数字"。
+        calc_prep = chapter_calculations.prepare_candidate(result, chapter_context, round_no=1)
+        chapter_calculations.apply_round(chapter_context, calc_prep)
         validation = validate_chapter_output(result.content, result.citation_ids, chapter_context)
         validation["source_attribution_restored"] = attribution_restored
         if not _report_boundary_safe(result.content):
@@ -1571,6 +1633,26 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             validation["reasons"].append("章节包含模型自行绘制的表格")
             validation["status"] = "rejected"
             validation["length_only_failure"] = False
+
+        # 复算结论并入三态：硬错误进 reasons（走同一次修复），未决进 needs_review_items。
+        validation = chapter_calculations.merge_validation(validation, calc_prep)
+        # 建议结构（方案 §四 line 52~55）：结构错误进同一次修复；未结构化建议（正文写了
+        # "建议承保 5000 万元"却没返回 recommendations）也必须拦下——否则它绕过人工复核。
+        recommendation_mode = str((chapter_context.get("recommendation_policy") or {}).get("mode") or "off")
+        if recommendation_mode != "off":
+            recommendation_result = recommendation_rules.normalize_and_validate(
+                getattr(result, "recommendations", None) or [], chapter_context)
+            unstructured = recommendation_rules.detect_unstructured_proposals(
+                result.content, recommendation_result["items"])
+            if recommendation_result["hard"]:
+                validation["reasons"].extend(recommendation_result["hard"][:3])
+                validation["status"] = "rejected"
+            if unstructured:
+                validation["reasons"].append("正文包含未结构化的建议草案：须写入 recommendations 结构化返回")
+                validation["status"] = "rejected"
+            if recommendation_result["review"]:
+                validation["needs_review_items"].extend(recommendation_result["review"])
+            validation["recommendation_items"] = recommendation_result["items"]
 
         # 支持检查**并入同一候选评估**（计划 §四 line 33）：与章节校验一起决定要不要用那一次
         # 修复。旧流程把支持检查放在统一修复之外——章节校验通过后若支持未过就直接换确定性
@@ -1605,6 +1687,9 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
                 chapter_context=chapter_context, call_context=call_context,
                 original_result=result, original_validation=validation,
                 drop_report=drop_collector,
+                # 修复稿独立复算：原样重发首稿被否决的计算 → 判继承；
+                # 修复失败回退首稿时，记录集切回第 1 轮（`first_round_calc`），防止串档。
+                blocked_calculations=calc_prep["blocked_map"], first_round_calc=calc_prep,
             )
             _add_usage(usage_total, repair_usage)
             # 台账存**真实修复响应**（失败时也不再拿被拒稿冒充）。
@@ -1627,6 +1712,9 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
                 chapter_context=chapter_context, call_context=call_context,
                 original_result=result, original_validation=validation,
                 drop_report=drop_collector,
+                # 修复稿独立复算：原样重发首稿被否决的计算 → 判继承；
+                # 修复失败回退首稿时，记录集切回第 1 轮（`first_round_calc`），防止串档。
+                blocked_calculations=calc_prep["blocked_map"], first_round_calc=calc_prep,
             )
             _add_usage(usage_total, repair_usage)
             repair_content = repair_draft
@@ -1644,7 +1732,18 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             # 完整生成保留确定性备用稿（fallback 标记 + 回退原因），单章再生保留旧正文。
             reason = f"章节模型调用或结构校验失败：report_repair_incomplete（{str(exc)}）"
         else:
+            # 只写类名不够诊断（2026-10-18 真实试跑出现 `InvalidOperation`，无从定位）。
+            # 把 traceback 最后一行（含异常消息）带进原因，落进 fallback_reason 与诊断。
+            tail = ""
+            try:
+                lines = [item.strip() for item in traceback.format_exc().strip().splitlines() if item.strip()]
+                if lines:
+                    tail = lines[-1][:180]
+            except Exception:  # noqa: BLE001
+                tail = ""
             reason = f"章节模型调用或结构校验失败：{error_type or type(exc).__name__}"
+            if tail:
+                reason = f"{reason}（{tail}）"
         return _emit(
             content=deterministic_content, citation_ids=None,
             validation={"status": "fallback", "reasons": [reason]},
@@ -1834,6 +1933,12 @@ def _generate_draft(run_id: str, project_id: str, project: dict, facts: list[dic
             # **warning**，交付状态因此立即成为 `needs_review`（`assess_delivery`），
             # 而不是先挂 `pending` 等后置检查——它本来就不该按"合格采用"对待。
             support_status="warning" if generation_status == "model_needs_review" else "pending",
+            # 计算轨迹随正文冻结。回退时**不写**：那份轨迹属于被否决的模型稿，
+            # 挂到确定性正文上会让接口把没被采用的指标显示成本章的计算。
+            calculations=(chapter_validation.get("calculation_trace") or [])
+            if generation_status in MODEL_CONTENT_STATUSES else [],
+            recommendations=(chapter_validation.get("recommendation_items") or [])
+            if generation_status in MODEL_CONTENT_STATUSES else [],
         )
         # 尝试台账：模型正文真正落库（含"仅剩未决项"的 model_needs_review）→ accepted=latest=本次；
         # 失败/跳过 → 只把 latest 指向本次，accepted 保持上一次成功（修订稿 §四）。

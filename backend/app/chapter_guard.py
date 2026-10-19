@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from rank_bm25 import BM25Okapi
@@ -20,9 +20,15 @@ from .report_tables import SYSTEM_TABLE_ROLE
 from .retrieval import tokenize
 
 
+# 代码级默认禁止词（与 yaml 的 `forbidden_patterns` 叠加）。
+# ⚠️ 方案 §一/§二：**承保、拒保、担保额度与担保费率建议是允许的**，所以这里不能放
+# "建议承保/建议拒绝/建议通过/建议不承保"——它们只是提议，硬拦会把合法建议判成越权。
+# 仍保留：投资类结论（本轮不扩展投资建议）、冒充审批的既成决定（审批通过/审批拒绝）。
+# "核定担保"也从裸词改为**决策语境**判定（见 DECISION_FORBIDDEN_TERMS）——
+# "已核定担保额度"要被拦，而"建议核定担保额度"只是提议。
 DEFAULT_FORBIDDEN = (
-    "建议承保", "建议拒绝", "建议通过", "投资建议",
-    "审批通过", "审批拒绝", "核定担保", "建议不承保",
+    "投资建议",
+    "审批通过", "审批拒绝",
     # 承诺性投资/授信结论（否定语境如“不构成投资建议”另行豁免）
     "建议投资", "推荐投资", "具备投资价值", "预计授信",
 )
@@ -33,11 +39,153 @@ DEFAULT_FORBIDDEN = (
 #   ② 否定声明（同小句有否定词）→ 放行；
 #   ③ 引用材料原文（同句出现材料名/载明/约定等）→ 放行。
 # 其余（纯描述性提及）也放行：描述责任上限不是越权。**不允许**退化成"固定窗口共现"。
-DECISION_FORBIDDEN_TERMS = ("担保额度", "担保费率")
+# 需要**按完整语境**判定的词组：材料里正当披露 + 模型可能提议 + 也可能冒充审批。
+# `_decision_classification` 会区分 否定 / 引用原文 / 提议（safe_recommendation）/ 既成决定。
+DECISION_FORBIDDEN_TERMS = ("担保额度", "担保费率", "核定担保")
+
+# 方案 §二 line 20：「允许引用表格关键数字、分析趋势和解释评级关注因素；禁止无依据的原因、
+# 趋势及确定性预测」。这里只做**窄检查**并一律落 `needs_review`（不硬拒）：
+# 有引用或落在记录上的趋势句是合法分析，硬拒会把正常财务分析打死。
+# ⚠️ 不能收单字"受"：'受托管理人'、'接受' 都会命中，趋势词一出现就误报。
+# 因果结构用短语 + 一个 `受…影响` 正则（跨 12 字以内）。
+_CAUSAL_MARKERS = ("由于", "因为", "主要系", "系因", "导致", "归因于", "原因在于")
+_CAUSAL_PATTERN = re.compile(r"受.{0,12}影响")
+_TREND_MARKERS = ("上升", "下降", "增长", "减少", "增加", "改善", "恶化", "提升", "回落", "波动")
+# ⚠️ 不能用裸"预计"做子串匹配：正文里大量出现"系统**预计**算的资产负债率为…"，
+# 2026-10-17 北投真实试跑中 15 条告警有 14 条是这个词被当成预测（"预计算"≠"预计"）。
+# 改用负向断言排除"预计"后面紧跟"算"的情况；"预测"**不收**（"本文不作预测"会误报）。
+# 内部记录 ID 出现在正文：模型把 record_id 当成"引用别名"写进句子
+# （2026-10-17 北投 financial 实测："…回落约1.22个百分点（metric:debt_ratio:2023、
+# metric:debt_ratio:2024）"）。这是必现的内部字段泄露，也会让成品用词检查失败；
+# 一律硬拒并走同一次修复。`record_id` 只允许出现在 calculations.input_record_ids。
+_RECORD_ID_IN_BODY_RE = re.compile(
+    r"(?<![\w:.])(?:fact|table|metric|rule|disclosure|calc):[A-Za-z0-9][A-Za-z0-9:_@.\-]*"
+)
+
+
+def _internal_record_ids_in(text: str) -> list[str]:
+    """正文里出现的内部记录 ID（去重、保序、最多 10 条）。"""
+    found: list[str] = []
+    for match in _RECORD_ID_IN_BODY_RE.finditer(text or ""):
+        value = match.group(0)
+        if value not in found:
+            found.append(value)
+        if len(found) >= 10:
+            break
+    return found
+
+
+# 负向断言要排除的不只是"预计**算**"，还有**会计科目名**：
+# `| 预计负债 | 103,591.43 |` 是资产负债表科目，不是预测（2026-10-18 北投 financial 实测
+# 被判 `deterministic_forecast`）。同理"预计费用/收益/成本/支出/款项/损失"都是科目。
+_FORECAST_PATTERN = re.compile(
+    r"预计(?!算|负债|款项|成本|费用|收益|支出|损失)|将达|有望|未来[一二三两1-3]年|必将|将会达到"
+)
+# ⚠️ 名字不能叫 `_CLAUSE_SPLIT_RE`：模块后面（现有代码）已有一个同名常量，
+# 它按**逗号也切**，会把"营业收入上升（E01）"与"主要系销量增长"拆成两句，
+# 导致带引文的合法分析被误判成"无依据的因果"。这里只按**句末标点**切。
+_SENTENCE_SPLIT_RE = re.compile(r"[。；;！!？?\n]")
+
+
+# 类型证据（方案 §四 line 56：「评级观点、合同生效等结论仍须有对应类型的证据」）。
+# 一律 `needs_review`：结论本身可能对，只是材料类型对不上，硬拒会把正常章节打死。
+_RATING_VIEW_RE = re.compile(r"(评级机构|评级报告|外部信用评价)[^。；;]{0,20}(认为|关注|评定|指出)")
+# ⚠️ 只认**担保类**合同/协议：方案 §四 line 56 说的是"合同生效等结论须有对应类型证据"，
+# 而"专户监管协议已签署"的对应证据是募集说明书/监管协议，不是担保合同。
+# 裸 `(合同|协议)` 会把监管协议、承销协议、受托管理协议全部扣到"缺担保合同"上
+# （2026-10-17 北投 proceeds #1 实测误报）。
+_GUARANTEE_CONTRACT_RE = re.compile(r"(担保合同|保证合同|反担保合同|委托担保协议|再担保合同|担保协议)")
+_CONTRACT_EFFECTIVE_RE = re.compile(r"(已生效|已签署|已履行)")
+
+
+_TABLE_ROW_RE = re.compile(r"(?m)^[ \t]*\|.*$")
+
+
+def _narrative_text(content: str) -> str:
+    """去掉表格行后的叙述文本，供趋势/因果/预测/类型证据检查使用。
+
+    系统表格块由服务端在正文后原样附加（`_preserve_chapter_boundaries`），每行都是
+    `| 科目 | 值 |`。这几项检查针对的是**叙述文字**，扫表格行必然误报：
+    2026-10-18 北投 financial 的 `| 预计负债 | 103,591.43 |` 被判成"确定性预测"，
+    而模型首稿里"预计负债"出现 **0 次** —— 那是系统块，不是模型写的。
+    """
+    return _TABLE_ROW_RE.sub("", content or "")
+
+
+def _type_evidence_advisories(content: str, context: dict) -> list[dict]:
+    """正文出现"需特定类型证据"的结论，但本章证据里没有该类材料 → 待核验。"""
+    evidence = context.get("evidence") or []
+    kinds = {str(item.get("document_kind") or "") for item in evidence}
+    items: list[dict] = []
+    text = content or ""
+    for pattern, required, code, detail in (
+        (_RATING_VIEW_RE, {"信用评级报告", "评级报告"}, "rating_evidence_missing",
+         "出现评级观点表述，但本章证据中没有评级报告类材料"),
+        # 担保类合同 + 生效/签署结论**同时出现**才检查（两个模式分开匹配，见下）。
+        (_GUARANTEE_CONTRACT_RE, {"担保合同", "保证合同", "担保协议"}, "contract_evidence_missing",
+         "出现担保合同生效/签署的结论，但本章证据中没有担保合同类材料"),
+    ):
+        match = pattern.search(text)
+        if not match:
+            continue
+        # 合同类要求"担保合同 + 生效/签署结论"同时出现：只有合同名（"依据担保合同约定"）
+        # 或只有"已签署"（"募集说明书已签署"）都不构成"合同已生效"的结论。
+        if code == "contract_evidence_missing" and not _CONTRACT_EFFECTIVE_RE.search(text):
+            continue
+        if kinds & required:
+            continue
+        items.append({
+            "code": code,
+            "excerpt": text[max(0, match.start() - 10):match.end() + 10].strip()[:120],
+            "position": match.start(),
+            "detail": detail,
+        })
+    return items
+
+
+def _trend_causal_advisories(content: str) -> list[dict]:
+    """趋势/因果句缺少依据、以及确定性预测 → 待核验（不阻断单章保存）。"""
+    items: list[dict] = []
+    position = 0
+    for clause in _SENTENCE_SPLIT_RE.split(content or ""):
+        stripped = clause.strip()
+        if not stripped:
+            position += len(clause) + 1
+            continue
+        has_citation = bool(CITATION_ALIAS_RE.search(stripped))
+        has_causal = (any(marker in stripped for marker in _CAUSAL_MARKERS)
+                      or bool(_CAUSAL_PATTERN.search(stripped)))
+        has_trend = any(marker in stripped for marker in _TREND_MARKERS)
+        if has_causal and has_trend and not has_citation:
+            items.append({
+                "code": "unsupported_causal_claim",
+                "excerpt": stripped[:120],
+                "position": position,
+                "detail": "趋势与原因同时出现但本句没有引用；需引用支撑原因的材料或改为待核验",
+            })
+        if _FORECAST_PATTERN.search(stripped) and not has_citation:
+            items.append({
+                "code": "deterministic_forecast",
+                "excerpt": stripped[:120],
+                "position": position,
+                "detail": "出现确定性预测表述且无引用；预测不得写成已确认事实",
+            })
+        position += len(clause) + 1
+    return items
+# "已作出的决定"类动词：写进正文就是冒充审批（方案 §二 line 15：不得把预测、建议或
+# 未决事项写成已确认事实）。
+# ⚠️ "建议/主张/倾向"**不属于**决策动作——方案 §一 明确允许承保、拒保、额度与费率建议，
+# 它们只是提议（见 RECOMMENDATION_MARKERS）。旧实现把"建议"放进本元组，导致
+# "建议担保额度为5000万元"被判成冒充审批。
 DECISION_VERBS = (
-    "建议", "核定", "核准", "批准", "审批", "同意", "决定", "确定", "主张", "倾向",
+    "核定", "核准", "批准", "审批", "同意", "决定", "确定",
     "给予", "授予", "设定", "批复", "决议",
 )
+# 提议类标记：出现即视为"建议/提议"，放行（仍要求人工复核，但不硬拒）。
+# 注：暂不含单字"拟"——它可能出现在"模拟"里；等出现真实误判再按需收窄。
+# 只收**明确表示提议**的词。"倾向/主张"太宽（"审批倾向为通过"是在陈述审批进程，
+# 不是提议），故未纳入。
+RECOMMENDATION_MARKERS = ("建议", "提议")
 SOURCE_QUOTE_MARKERS = (
     "募集说明书", "发行文件", "评级报告", "外部信用评价文件", "材料载明", "载明",
     "原文", "披露", "约定", "据材料", "根据材料", "保证合同", "担保协议",
@@ -46,7 +194,7 @@ DECISION_CLAUSE_WINDOW = 40
 
 
 def _decision_classification(content: str, index: int) -> str:
-    """"担保额度/担保费率"命中的归类：forbidden / safe_negative / safe_quote / safe_description。
+    """"担保额度/担保费率"命中的归类：forbidden / safe_negative / safe_quote / safe_recommendation / safe_description。
 
     顺序有意义：**先否定、再引用、最后才看决策动词**——"不得输出担保额度"里虽然有"输出"，
     但否定已经把它变成边界声明；"募集说明书载明担保额度为…"是在复述材料，两者都不该拒绝。
@@ -62,6 +210,11 @@ def _decision_classification(content: str, index: int) -> str:
     sentence = content[max(0, index - DECISION_CLAUSE_WINDOW * 2):index]
     if any(marker in sentence for marker in SOURCE_QUOTE_MARKERS):
         return "safe_quote"
+    # 提议在决策动词**之前**判：方案 §一 允许"承保/拒保/额度/费率建议"，
+    # 只有"已核定/已批准"这类既成决定才算冒充审批。二者常同句出现
+    # （"建议核定担保额度…"），所以必须先认提议。
+    if any(marker in clause for marker in RECOMMENDATION_MARKERS):
+        return "safe_recommendation"
     if any(verb in clause for verb in DECISION_VERBS):
         return "forbidden"
     return "safe_description"
@@ -140,10 +293,27 @@ def _decimal_places(text: object) -> int:
     return len(body.split(".", 1)[1])
 
 
+# 展示精度上限：报告里不可能用到超过 12 位小数；再高的写法只可能来自算出来的浮点尾数。
+_MAX_DISPLAY_PLACES = 12
+
+
 def _round_half_up(value: Decimal, places: int) -> Decimal:
-    """按给定小数位以 ROUND_HALF_UP 舍入（不再是银行家舍入）。"""
-    places = max(0, int(places))
-    return value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    """按给定小数位以 ROUND_HALF_UP 舍入（不再是银行家舍入）。
+
+    ⚠️ 必须放宽 Decimal 上下文精度并兜住 `InvalidOperation`：
+    `metrics` 里的比率是 Decimal(28) 精度算出来的，`str()` 后可能带 28 位小数；
+    若拿这个位数去 `quantize`，系数位数会超过默认 28 位精度 → `decimal.InvalidOperation`
+    **未捕获**，整章直接以"章节模型调用或结构校验失败：InvalidOperation"回退
+    （2026-10-18 北投 financial 实测，`_values_match` 的 `_round_half_up(a, b_places)` 处）。
+    """
+    places = min(max(0, int(places)), _MAX_DISPLAY_PLACES)
+    try:
+        with localcontext() as context:
+            context.prec = 60
+            return value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        # 极端值（NaN/Infinity/指数越界）不参与"展示精度匹配"，按原值返回。
+        return value
 
 
 def _values_match(a: Decimal, a_places: int, b: Decimal, b_places: int) -> bool:
@@ -875,6 +1045,18 @@ def _system_table_block(project_id: str, chapter_key: str, subject: str) -> str:
 
 # 校验规则版本：任何改变"允许/拒绝"判定的规则调整都应递增（纳入输入哈希，修订稿 §2.1）。
 VALIDATION_RULES_VERSION = "v1"
+# 计算/建议的规则版本：写进输入哈希与代码指纹，回答"这份报告按哪版规则判的"。
+CALCULATION_RULE_VERSION = "calculations-v1"
+RECOMMENDATION_RULE_VERSION = "recommendations-v1"
+
+
+def _calculation_functions() -> tuple[str, ...]:
+    """计算可用函数白名单——直接取 `calculations.FUNCTIONS`，避免两处各写一份。"""
+    from .calculations import FUNCTIONS
+    return tuple(sorted(FUNCTIONS))
+
+
+CALCULATION_FUNCTIONS = _calculation_functions()
 
 
 def _materials_fingerprint(project_id: str) -> str:
@@ -945,6 +1127,155 @@ def _outline_chapter_config(project_id: str, chapter_key: str) -> dict:
     return empty
 
 
+# 记录索引上限：80 条 × 约 70 字 ≈ 5.6k 字符，约占 64k 输入预算的 9%。
+# 超限时**整条丢弃**（`_REPORT_CONTEXT_DROPPABLE_KEYS` 末尾），不截断字符串。
+MAX_CALCULATIONS_PER_CHAPTER = 24
+# 索引按**科目名**计，不按单元格计。financial 单章有 1380 条记录、216 个不同科目；
+# 上限 240 足以覆盖全部科目，体积仍远小于逐单元格列（不重复 record_id 与 value）。
+RECORD_INDEX_MAX_ITEMS = 200
+# financial 单章 167 个有效科目 ≈ 12.2k 字符；留 14k 保证不被截断。
+# 超限时按"覆盖年度数"降序截断——先丢单期科目（多为账龄分段等明细噪音）。
+RECORD_INDEX_MAX_CHARS = 14000
+# 排序优先级：报表科目（table）在前，规则次之，计算结果最后。
+# ⚠️ 不能按类型名字母序排：`calculation < disclosure < rule < table` 会让
+# **disclosure 碎片排最前**，把真正的报表科目挤掉（disclosure 的 label 是引文里
+# 抽出的片段，不是规范科目名，本就不该当计算输入）。
+_RECORD_INDEX_ORDER = {"table": 0, "rule": 1, "calculation": 2}
+
+
+def _record_index(records: list[dict]) -> list[dict]:
+    """给模型的"可引用科目索引"——**按科目名聚合**，不逐单元格列。
+
+    为什么必须聚合（2026-10-18 北投 financial 实测）：逐条列时按 records 顺序截断，
+    而顺序是「系统表 → 上传表」，80 条名额被系统表 56 行吃光，上传表的明细科目
+    （`一年内到期的非流动负债`、`加：其他收益`、`投资收益…`）**一条都没进索引**。
+    模型于是拿系统表里的「流动负债合计」去凑「一年内到期的非流动负债」，
+    复算必然不符，整章回退——看起来像模型算错，其实是它根本看不到正确科目。
+
+    聚合后模型只需读「有哪些科目、哪些期间」，输入写 `科目名@期间` 由系统解析；
+    不需要记 `report-financial-debt:r01c01@table-evidence-v2` 这种行号。
+    """
+    groups: dict[tuple[str, str], dict] = {}
+    for record in records or []:
+        record_type = str(record.get("record_type") or "")
+        # fact/metric 已在 `llm._model_facts` / `_model_metrics` 里内联 record_id；
+        # 这里补 table/rule/disclosure，并顺带收 calculation（供链式计算引用）。
+        # 不收 disclosure：它的 label 是引文片段（如「合计」「其中」），不是规范科目名，
+        # 拿它做计算输入会算错，还会把索引名额占满。
+        if record_type not in _RECORD_INDEX_ORDER:
+            continue
+        if str(record.get("status") or "") == "conflict":
+            continue
+        label = str(record.get("label") or "").strip()
+        if not label:
+            continue
+        unit = str(record.get("unit") or "")
+        key = (label, unit)
+        group = groups.get(key)
+        if group is None:
+            group = groups[key] = {
+                "label": label[:40],
+                "type": record_type,
+                "unit": unit[:12],
+                "periods": [],
+                "scopes": [],
+            }
+        period = str(record.get("period") or "").strip()
+        if period and period not in group["periods"]:
+            group["periods"].append(period)
+        scope = str(record.get("scope") or "").strip()
+        if scope and scope not in group["scopes"]:
+            group["scopes"].append(scope)
+
+    index: list[dict] = []
+    chars = 0
+    skipped_no_period = 0
+    def _year_count(group: dict) -> int:
+        return len([p for p in group["periods"] if p.isdigit() and len(p) == 4])
+
+    # **多期优先**：覆盖 3 年的报表科目比单期明细更重要。
+    # ⚠️ 不能只按 label 字典序——中文按码点排序无语义，会把「短期借款」排到末尾
+    # 被字符上限截掉（2026-10-18 实测：财务章丢了短期借款与货币资金）。
+    for key in sorted(groups, key=lambda item: (
+            _RECORD_INDEX_ORDER[groups[item]["type"]], -_year_count(groups[item]),
+            groups[item]["label"])):
+        group = groups[key]
+        periods = sorted(group["periods"])
+        # 无年份期间的科目（「1年以内（含1年）」这类账龄分段、明细小项）不进索引：
+        # 它们不是三大报表科目，模型拿去算指标会算错，还白占名额。
+        if not any(p.isdigit() and len(p) == 4 for p in periods):
+            skipped_no_period += 1
+            continue
+        compact = _compact_periods(periods)
+        # 不带 `type`：模型只需要"有哪些科目"，类型标记占 16 字符/条却用不上。
+        item = {
+            "label": group["label"],
+            "unit": group["unit"],
+            "periods": compact,
+        }
+        if len(group["scopes"]) > 1:
+            # 多口径并列时明确告知，否则模型不知道同一科目有两套数
+            # （解析时会按声明的 scope 消歧，但它得先声明对）。
+            item["scopes"] = "/".join(group["scopes"])
+        size = len(json.dumps(item, ensure_ascii=False)) + 1
+        if chars + size > RECORD_INDEX_MAX_CHARS or len(index) >= RECORD_INDEX_MAX_ITEMS:
+            break
+        chars += size
+        index.append(item)
+    return index
+
+
+def _compact_periods(periods: list[str]) -> str:
+    """把期间列表压成 `2023-2025` / `2023,2025` / `2025`（控体积）。"""
+    years = sorted({p for p in periods if p.isdigit() and len(p) == 4})
+    others = [p for p in periods if p not in years]
+    parts: list[str] = []
+    if years:
+        if len(years) >= 3 and int(years[-1]) - int(years[0]) == len(years) - 1:
+            parts.append(f"{years[0]}-{years[-1]}")
+        else:
+            parts.append(",".join(years))
+    parts.extend(others)
+    return "/".join(parts)
+
+
+def _resolve_material_scope(project_id: str, chapter_key: str, config: dict, outline_cfg: dict) -> dict:
+    """材料范围的**唯一**解析点（方案 §二 line 16 / §四 line 56）。
+
+    优先级：Prompt 业务层的 `material_scope` > 目录章节的 `material_roles` / `document_ids`
+    > 空（不额外收窄）。返回 `{document_ids, material_roles, source_kinds, source}`。
+
+    ⚠️ **fail-closed**：显式给了 `document_ids` 却全部不属于本项目时，返回空列表并标
+    `invalid=True`——调用方据此得到"空匹配集"，绝不退化成"全部材料"。放宽成全部材料
+    等于把用户明确排除的文件又偷偷放回来。
+    """
+    business = config.get("material_scope") or {}
+    outline_ids = [str(item) for item in (outline_cfg.get("document_ids") or []) if str(item).strip()]
+    prompt_ids = [str(item) for item in (business.get("document_ids") or []) if str(item).strip()]
+    document_ids = prompt_ids or outline_ids
+    source = "prompt" if prompt_ids else ("outline" if outline_ids else "")
+    invalid = False
+    if document_ids:
+        placeholders = ",".join("?" for _ in document_ids)
+        owned = {
+            str(item["id"]) for item in rows(
+                f"SELECT id FROM analysis_documents WHERE project_id=? AND id IN ({placeholders})",
+                (project_id, *document_ids),
+            )
+        }
+        document_ids = [item for item in document_ids if item in owned]
+        if not document_ids:
+            invalid = True
+    return {
+        "document_ids": document_ids,
+        "material_roles": [str(item) for item in (business.get("material_roles")
+                                                  or outline_cfg.get("material_roles") or []) if str(item).strip()],
+        "source_kinds": [str(item) for item in (business.get("source_kinds") or []) if str(item).strip()],
+        "source": source,
+        "invalid": invalid,
+    }
+
+
 def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_ids: list[str] | None = None) -> dict:
     # The effective config (project > global > YAML) is what the model is told and
     # what the validator measures against; reading the factory YAML here made an
@@ -956,12 +1287,36 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
     outline_cfg = _outline_chapter_config(project_id, chapter_key)
     outline_subsections = outline_cfg["subsections"]
     outline_version = outline_cfg["outline_version"]
+    # 材料范围必须在目录哈希里：改了文件白名单等于改了"模型能看到什么"，
+    # 不进哈希就无法用重放区分"输入变了"与"模型抽风"。
+    material_scope = _resolve_material_scope(project_id, chapter_key, config, outline_cfg)
+    outline_material = {
+        "subsections": outline_subsections,
+        "material_roles": list(material_scope["material_roles"]),
+        "document_ids": list(material_scope["document_ids"]),
+    }
     outline_sha256 = (
         hashlib.sha256(
-            json.dumps(outline_subsections, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            json.dumps(outline_material, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        if outline_subsections else ""
+        if (outline_subsections or material_scope["material_roles"] or material_scope["document_ids"]) else ""
     )
+    # 文件级白名单 → 允许的来源页集合；`None` 表示不额外收窄。
+    scoped_source_ids: set[str] | None = None
+    if material_scope["document_ids"]:
+        placeholders = ",".join("?" for _ in material_scope["document_ids"])
+        scoped_source_ids = {
+            str(item["id"]) for item in rows(
+                f"SELECT id FROM analysis_sources WHERE project_id=? AND document_id IN ({placeholders})",
+                (project_id, *material_scope["document_ids"]),
+            )
+        }
+
+    def _in_scope(source_id_list) -> bool:
+        """该事实/指标/核验/冲突是否落在材料范围内。不收窄时恒 True。"""
+        if scoped_source_ids is None:
+            return True
+        return bool({str(item) for item in (source_id_list or [])} & scoped_source_ids)
     fact_keys = set(contract["fact_keys"])
     rule_keys = set(contract["rule_keys"])
     source_kinds = set(contract["source_kinds"])
@@ -991,6 +1346,12 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
             # 主体维度随事实进上下文：统一冻结记录（evidence_records）要用它做归属绑定。
             "subject": fact.get("subject", ""), "subject_id": fact.get("subject_id", ""),
         })
+    # 材料范围：文件白名单同时约束事实（方案 §四 line 56「材料筛选同时约束检索、事实、
+    # 指标及计算输入」）。`profile_snapshot` 是冻结主体档案、不对应项目文件，豁免。
+    selected_facts = [
+        item for item in selected_facts
+        if item.get("origin_type") == "profile_snapshot" or _in_scope(item.get("source_ids"))
+    ]
     checks = []
     for check in rows("SELECT * FROM cross_checks WHERE project_id=? ORDER BY rowid", (project_id,)):
         if check.get("rule_key") not in rule_keys:
@@ -1007,6 +1368,7 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
             "result_value": check.get("result_value"), "values": check["values"],
             "thresholds": check["thresholds"], "source_ids": check["source_ids"],
         })
+    checks = [item for item in checks if _in_scope(item.get("source_ids"))]
     metrics = []
     metric_keys = set(contract["metric_keys"])
     for metric in rows("SELECT * FROM financial_metrics WHERE project_id=? ORDER BY period,metric_key", (project_id,)):
@@ -1026,11 +1388,23 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
             # 系统计算值时，能回溯到"按哪一版公式算出来的"。
             "rule_version": str(metric.get("policy_version") or ""),
         })
+    metrics = [item for item in metrics if _in_scope(item.get("source_ids"))]
     if source_ids:
         referenced_sources.update(source_ids)
     relevant_conflicts, conflict_source_ids = _conflict_context(project_id, fact_keys)
     referenced_sources.update(conflict_source_ids)
+    # 冲突只保留范围内的来源（否则白名单外的冲突块会随正文一起披露）。
+    if scoped_source_ids is not None:
+        conflict_source_ids = [item for item in conflict_source_ids if str(item) in scoped_source_ids]
+        relevant_conflicts = [
+            item for item in relevant_conflicts
+            if _in_scope([sid for sid in (item.get("source_ids") or [])])
+        ]
     source_rows = _source_rows(project_id, referenced_sources, source_kinds, True)
+    # 检索为空的兜底走的是 `source_rows`，这里过滤一次即可覆盖两条路径
+    # （`_source_rows` 的 `include_all` 分支不受 `source_ids` 约束）。
+    if scoped_source_ids is not None:
+        source_rows = [item for item in source_rows if str(item.get("id")) in scoped_source_ids]
     max_items = contract["max_evidence_items"]
     max_chars = contract["max_evidence_chars"]
     # 优先保证"该章事实/指标/核验/冲突所引用的来源页"进入证据，其余按相关度补足。
@@ -1141,6 +1515,19 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
     except Exception:
         # 表格问题不阻断整章生成：构建失败按"无表"处理（与 _system_table_block 的既有取舍一致）。
         pass
+    # 材料范围（方案 §四 line 56「材料筛选同时约束…」）：表格来自文件，白名单外的表不能出现。
+    # 块是**单段 Markdown**，无法按表切分重排 → 采取保守取舍：过滤结构化记录；只要确有
+    # 越界表，就把整段表格块与 blocks 一并移除并留诊断。宁可不给表，也不能把用户排除的
+    # 文件内容带进正文（分表重建需要 build_chapter_tables 支持按文件过滤，另立阶段）。
+    if scoped_source_ids is not None and table_records:
+        kept_tables = [item for item in table_records if _in_scope(item.get("source_ids"))]
+        if len(kept_tables) != len(table_records):
+            table_records = []
+            system_table_block = ""
+            table_blocks = []
+            material_scope["table_scope_filtered"] = True
+        else:
+            table_records = kept_tables
     # 统一冻结记录（三项遗留修复方案 §一 + 收口方案 §一）：一次产出，
     # 随上下文中转，由 write_report_section 与表格快照同事务冻结；章节校验与后置支持
     # 校验读取**同一份**——事实、指标、规则不再因"不在受控表格里"被判无证据；
@@ -1219,8 +1606,34 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
         "materials_version": _materials_fingerprint(project_id),
         "validation_rules_version": VALIDATION_RULES_VERSION,
         "llm_applicable": not (chapter_key in {"guarantee", "counter_guarantee"} and not guarantee_applicable),
+        # 业务规则与可引用记录索引（方案 §三.1 / §二 line 16）：
+        # **必须在 input_hash 之前**——否则"模式变了但输入未变"无法被重放识别。
+        # 模型输出（calculations/recommendations）本身不在哈希内：它在调用后才产生，
+        # 由单独的 trace hash 记录（见章节目录 attempts）。
+        "calculation_policy": {
+            "mode": str(config.get("calculation_mode") or "system_only"),
+            "rule_version": CALCULATION_RULE_VERSION,
+            "functions": sorted(CALCULATION_FUNCTIONS),
+            "max_calculations": MAX_CALCULATIONS_PER_CHAPTER,
+        },
+        "recommendation_policy": {
+            "mode": str(config.get("recommendation_mode") or "off"),
+            "rule_version": RECOMMENDATION_RULE_VERSION,
+            "max_items": 6,
+        },
+        "record_index": _record_index(evidence_records),
+        # 材料范围进输入哈希：白名单变化 = 模型可见面变化，必须能被重放识别。
+        "material_scope": {
+            "document_ids": list(material_scope["document_ids"]),
+            "material_roles": list(material_scope["material_roles"]),
+            "source": material_scope["source"],
+        },
     }
     payload["input_hash"] = _json_hash(payload)
+    # 按候选复算要用的**纯净基线**：`apply_round` 会改写 `evidence_records`（追加 calculation
+    # 记录），若没有这份副本，下一轮会把上一轮的计算当成"输入记录"继承下去。
+    # 放在 input_hash **之后**：它与 `evidence_records` 内容相同，进哈希只是白翻倍体积。
+    payload["base_evidence_records"] = list(evidence_records)
     # 冻结原表 blocks（表格正文/记录/快照同源）：操作数据不进哈希（正文与记录已在哈希内）。
     payload["table_blocks"] = table_blocks
     payload["allowed_citation_ids"] = [item["id"] for item in evidence]
@@ -1336,18 +1749,36 @@ SOURCE_ATTRIBUTION_BLOCK = (
 )
 
 
-def _is_negated_mention(content: str, index: int) -> bool:
+# 否定也可能**后置**（"把X等同于可偿付现金的做法不成立"）：命中短语之后紧跟
+# "…的做法/说法/等式不成立/不正确"时，同样是对该表述的否定，不是承诺性结论
+# （中邮/华辰 cashflow"经营现金流预测直接等同于可偿付现金的做法不成立"实测——
+# 原实现只看命中位置之前 40 字，把这类合规的限定句判成 forbidden）。
+# **刻意不含"不足以/不满足"**：那是业务事实（"可偿付现金不足以覆盖利息"仍须核验）。
+NEGATION_POST_MARKERS = ("不成立", "不能成立", "并不成立", "不正确", "不准确", "不恰当", "不可取", "行不通")
+NEGATION_POST_WINDOW = 20
+
+
+def _is_negated_mention(content: str, index: int, length: int = 0) -> bool:
     """命中位置前一小句内出现否定词 → 是“禁止做某事”的边界表述，而非承诺性结论。
 
     例如“不得推断授信获批概率”“不构成投资建议”“不得表述为已具备可执行覆盖”必须放行；
     而“预计授信能够获批”“授信获批概率较高”仍然拒绝。此前靠逐词字符串替换处理，
     每加一个词都要写一次例外，这里改成统一的否定语境判断。
+
+    2026-10-16 增补**后置否定**：命中短语之后 20 字内出现"不成立/不正确/不恰当"等
+    元评价词时同样放行（见 `NEGATION_POST_MARKERS` 的取舍说明）。
     """
     window = content[max(0, index - NEGATION_WINDOW):index]
     clause = NEGATION_CLAUSE_SPLIT_RE.split(window)[-1]
     if any(hedge in clause for hedge in NEGATION_HEDGES):
         return False
-    return any(marker in clause for marker in NEGATION_MARKERS)
+    if any(marker in clause for marker in NEGATION_MARKERS):
+        return True
+    if length <= 0:
+        # 未给命中长度（口径声明等旧调用点）时只看前置否定，保持既有语义不变。
+        return False
+    tail = content[index + length: index + length + NEGATION_POST_WINDOW]
+    return any(marker in tail for marker in NEGATION_POST_MARKERS)
 
 
 FALLBACK_REASON_CODES = (
@@ -1771,6 +2202,12 @@ def _coverage_phrase_labels(clause: str) -> set[str]:
 
 
 
+# 变化量动词：数字紧跟在它们后面时，这个数是**两期之差**，不属于任何单一年份。
+_DELTA_TAIL_RE = re.compile(
+    r"(?:减少|增加|下降|上升|增长|回落|提升|变动|降幅|增幅|增加额|减少额)$"
+)
+
+
 def _written_period(prefix: str) -> str | None:
     """正文里数字前的**唯一**年份归属；只看**最后一个分句**，两处年份或比较基准年返回 None。
 
@@ -1778,6 +2215,11 @@ def _written_period(prefix: str) -> str | None:
     增至2025年度的52,000万元，净利润由2,296万元增至2,800万元"里，2,296 的年份由
     "由…增至…"的并列结构决定，前缀窗口扫到 2025 会把 2023 的正确归属误判成错期间。
     """
+    # 变化量不是某一期的取值，而是两期之差：「较上年末减少3.14亿元」里的 3.14 亿
+    # 没有单一所属期间，主句的「2025年末」只是观察时点。拿它做期间比对必然判错
+    # （2026-10-18 北投 financial 实测：written=2025 / expected=2024，硬拒整章）。
+    if _DELTA_TAIL_RE.search((prefix or "").rstrip()):
+        return None
     clause = _CLAUSE_SPLIT_RE.split(prefix or "")[-1]
     years = list(PERIOD_TOKEN_RE.finditer(clause))
     if len(years) != 1:
@@ -2357,6 +2799,17 @@ def _record_binding(
         # 公式的包含比对"（`match_labels`），但不计入"是否有正文所写科目"的闸门
         # （`written_labels`）：短语配不上任何记录时不得反过来制造冲突（§㉓d 负例：
         # "占有息负债余额的比例为14.00%"的短语没有对应记录，仍应按无科目处理、不报冲突）。
+        # 「"其他"类存货4,218,593.88万元、占比49.97%」：真正的限定词是**引号内的"其他"**，
+        # 后面"存货"只是类别名。词表按包含匹配只会命中"存货"，记录 label="其他" 反而
+        # 配不上，造出假 label_mismatch（2026-10-18 北投 financial 49.97% 实测）。
+        # 只在引号内容**命中词表**时并入（避免把引用的书名/政策名当科目）。
+        # ⚠️ 扫描窗口不能只用 `label_clause`：49.97 前面的末分句只有"占比"，
+        # 而「"其他"类存货」在**上一个分句**。用 wide_prefix 的尾部窗口（60 字，
+        # 覆盖到上一分句），并要求引号内容命中词表，避免跨句误抓。
+        quote_window = str(item.get("wide_prefix") or prefix or "")[-60:] or label_clause
+        for quoted in re.findall(r"[“\"]([^”\"]{1,12})[”\"]\s*类", quote_window):
+            if quoted in vocabulary:
+                written_labels.add(quoted)
         match_labels = written_labels
         if str(item.get("normalized_unit") or "") in {"%", "倍"} and label_clause:
             match_labels = written_labels | {
@@ -2374,8 +2827,15 @@ def _record_binding(
         # 也可以写子项（"1年以内"），系统无法判定，按"归属不明"进待核验（实测：
         # 北投 751,716.86万元/59.22%、华辰 12,640万元 均为正确归属被硬拒；而
         # 类型表合计 3,856,300 被写成"1年以内"属于真实错配，同样只能由人工裁决）。
-        generic_total_label = bool(written_labels) and candidates and all(
-            str(record.get("label") or "").strip() in GENERIC_TOTAL_LABELS for record in candidates
+        # 两种情形都按"无法与具体科目比对"处理（待核验，不硬拒）：
+        # a) **候选记录**只命中合计行（原有口径）；
+        # b) **正文所写科目**只剩"合计/小计/总计"——「前十大银行授信额度合计3,581.30亿元」
+        #    里的"合计"是行角色描述，不是科目名，拿它比 label 必然造假冲突
+        #    （2026-10-18 北投 financial 3,581.30 亿实测：written=["合计"]）。
+        generic_total_label = bool(written_labels) and candidates and (
+            all(str(record.get("label") or "").strip() in GENERIC_TOTAL_LABELS
+                for record in candidates)
+            or all(str(label).strip() in GENERIC_TOTAL_LABELS for label in written_labels)
         )
 
         # 每个可判定的维度 → (维度名, 记录谓词, 诊断字段)。
@@ -2550,7 +3010,8 @@ def validate_chapter_output(content: str, citation_ids: list[str], context: dict
             if kind == "decision":
                 classification = _decision_classification(content, match.start())
             else:
-                classification = "safe_negative" if _is_negated_mention(content, match.start()) else "forbidden"
+                classification = "safe_negative" if _is_negated_mention(
+                    content, match.start(), match.end() - match.start()) else "forbidden"
             if classification in seen_classifications:
                 continue
             seen_classifications.add(classification)
@@ -2577,7 +3038,11 @@ def validate_chapter_output(content: str, citation_ids: list[str], context: dict
             "未取得签署版保证合同": not any(item.get("document_kind") == "担保合同" for item in context.get("evidence", [])),
         }
         if phrase and phrase not in content and conditional.get(phrase, True):
-            reasons.append(f"缺少必需表达：{phrase}")
+            # 方案 §二 line 21：来源、评级意见和材料缺口边界**按实际状态由系统附加**，
+            # 取消"要求模型逐字输出固定句子"的**拒绝条件**。旧实现把它当硬失败
+            # （`reasons.append`→整章 rejected），模型换一种说法讲同样的边界就被判失败。
+            # 现在只记写作提示，不阻断保存与交付。
+            style_notes.append(f"未逐字写出系统必备表述：{phrase}（边界由系统附加，仅提示）")
     if context.get("has_missing"):
         markers = output.get("required_missing_markers", [])
         if markers and not any(marker in content for marker in markers):
@@ -2799,6 +3264,13 @@ def validate_chapter_output(content: str, citation_ids: list[str], context: dict
         })
     if unexpected_numbers:
         reasons.append("章节包含确定性草稿和证据之外的新数字")
+    # 内部记录 ID 写进正文（见 `_RECORD_ID_IN_BODY_RE` 注释）：与"新数字"同级的硬失败。
+    internal_record_ids = _internal_record_ids_in(content)
+    if internal_record_ids:
+        reasons.append(
+            "正文出现内部记录 ID（" + "、".join(internal_record_ids[:3]) + "），"
+            "记录 ID 只能写在 calculations.input_record_ids 中，正文引用请用 E01 这类别名"
+        )
     # 数字在允许集里还不够：还要看它**写在哪个科目/期间/主体/口径下**。把筹资活动现金流
     # 写成投资活动现金流时两个数都在材料里，只有**归属绑定**能拦住（修订稿 §3.1）。
     # 只看**模型自己写的正文**：系统表格/冲突块/来源边界是系统生成的，其内部行名与表格
@@ -2844,6 +3316,11 @@ def validate_chapter_output(content: str, citation_ids: list[str], context: dict
         # 带上具体片段，便于区分“模型真的引入了新主体”与“改写换了上下文”。
         shown = "、".join(item[-20:] for item in unknown_entities[:3])
         reasons.append(f"章节包含确定性草稿和证据之外的新主体：{shown}")
+    # 趋势/因果/预测的窄检查（方案 §二 line 20）：只进待核验，不进 reasons。
+    # 只扫叙述文字（表格行由系统附加，不是模型写的，扫了会误报）。
+    narrative_text = _narrative_text(content)
+    needs_review_items.extend(_trend_causal_advisories(narrative_text))
+    needs_review_items.extend(_type_evidence_advisories(narrative_text, context))
     length = assess_chapter_length(content, context)
     # 三态（修订稿 §2.2 / §3.1）：有硬失败 → rejected；否则有需要人工核验的发现 →
     # needs_review（不阻断单章保存，但计入独立指标、阻止最终交付）；否则 passed。
@@ -2876,6 +3353,7 @@ def validate_chapter_output(content: str, citation_ids: list[str], context: dict
         "needs_review_count": len(deduped_reviews),
         # 非敏感诊断（不保存被拒绝的模型正文）
         "unexpected_numbers": unexpected_numbers[:10],
+        "internal_record_ids": internal_record_ids[:10],
         "attribution_conflicts": attribution_conflicts[:10],
         "safe_unit_conversions": safe_unit_conversions[:10],
         "ignored_format_numbers": ignored_format_numbers[:20],

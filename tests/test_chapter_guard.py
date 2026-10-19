@@ -4,7 +4,8 @@ from backend.app import chapter_guard
 from backend.app.chapter_guard import build_chapter_context, validate_chapter_output
 from backend.app.chapter_prompts import (
     BOND_CHAPTER_KEYS, BOND_CHAPTER_PART, BOND_CHAPTER_PARTS, BOND_CHAPTER_TITLES,
-    _length_guidance, chapter_uses_llm, load_chapter_config, prompt_config_payload,
+    _length_guidance, chapter_uses_llm, compile_structured_prompt, load_chapter_config,
+    prompt_config_payload,
 )
 from backend.app.main import startup
 from backend.app.professional import sync_fact_assertions
@@ -101,14 +102,13 @@ def test_llm_chapters_define_report_narrative_and_concise_citations():
         assert narrative["tone"] == "professional_due_diligence"
         assert narrative["min_paragraphs"] >= 3
         assert narrative["max_paragraphs"] >= narrative["min_paragraphs"]
-        # 引用仍然必须**有界**。财务章是计划 §二 的试点：上限 3 → 8（财务引用处多，
-        # 3 条会把合法引用截断成"论据不全"）；其余模型章维持 ≤3 的精简引用契约。
-        limit = int(config["output_contract"]["max_citations"])
-        assert limit <= 8
-        if key == "financial":
-            assert limit == 8, "财务章试点引用上限：8 条"
-        else:
-            assert limit <= 3
+        # 方案 §二：「取消固定引用条数上限，允许引用本次实际提供的全部合法证据」。
+        # 0 = 不限；字段保留只为兼容历史显式覆盖（>0 才算真的设了上限）。
+        limit = int(config["output_contract"].get("max_citations") or 0)
+        assert limit == 0, f"{key} 不应再设固定引用上限，实际 {limit}"
+        # 现场编译（`chapter_prompt` 对有覆盖的章节返回 DB 存量文本，判断不了新契约）
+        compiled = compile_structured_prompt(key, config)
+        assert "最多引用" not in compiled, f"{key} 的 Prompt 不应下发引用上限"
 
 
 def test_context_is_scoped_to_rating_sources_and_hash_changes():
@@ -130,7 +130,15 @@ def test_validation_rejects_invalid_citation_new_number_and_forbidden_language()
     assert result["status"] == "rejected"
     assert result["invalid_citations"] == ["c-does-not-exist"]
     assert any("新数字" in reason for reason in result["reasons"])
-    assert any("禁止" in reason for reason in result["reasons"])
+    # 方案 §一：**建议承保已放行**（只是提议），不能再因它判"禁止表达"。
+    assert not any("建议承保" in reason for reason in result["reasons"]), result["reasons"]
+
+    # 仍被禁的表达继续拦截：投资建议（§一：本轮不扩展投资建议）
+    result = validate_chapter_output(
+        "据募集说明书披露，材料不足。综上，本章给出明确的投资建议：买入。",
+        ["c-source-1"], context,
+    )
+    assert any("禁止" in reason for reason in result["reasons"]), result["reasons"]
 
 
 def test_validation_requires_conflict_and_missing_markers():
@@ -934,9 +942,12 @@ def test_evidence_selection_respects_char_budget():
 def test_decision_words_are_judged_by_context_not_by_bare_word():
     """"担保额度/担保费率"按**完整语境**判定，不按裸词拦（修订稿 §3.1）。
 
-    三类必须分开：① 我们方做出担保决策 → 拒绝；② 否定声明 → 放行；③ 引用材料原文 → 放行。
+    四类必须分开：① 我们方**已作出**的担保决定 → 拒绝；② 否定声明 → 放行；
+    ③ 引用材料原文 → 放行；④ **提议/建议** → 放行（方案 §一：允许承保、拒保、额度与费率建议，
+    只是提议、须人工复核）。
     描述性提及（"反担保覆盖担保额度"）同样放行——描述责任上限不是越权结论。
-    这条同时守住"**不能用固定窗口共现替代语义边界**"：判定顺序是 否定 → 引用 → 决策动词。
+    这条同时守住"**不能用固定窗口共现替代语义边界**"：
+    判定顺序是 否定 → 引用 → 提议 → 决策动词。
     """
     from backend.app.chapter_guard import DEFAULT_FORBIDDEN, _decision_classification
 
@@ -948,9 +959,12 @@ def test_decision_words_are_judged_by_context_not_by_bare_word():
         term = "担保额度" if "担保额度" in text else "担保费率"
         return _decision_classification(text, text.index(term))
 
-    # ① 肯定决策 → 拒绝
-    assert classify("本章建议担保额度为2亿元，用于覆盖本期债券。") == "forbidden"
+    # ① 既成决定 → 拒绝
+    assert classify("本章核定担保额度为2亿元，用于覆盖本期债券。") == "forbidden"
     assert classify("核定担保费率为1.2%，按年收取。") == "forbidden"
+    # ④ 提议 → 放行（方案 §一允许额度/费率建议；旧实现把"建议"当决策动词，误拒）
+    assert classify("本章建议担保额度为2亿元，用于覆盖本期债券。") == "safe_recommendation"
+    assert classify("建议担保费率为1.2%，待人工复核。") == "safe_recommendation"
     # ② 否定声明 → 放行
     assert classify("不得输出承保、拒保、担保额度、担保费率或投资建议。") == "safe_negative"
     assert classify("本报告不构成投资建议，也不建议设定担保额度。") == "safe_negative"
@@ -1852,3 +1866,96 @@ def test_coverage_phrase_binds_metric_alias_and_formula():
     assert not any(item["reason"] == "label_mismatch" for item in result["attribution_conflicts"]), (
         result["attribution_conflicts"]
     )
+
+
+def test_post_negated_meta_statement_is_not_forbidden():
+    """后置否定（"…等同于可偿付现金的做法不成立"）不是承诺性结论（2026-10-16 第四轮试跑）。
+
+    中邮/华辰 cashflow 实测：模型写"经营现金流预测直接等同于可偿付现金的做法不成立"，
+    原实现只看命中位置**之前** 40 字，没有否定词 → 判 forbidden → 整章回退。
+    后置的"不成立/不正确"等元评价词同样是对该表述的否定，应归 safe_negative。
+    """
+    assert _forbidden_reasons(
+        "据募集说明书披露，经营现金流预测直接等同于可偿付现金的做法不成立；材料不足。",
+        key="cashflow") == []
+    # 负例①：肯定句（无否定）仍拒。
+    assert _forbidden_reasons(
+        "据募集说明书披露，经营现金流预测直接等同于可偿付现金；材料不足。", key="cashflow")
+    # 负例②："不足以覆盖"是业务事实（覆盖不足的结论），不属后置否定，仍拒。
+    assert _forbidden_reasons(
+        "据募集说明书披露，可偿付现金不足以覆盖本期利息；材料不足。", key="cashflow")
+
+
+# ------------------------------------- Decimal 精度溢出（2026-10-18 真实试跑崩溃）--
+
+
+def test_round_half_up_survives_long_decimal_metrics():
+    """28 位小数的指标值不能再让 `quantize` 抛 `InvalidOperation`。
+
+    真实故障：`_values_match` 用对侧小数位（28 位）舍入指标值，系数位数超过 Decimal
+    默认 28 位精度 → 未捕获的 `decimal.InvalidOperation` 被上层当成"模型调用失败"，
+    整章回退且诊断全空（找不到真正的出错点）。
+    """
+    from decimal import Decimal
+
+    from backend.app.chapter_guard import _round_half_up, _values_match
+
+    big = Decimal("1.5759000000000000000000000001")   # metrics 算出的比率形态
+    assert _round_half_up(big, 28) is not None          # 不抛异常即通过
+    assert _values_match(Decimal("1.58"), 2, big, 28) is True
+    assert _values_match(big, 28, Decimal("1.58"), 2) is True
+
+
+def test_round_half_up_keeps_display_precision_semantics():
+    from decimal import Decimal
+
+    from backend.app.chapter_guard import _round_half_up
+
+    assert _round_half_up(Decimal("1.235"), 2) == Decimal("1.24")
+    assert _round_half_up(Decimal("1.234"), 2) == Decimal("1.23")
+
+
+# --------------------------------------- 归属/advisory 的五处误报（2026-10-18）--
+# 北投 financial 单章再生实测：模型首稿措辞全部正确，却因下列误报被判 rejected。
+
+
+def test_delta_amount_has_no_single_period():
+    """变化量没有单一所属期间：「较上年末减少3.14亿元」不能绑到主句的 2025。
+
+    实测 written_period=2025 / expected=2024 → period_mismatch → 整章回退。
+    """
+    from backend.app.chapter_guard import _written_period
+
+    assert _written_period("募集说明书说明2025年末应收账款较上年末减少") is None
+    assert _written_period("2025年末应收账款较上年末增长") is None
+    # 普通取值仍要能取到年份（不能被上面这条放宽带偏）
+    assert _written_period("2024年末应收账款为") == "2024"
+
+
+def test_forecast_pattern_excludes_accounting_subjects():
+    """「预计负债」是资产负债表科目，不是预测。"""
+    from backend.app.chapter_guard import _FORECAST_PATTERN
+
+    assert _FORECAST_PATTERN.search("预计负债为103,591.43万元") is None
+    assert _FORECAST_PATTERN.search("预计费用率将上升") is None
+    # 真正的预测表述仍必须命中
+    assert _FORECAST_PATTERN.search("预计于2027年投产") is not None
+    assert _FORECAST_PATTERN.search("未来三年将达10亿元") is not None
+
+
+def test_narrative_text_strips_table_rows():
+    """系统表格块由服务端附加，不是模型写的，advisory 不该扫它。"""
+    from backend.app.chapter_guard import _narrative_text
+
+    raw = "存货上升（E01），主要系销量增长所致。\n| 预计负债 | 103,591.43 |\n| 合计 | 1 |"
+    text = _narrative_text(raw)
+    assert "|" not in text
+    assert "存货上升" in text
+
+
+def test_trend_advisory_ignores_system_table_rows():
+    """`| 预计负债 |` 不再被报成 deterministic_forecast。"""
+    from backend.app.chapter_guard import _trend_causal_advisories, _narrative_text
+
+    raw = "| 预计负债 | 103,591.43 | 86,994.53 | 70,720.21 |"
+    assert _trend_causal_advisories(_narrative_text(raw)) == []

@@ -29,7 +29,10 @@ from backend.app.schemas import LlmSection, SectionRegenerateRequest
 
 PROJECT_ID = "demo-bond-huachen"
 CHAPTER = "rating"                       # 模型章节，且确定性模板能通过自身输出契约
-FORBIDDEN = "建议通过担保"                # 命中 _report_boundary_safe 的禁止结论
+# 命中 `_report_boundary_safe` 的"冒充已决定"结论。
+# ⚠️ 不能用"建议通过担保"：《风控约束分层》§一 允许承保/拒保**建议**，
+# 该句已从禁止表移除（2026-10-17）。用带决策主语"本所"的既成表述才仍被拦。
+FORBIDDEN = "本所同意担保"
 INITIAL_REASON = "章节包含禁止的承保或审批结论"
 
 

@@ -385,3 +385,26 @@ def test_report_task_still_retries_transport_failures(monkeypatch):
 
     assert body["content"] == "ok"
     assert len(calls) == 2                                  # 传输层仍重试同一请求
+
+
+# ------------------------------------------------- 报告输入预算的量级守卫 --
+
+
+def test_report_input_budget_is_wide_enough_for_fact_heavy_chapters():
+    """报告预算必须给事实密集章节留足余量（模型是 1M 上下文）。
+
+    2026-10-18 实测：北投 financial 的 user message 73,682 字符 ≈ 56,105 tokens，
+    在 64k 下超限 15% → 裁剪把 `record_index` 整条丢光 → 模型看不到明细科目 →
+    复算必然不符 → 整章回退。这条守卫防止有人把预算改回过小的值。
+    """
+    from backend.app.config import settings
+
+    assert settings.llm_report_max_chars >= 200_000
+
+
+def test_usage_records_sent_chars_without_breaking_positional_args():
+    """`input_chars` 必须能记录，且不能破坏既有的位置传参。"""
+    usage = llm.LlmUsage(100, 200, 30, 0.5)
+    assert (usage.input_tokens, usage.output_tokens, usage.latency_ms, usage.cost) == (100, 200, 30, 0.5)
+    assert usage.input_chars == 0
+    assert llm.LlmUsage(input_chars=1234).input_chars == 1234

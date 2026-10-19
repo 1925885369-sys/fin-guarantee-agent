@@ -97,6 +97,10 @@ class LlmUsage:
     response_keys: list[str] = field(default_factory=list)
     response_field_counts: dict[str, int] = field(default_factory=dict)
     response_value_types: dict[str, str] = field(default_factory=dict)
+    # 本次实际发送的 user message 字符数（预算口径）。与 `input_tokens` 一起看，
+    # 就能算出真实的「字符/token」比，下次调 `llm_report_max_chars` 不必再离线估算。
+    # ⚠️ 必须放在**末尾**：`LlmUsage(input_tokens, output_tokens, 0, cost)` 是位置传参。
+    input_chars: int = 0
 
 
 @dataclass(frozen=True)
@@ -484,7 +488,12 @@ def _compact_json(payload: object) -> str:
 # 报告任务请求里允许**整条丢弃**的相关性列表键，按丢弃先后排列（修订稿 §2.1 / §3.2）。
 # 顶层 ``evidence`` 先丢，其次 ``chapter_context`` 里的事实/指标/交叉核验记录。
 # 这些列表上游已按章节相关性排序，因此一律**从尾部**丢掉整条记录。
-_REPORT_CONTEXT_DROPPABLE_KEYS = ("facts", "metrics", "cross_checks")
+# 丢弃顺序即**优先级倒序**：`record_index` 放最前，先裁它。
+# 理由：证据（evidence/facts/metrics）驱动正文内容，裁了会直接掉分析质量；
+# 索引只服务"模型自主计算"这一可选能力。裁剪是**按条目**进行的——被裁掉的记录仍
+# 完整存在于 `evidence_records` 里，`verify_calculation` 认的是记录全集，
+# 所以"模型看不到"不会变成"引用未冻结输入"的硬失败，只影响它能主动用哪些 ID。
+_REPORT_CONTEXT_DROPPABLE_KEYS = ("record_index", "facts", "metrics", "cross_checks")
 
 
 def _report_droppable_lists(payload: object) -> list[list]:
@@ -633,7 +642,7 @@ def _chat_json(system_prompt: str, prompt: str, *, schema: type[SchemaT] | None 
     last_raw_content = ""
     repair_used = False
     thinking_fallback_used = False
-    total_usage = LlmUsage()
+    total_usage = LlmUsage(input_chars=len(prompt))
     for attempt in range(1, 4):
         _run_budget(context)
         started = time.perf_counter()
@@ -1084,10 +1093,16 @@ def one_shot_baseline(project: dict, source_rows: list[dict], context: LlmCallCo
 MODEL_CONTEXT_KEYS = (
     "project_id", "conflict_block", "facts", "metrics", "cross_checks",
     "allowed_periods", "selected_scope", "origin_types", "length_policy", "prompt_config",
+    # 业务规则与可引用记录索引（方案 §三.1）：模型要靠 record_index 填
+    # `calculations.input_record_ids`，靠 policy 知道能不能自算/提建议。
+    "calculation_policy", "recommendation_policy", "record_index",
 )
 MODEL_FACT_KEYS = ("fact_key", "name", "period", "scope", "value", "unit", "raw_value",
                    "text_value", "assertion_status")
-MODEL_METRIC_KEYS = ("metric_key", "period", "value", "unit", "formula", "status")
+# `name` 必须投影：不给中文名，模型只看到 `metric_key=cash_profit_ratio`，
+# 会以为"系统没算这个指标"而自己拿 fact 去除它以这个指标当分母 → 量纲错、整章回退
+# （2026-10-18 北投 cashflow 三条全栽在这里）。
+MODEL_METRIC_KEYS = ("metric_key", "name", "period", "value", "unit", "formula", "status")
 MODEL_CHECK_KEYS = ("rule_key", "status", "title", "summary", "formula", "result_value",
                     "values", "thresholds")
 MODEL_EVIDENCE_KEYS = ("document_kind", "filename", "locator", "page", "quote", "entity_role")
@@ -1108,6 +1123,10 @@ def _model_facts(facts: list[dict], source_alias: dict[str, str]) -> list[dict]:
     projected = []
     for fact in facts:
         item = {key: fact[key] for key in MODEL_FACT_KEYS if fact.get(key) not in (None, "", [])}
+        # 冻结记录的 ID 必须让模型看得见，否则 `calculations.input_record_ids` 无从填写。
+        # 与 `evidence_records` 的编号规则保持一致（`fact:<id>`）。
+        if fact.get("id"):
+            item["record_id"] = f"fact:{fact['id']}"
         aliases = [source_alias[source_id] for source_id in fact.get("source_ids") or [] if source_id in source_alias]
         if aliases:
             item["source_aliases"] = list(dict.fromkeys(aliases))
@@ -1119,6 +1138,9 @@ def _model_metrics(metrics: list[dict], source_alias: dict[str, str]) -> list[di
     projected = []
     for metric in metrics:
         item = {key: metric[key] for key in MODEL_METRIC_KEYS if metric.get(key) not in (None, "", [])}
+        # 同上：`metric:<metric_key>:<period>` 与记录侧编号一致。
+        if metric.get("metric_key"):
+            item["record_id"] = f"metric:{metric['metric_key']}:{metric.get('period') or ''}"
         aliases = [source_alias[source_id] for source_id in metric.get("source_ids") or [] if source_id in source_alias]
         if aliases:
             item["source_aliases"] = list(dict.fromkeys(aliases))
@@ -1183,6 +1205,8 @@ LENGTH_REPAIR_RULE = (
     "只调整正文长度到目标范围：不得新增或删除事实、数字、引用 ID、主体、风险状态和结论，"
     "不得改变章节结构与证据边界，不得为凑长度重复同一事实；"
     "系统表格、冲突披露块与来源边界块由服务端拼接，不要复制进正文。"
+    # 压缩是有界操作：改计算属于超出授权范围（要改计算就走安全修复）。
+    "不得修改、新增或删除 calculations 中的公式与数值；压缩后正文里用到的指标值必须与压缩前一致。"
 )
 
 SAFETY_REPAIR_RULE = (
@@ -1190,6 +1214,20 @@ SAFETY_REPAIR_RULE = (
     "投资结论；把数字修正到正确的科目、期间、主体与口径归属。逐字保留全部合法正文；"
     "系统表格、冲突披露块与来源边界块由服务端拼接，不要在 content 中复制。"
     "不得引入任何新的数字、主体或结论，不得新增或删除引用 ID。"
+    # 2026-10-16 第四轮复核：模型常把两个披露值自行相加写成"合计"（中邮 financial
+    # "应付债券与应付短期融资款合计由491,193.24万元升至682,249.17万元"——两个加数
+    # 都有记录、和没有）。自行计算的合计值不在证据范围内，必须改写。
+    "由多个披露值自行加总、相减或换算得到的合计/差额不得保留：改写为分别引用各构成项"
+    "（如『应付债券 X 万元、应付短期融资款 Y 万元』），或整句删除该合计值。"
+    # 「新数字」的首选修法不是删分析，而是**声明**（2026-10-17 真实试跑：模型把合计/差值
+    # 直接写进正文被拒，修复轮又只能删句子，等于把有价值的分析削掉）。
+    "若 details.unexpected_numbers 里的数值是你自己算出来的：优先在 calculations 中声明"
+    "（写清公式与输入记录 ID），**不要**因此删掉该分析；只有确实追不到冻结记录时，"
+    "才删除该数值或改写为“材料不足”。"
+    # 风控约束分层 §三.3：计算错了不能只改数字，必须连分析一起改。
+    "若 details.calculations 标出了计算错误：按给定公式与输入记录重新计算，或在正文中改写/删除"
+    "依赖该指标的分析；**不得只把数字换成另一个数而保留原有分析**；被标为错误且未修正的指标，"
+    "其值不得继续出现在正文；仍然依赖的计算必须按原 calculation_id 与公式原样回填，不要换名。"
 )
 
 # 安全修复诊断的发送上限：每类最多 10 条，整体 JSON 字符数封顶，避免把被拒稿细节整段回灌。
@@ -1209,6 +1247,30 @@ def _safety_repair_details(validation: dict) -> dict:
     """
     keys = ("unexpected_numbers", "attribution_conflicts", "forbidden_matches", "invalid_citations")
     details: dict = {key: list(validation.get(key) or [])[:_SAFETY_DETAIL_LIMIT] for key in keys}
+    # 计算错误必须点名下发（方案 §三.3「计算或正文错误使用原有的一次修复，同时修正指标及相关分析」）：
+    # 只说"有计算错误"，修复模型只能盲改数字。
+    calculation_errors = [
+        {
+            "calculation_id": str(item.get("calculation_id") or ""),
+            "name": str(item.get("name") or "")[:40],
+            "reason_code": str(item.get("reason_code") or ""),
+            "formula": str(item.get("formula") or "")[:120],
+            "input_record_ids": list(item.get("input_record_ids") or [])[:6],
+            "declared": str(item.get("value") or ""),
+            "computed": str(item.get("computed") or ""),
+            # 输入实际指向：`科目名@期间=值`——让模型看清自己填的是哪一行。
+            "inputs": [
+                f"{entry.get('label') or entry.get('record_id')}@{entry.get('period') or '—'}"
+                f"={entry.get('value')}{entry.get('unit') or ''}"
+                for entry in (item.get("inputs") or [])
+            ][:6],
+            "anchor": str(item.get("anchor") or "")[:120],
+        }
+        for item in (validation.get("calculation_trace") or [])
+        if str(item.get("status") or "") == "rejected"
+    ][:_SAFETY_DETAIL_LIMIT]
+    if calculation_errors:
+        details["calculations"] = calculation_errors
     if validation.get("support_failed"):
         items = [
             {
@@ -1239,10 +1301,19 @@ def _safety_repair_details(validation: dict) -> dict:
 
 # 编译器在 system prompt 尾部的输出约定句（chapter_prompts 两个编译器同源）。
 _CONTENT_JSON_CONVENTION = "输出严格 JSON：{\"content\":\"Markdown正文\",\"citation_ids\":[\"允许的引用ID\"]}。"
-_SUBSECTION_JSON_CONVENTION = (
-    "输出严格 JSON：{\"subsections\":[{\"subsection_id\":\"清单中的小节ID\",\"content\":\"该小节 Markdown 正文\","
-    "\"citation_ids\":[\"允许的引用ID\"]}],\"citation_ids\":[\"本章其余引用ID\"]}。"
-)
+def _subsection_json_convention(extra_keys: str = "") -> str:
+    """小节模式的输出形状。
+
+    ⚠️ `extra_keys` 不能省：小节模式会把 content 形状整句替换掉，若不带
+    `calculations`/`recommendations`，模型就是"被要求算但没处放"——
+    2026-10-18 实测 financial（4 个小节）连续 3 次返回 0 条 calculations 正是这个原因。
+    """
+    return (
+        "输出严格 JSON：{\"subsections\":[{\"subsection_id\":\"清单中的小节ID\","
+        "\"content\":\"该小节 Markdown 正文\",\"citation_ids\":[\"允许的引用ID\"]}],"
+        "\"citation_ids\":[\"本章其余引用ID\"]" + (extra_keys or "") + "}。"
+        + ("数组没有内容时写 []，**禁止省略这些键**。" if extra_keys else "")
+    )
 # 小节输出段落的哨兵标记：重复调用时先截断到标记前再整体重注入，保证幂等。
 _SUBSECTION_SECTION_MARK = "【小节输出契约】"
 
@@ -1282,7 +1353,8 @@ def _subsection_instructions(subsections: list[dict]) -> str:
     )
 
 
-def apply_subsection_contract(system_prompt: str, subsections: list[dict]) -> str:
+def apply_subsection_contract(system_prompt: str, subsections: list[dict], *,
+                                replace_contract: str = "", extra_keys: str = "") -> str:
     """把小节组织指令并入 system prompt（替代 required_sections 组织句与 content 输出约定）。
 
     **幂等**：上次注入的整段（哨兵标记起）先被截断，再按当前清单整体重注入；
@@ -1293,11 +1365,14 @@ def apply_subsection_contract(system_prompt: str, subsections: list[dict]) -> st
         return prompt
     if _SUBSECTION_SECTION_MARK in prompt:
         prompt = prompt.split(_SUBSECTION_SECTION_MARK)[0].rstrip()
+    # 剥掉**当前生效的**输出形状句（新旧两种都要剥：老库存文本用的是常量版）。
+    if replace_contract:
+        prompt = prompt.replace(replace_contract, "").rstrip()
     prompt = prompt.replace(_CONTENT_JSON_CONVENTION, "").rstrip()
     # 固定的三级结构替代重复的组织指令（PLAN_new.md §三）：移除章级"必须保留内容区块"句。
     prompt = re.sub(r"必须保留以下内容区块：[^。]*。", "", prompt).rstrip()
     prompt = (
-        f"{prompt}\n{_SUBSECTION_SECTION_MARK}\n{_SUBSECTION_JSON_CONVENTION}\n"
+        f"{prompt}\n{_SUBSECTION_SECTION_MARK}\n{_subsection_json_convention(extra_keys)}\n"
         f"{_subsection_instructions(subsections)}"
     )
     return re.sub(r"[ \t]{2,}", " ", prompt).strip()
@@ -1357,6 +1432,54 @@ def assemble_subsections(entries: list, subsections: list[dict], alias_to_citati
     return "\n\n".join(parts), citations
 
 
+# 结构化数组的条数上限（方案 §三.1 / §四：`calculations` 每条带定义与公式，
+# 上限 24 条约 4~6k tokens；建议 6 条足够覆盖承保/拒保/额度/费率四类）。
+MAX_CALCULATIONS = 24
+MAX_RECOMMENDATIONS = 6
+
+
+def _normalize_structured_arrays(result: "LlmSection") -> "LlmSection":
+    """规整 `calculations` / `recommendations` 的 ID 与条数——**只做形状，不做业务判定**。
+
+    - 空 ID 补 `c1..` / `r1..`（模型经常省略，但下游要靠 ID 关联正文与台账）；
+    - 重复 ID 只保留首条（同 ID 两条会让"正文关联哪条"变成二义）；
+    - 超上限截断（上限见 `MAX_*`）；
+    - `recommendation_type` 归一为小写。
+
+    复算、依据校验、anchor 命中都在 `chapter_calculations`（B2）里做——这里动业务判定
+    会让"结构修复"和"内容修复"纠缠在一起。
+    """
+    calculations = []
+    seen_calc: set[str] = set()
+    for index, item in enumerate(result.calculations or [], start=1):
+        calc_id = str(getattr(item, "calculation_id", "") or "").strip()
+        if not calc_id:
+            calc_id = f"c{index}"
+        if calc_id in seen_calc:
+            continue
+        seen_calc.add(calc_id)
+        item.calculation_id = calc_id
+        calculations.append(item)
+        if len(calculations) >= MAX_CALCULATIONS:
+            break
+    result.calculations = calculations
+
+    recommendations = []
+    seen_rec: set[str] = set()
+    for index, item in enumerate(result.recommendations or [], start=1):
+        rec_id = str(getattr(item, "recommendation_id", "") or "").strip() or f"r{index}"
+        if rec_id in seen_rec:
+            continue
+        seen_rec.add(rec_id)
+        item.recommendation_id = rec_id
+        item.recommendation_type = str(getattr(item, "recommendation_type", "") or "other").strip().lower() or "other"
+        recommendations.append(item)
+        if len(recommendations) >= MAX_RECOMMENDATIONS:
+            break
+    result.recommendations = recommendations
+    return result
+
+
 def _finalize_report_section(body: dict, alias_to_citation: dict[str, str], allowed: set[str],
                              strict_citations: bool, subsections: list[dict],
                              *, require_complete: bool, usage: LlmUsage | None = None,
@@ -1412,7 +1535,7 @@ def _finalize_report_section(body: dict, alias_to_citation: dict[str, str], allo
             f"{prefix}响应缺少正文内容",
             usage, raw_content=json.dumps(body, ensure_ascii=False),
         )
-    return result
+    return _normalize_structured_arrays(result)
 
 
 def _report_request(title: str, content: str, evidence: list[dict], context: LlmCallContext | None,
@@ -1437,13 +1560,24 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
     )
     # 生成模式：``generate`` 时请求体**不携带确定性分析正文作创作边界**（草稿在服务端保留，
     # 仍用于允许集与回退）。结构、行文顺序与篇幅交给项目 Prompt 与章节上下文（修订稿 §3.2）。
+    # 这些是**运行时文案**用的边界句助手：请求体与 system prompt 两处都要用，
+    # 必须在请求构造**之前**导入（否则请求体里引用会 NameError）。
+    from .chapter_prompts import (
+        DEFAULT_CALCULATION_MODE, DEFAULT_RECOMMENDATION_MODE, LEGACY_BOUNDARY_SENTENCES,
+        LEGACY_CALCULATION_SENTENCES, LEGACY_DECISION_SENTENCES, REWRITE_BOUNDARY_SENTENCE,
+        calculation_boundary_sentence, claim_boundary_sentence, extra_shape_keys,
+        recommendation_boundary_sentence, structured_array_contract, structured_json_shape,
+    )
+
     mode = str(chapter_config.get("generation_mode") or "rewrite")
     if mode == "generate":
         request = {
             "section": title,
             "generation_scope": (
                 "基于 chapter_context 中的事实、指标、规则核验结果、证据原文与冲突披露直接撰写完整分析正文；"
-                "不得引入材料中没有的数字、主体、年度或评级；不得自行计算或换算；"
+                "不得引入材料中没有的数字、主体、年度或评级；"
+                + calculation_boundary_sentence(chapter_config)
+                + " "
                 # 旧句是"系统数据表、冲突披露块与来源边界块逐字保留；表格由系统附入、不得自行绘制"。
                 # 与 v4 契约（只下发结构化摘要、完整 Markdown 留服务端）**直接矛盾**：模型手里没有
                 # 逐字原文，"逐字保留"既做不到又诱导它把 24k 表格块抄进正文。与
@@ -1451,7 +1585,7 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
                 "系统表格、冲突披露块与来源边界块由服务端在正文后原样附加——只返回分析正文和引用 ID，"
                 "不要输出、复制或重写系统表格，正文不重复逐行列示；"
                 "冲突事实并列，缺失信息写“材料不足”；"
-                "不得输出承保、拒保、担保额度、担保费率、债券评级或投资建议。"
+                + recommendation_boundary_sentence(chapter_config)
             ),
             "required_elements": chapter_config.get("required_sections", []),
             "preserve_blocks": chapter_config.get("preserve_blocks", []),
@@ -1464,7 +1598,10 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
         request = {
             "section": title,
             "deterministic_draft": content,
-            "rewrite_scope": "只改善表达；确定性草稿是允许主张的唯一边界，不得增加、删除或改变事实、数字、状态和结论",
+            # `REWRITE_BOUNDARY_SENTENCE` 本身已以"只改善表达"开头，不要再加前缀。
+            "rewrite_scope": (
+                REWRITE_BOUNDARY_SENTENCE + " " + calculation_boundary_sentence(chapter_config)
+            ),
             "required_sections": chapter_config.get("required_sections", []),
             "preserve_blocks": chapter_config.get("preserve_blocks", []),
             "allowed_citation_ids": [citation_alias.get(cid, cid) for cid in sorted(allowed)],
@@ -1487,25 +1624,45 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
         )
     prompt_project_id = context.project_id if context else str((chapter_context or {}).get("project_id") or "")
     system_prompt = chapter_prompt(chapter_key, prompt_project_id) if chapter_key else SYSTEM_PROMPT
-    if mode == "generate":
-        # **幂等兜底 + 旧句迁移**：`chapter_prompt()` 的解析顺序是「项目覆盖 > 全局默认 >
-        # YAML」，而库里存的是**当时编译好的文本**——可能仍写着"确定性草稿是允许主张的
-        # 唯一边界"（改写模式旧句），或"系统数据表…必须逐字保留，表格一律由系统附入"
-        # （表格回声的旧矛盾句，三项遗留修复方案 §二）。这里就地删旧句、补新句：
-        # 只替换系统自动编译的边界句，用户自定义的业务目标/结构/篇幅不受影响。
-        from .chapter_prompts import (
-            GENERATE_BOUNDARY_SENTENCE, LEGACY_BOUNDARY_SENTENCES, REWRITE_BOUNDARY_SENTENCE,
-        )
-
-        system_prompt = system_prompt.replace(REWRITE_BOUNDARY_SENTENCE, "").rstrip()
-        for legacy in LEGACY_BOUNDARY_SENTENCES:
+    # **幂等兜底 + 旧句迁移**（两种生成模式都执行）：`chapter_prompt()` 的解析顺序是
+    # 「项目覆盖 > 全局默认 > YAML」，而库里存的是**当时编译好的文本**——可能仍写着
+    # "确定性草稿是**唯一**边界"、"不得由模型计算…"、"不得输出承保、拒保…"。
+    # 只替换系统自动编译的边界句，用户自定义的业务目标/结构/篇幅不受影响。
+    #
+    # 旧句清单里既有"表格回声"旧句（三项遗留修复方案 §二），也有计算/建议旧禁令
+    # （风控约束分层方案 §二 line 18）。后者只在模式**允许**时才剥掉——mode=off 时
+    # 那句仍是对的，剥了反而少一道约束。
+    calc_mode = str(chapter_config.get("calculation_mode") or DEFAULT_CALCULATION_MODE)
+    rec_mode = str(chapter_config.get("recommendation_mode") or DEFAULT_RECOMMENDATION_MODE)
+    for legacy in (*LEGACY_BOUNDARY_SENTENCES, REWRITE_BOUNDARY_SENTENCE):
+        system_prompt = system_prompt.replace(legacy, "").rstrip()
+    if calc_mode == "model":
+        for legacy in LEGACY_CALCULATION_SENTENCES:
             system_prompt = system_prompt.replace(legacy, "").rstrip()
-        if GENERATE_BOUNDARY_SENTENCE not in system_prompt:
-            system_prompt = f"{system_prompt}\n{GENERATE_BOUNDARY_SENTENCE}"
+    if rec_mode in ("structured", "qualitative"):
+        for legacy in LEGACY_DECISION_SENTENCES:
+            system_prompt = system_prompt.replace(legacy, "").rstrip()
+    boundary = claim_boundary_sentence(chapter_config)
+    if boundary not in system_prompt:
+        system_prompt = f"{system_prompt}\n{boundary}"
+    # 输出契约：**形状句 + 规则段**一起按当前生效配置补。
+    # ⚠️ 只补规则不补形状是不够的（2026-10-18 实测）：模型照抄 `{content, citation_ids}`
+    # 就收尾，calculations 连续 3 次为 0。
+    shape = structured_json_shape(chapter_config)
+    rules = structured_array_contract(chapter_config)
+    if _CONTENT_JSON_CONVENTION in system_prompt and shape not in system_prompt:
+        # 老库存文本：先剥旧形状句（含"追加…"的旧规则段），再补新的一套。
+        system_prompt = system_prompt.replace(_CONTENT_JSON_CONVENTION, "").rstrip()
+    if shape not in system_prompt:
+        system_prompt = f"{system_prompt}\n{shape}{rules}"
     # P1-2：有小节配置的章节，输出契约改为按小节分条返回（替代重复的组织指令）。
+    # 小节形状必须**带着**额外数组键，否则等于"要求模型算，却没给它放的地方"。
     subsections = _context_subsections(chapter_context)
     if subsections:
-        system_prompt = apply_subsection_contract(system_prompt, subsections)
+        system_prompt = apply_subsection_contract(
+            system_prompt, subsections,
+            replace_contract=shape, extra_keys=extra_shape_keys(chapter_config),
+        )
         if isinstance(request, dict):
             request.pop("required_sections", None)
             request.pop("required_elements", None)

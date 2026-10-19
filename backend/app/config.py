@@ -31,7 +31,19 @@ class Settings:
     # 抽取批次按材料切分，单批可控；报告上下文整章一次送入。用同一个上限会让
     # 事实密集的章节（财务/债务）在裁剪到 128 字符后仍然超限而被直接放弃，
     # 整章退回确定性草稿。这里给报告链路单独一个更大的预算。
-    llm_report_max_chars: int = int(os.getenv("LLM_REPORT_MAX_CHARS", "64000"))
+    # 报告链路输入预算（**字符**，只算 user message，不含 system prompt）。
+    #
+    # 取值依据（2026-10-18 北投实测，模型 deepseek-v4-flash 1M 窗口）：
+    # - financial 是最大章：user message 73,682 字符 ≈ 56,105 tokens（真实调用计量），
+    #   即 **1 token ≈ 1.16 字符**（中文正文 + JSON 结构）；
+    # - 80k 字符只占 1M 窗口的 6.9%，而 64k 时该章 115% 超限 → 裁剪把 record_index
+    #   整条丢光 → 模型看不到明细科目 → 复算不符 → 整章回退（历史故障）；
+    # - 400k 字符 ≈ 345k tokens，占窗口 34.5%，是当前最大章的 5.4 倍：
+    #   材料翻几倍也不触发裁剪，同时给输出（10k tokens）与安全余量留足空间。
+    #
+    # ⚠️ 这是**上限**不是配额：短章节（cashflow 25.6k / debt 22k 字符）一个字都不会多送，
+    # 成本不因抬高上限而增加。裁剪机制保留，只作为异常长章的兜底。
+    llm_report_max_chars: int = int(os.getenv("LLM_REPORT_MAX_CHARS", "400000"))
     llm_extract_batch_max_sources: int = int(os.getenv("LLM_EXTRACT_BATCH_MAX_SOURCES", "3"))
     llm_extract_max_batches: int = int(os.getenv("LLM_EXTRACT_MAX_BATCHES", "16"))
     llm_extract_sources_per_topic: int = int(os.getenv("LLM_EXTRACT_SOURCES_PER_TOPIC", "2"))
@@ -43,7 +55,11 @@ class Settings:
     # ``llm_max_output_tokens`` 钳制，但抽取等其他任务仍然受。
     llm_report_max_output_tokens: int = int(os.getenv("LLM_REPORT_MAX_OUTPUT_TOKENS", "10000"))
     llm_connect_timeout_seconds: float = float(os.getenv("LLM_CONNECT_TIMEOUT_SECONDS", "10"))
-    llm_read_timeout_seconds: float = float(os.getenv("LLM_READ_TIMEOUT_SECONDS", "60"))
+    # 读超时必须配得上 `llm_report_max_chars`：北投实测 56,105 tokens → 23.9s
+    # （约 0.43 ms/token），按此外推 400k 字符（≈345k tokens）≈ 150-170s，
+    # 原来的 60s 会在长章上直接超时失败（而超时会被当成传输错误重试，白等两轮）。
+    # 300s 留约 45% 余量；短章节仍是 20s 左右返回，不受影响。
+    llm_read_timeout_seconds: float = float(os.getenv("LLM_READ_TIMEOUT_SECONDS", "300"))
     llm_write_timeout_seconds: float = float(os.getenv("LLM_WRITE_TIMEOUT_SECONDS", "30"))
     llm_pool_timeout_seconds: float = float(os.getenv("LLM_POOL_TIMEOUT_SECONDS", "10"))
     llm_latency_anomaly_seconds: float = float(os.getenv("LLM_LATENCY_ANOMALY_SECONDS", "90"))
