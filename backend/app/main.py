@@ -71,7 +71,8 @@ from .report_outline_store import (
     payload_sha256, save_outline, validate_outline,
 )
 from .schemas import (
-    CandidateDecision, DocumentUpdate, EntityProfileCreate, EntityProfileUpdate, ReportOutlineUpdate, ReportTableRefresh,
+    CandidateDecision, DocumentUpdate, EntityProfileCreate, EntityProfileUpdate, ReportOutlineUpdate,
+    ReportRecommendationDecision, ReportTableRefresh,
     FactGroupResolve, FactUpdate, MaterialQARequest, ProfileImportCommit, ProjectCreate, ProjectUpdate, PromptEditableConfig, ReportPromptPreview, ReportPromptUpdate, ReviewTaskUpdate, RunCreate, SectionRegenerateRequest, SectionUpdate, TableCellReview,
 )
 from .security import check_rate, cleanup_expired_projects, validate_magic
@@ -1372,6 +1373,82 @@ def apply_review(project_id: str, x_project_token: Optional[str] = Header(defaul
     return result
 
 
+@app.get("/api/projects/{project_id}/report-recommendations")
+def list_report_recommendations(project_id: str,
+                                x_project_token: Optional[str] = Header(default=None),
+                                status: Optional[str] = Query(default=None)) -> dict:
+    """建议草案列表（方案 §四 line 52~55）。
+
+    默认只返回**当前有效**的（`pending`/`confirmed`/`stale`）；`superseded` 是历史留存，
+    显式传 `status=superseded` 才看得到。每条带服务端渲染并冻结的 `draft_text`。
+    """
+    _authorize(project_id, x_project_token)
+    query = ("SELECT * FROM report_recommendations WHERE project_id=? "
+             + ("AND status=? " if status else "AND status!='superseded' ")
+             + "ORDER BY section_key,rowid")
+    params = (project_id, status) if status else (project_id,)
+    items = []
+    counts: dict[str, int] = {}
+    for record in rows(query, params):
+        entry = dict(record)
+        entry["basis_record_ids"] = json_load(entry.get("basis_record_ids") or "[]")
+        entry["preconditions"] = json_load(entry.get("preconditions") or "[]")
+        entry["parameters"] = json_load(entry.get("parameters_json") or "{}")
+        entry.pop("parameters_json", None)
+        counts[entry["status"]] = counts.get(entry["status"], 0) + 1
+        items.append(entry)
+    return {"items": items, "counts": counts}
+
+
+@app.patch("/api/projects/{project_id}/report-recommendations/{recommendation_id}")
+def review_report_recommendation(project_id: str, recommendation_id: str,
+                                 payload: ReportRecommendationDecision,
+                                 x_project_token: Optional[str] = Header(default=None)) -> dict:
+    """逐条确认/驳回一条建议草案。
+
+    规则（方案 §四 line 54~55）：
+
+    - `confirmed` 只表示"报告采用该建议"，**不代表业务担保审批**（`decision_scope` 固定）；
+    - `stale` 允许重新确认（正文差异人工核对后）；
+    - `superseded` 只读留档，不能再确认（返回 409）；
+    - 带 `expected_section_sha256` 且与当前正文不符 → 409（正文变了，别给旧正文背书）。
+    """
+    _ensure_project_writable(_authorize(project_id, x_project_token))
+    record = row("SELECT * FROM report_recommendations WHERE project_id=? AND id=?",
+                 (project_id, recommendation_id))
+    if not record:
+        raise HTTPException(404, "建议不存在")
+    if record["status"] == "superseded":
+        raise HTTPException(409, "该建议已被新一轮生成取代，只读留档，不能再确认")
+    section = row("SELECT content_sha256 FROM report_sections WHERE project_id=? AND section_key=?",
+                  (project_id, record["section_key"]))
+    current_sha = str((section or {}).get("content_sha256") or "")
+    expected = str(payload.expected_section_sha256 or "")
+    if expected and current_sha and expected != current_sha:
+        raise HTTPException(409, "正文已变化，请重新加载后再确认建议")
+    # 确认时的正文哈希必须与建议冻结时一致；不一致说明正文变了（stale），
+    # 前端应提示先复核正文——这里允许确认但把最新哈希落定，避免"确认了却没对上"。
+    stamp = now_iso()
+    execute(
+        "UPDATE report_recommendations SET status=?,decision_scope='report_adoption',"
+        "decision_note=?,decided_by='human',decided_at=?,updated_at=?,section_content_sha256=? "
+        "WHERE project_id=? AND id=?",
+        (payload.decision, payload.note, stamp, stamp, current_sha or record["section_content_sha256"],
+         project_id, recommendation_id),
+    )
+    audit_event(
+        project_id,
+        "report_recommendation_confirm" if payload.decision == "confirmed" else "report_recommendation_reject",
+        "report_recommendation", recommendation_id,
+        {"status": record["status"], "basis_hash": record["basis_hash"]},
+        {"status": payload.decision, "note": payload.note, "decision_scope": "report_adoption"},
+        "human",
+    )
+    fresh = row("SELECT * FROM report_recommendations WHERE project_id=? AND id=?",
+                (project_id, recommendation_id))
+    return dict(fresh or {})
+
+
 @app.post("/api/projects/{project_id}/report/mark-reviewed")
 def mark_report_as_reviewed(project_id: str, x_project_token: Optional[str] = Header(default=None)) -> dict:
     _ensure_project_writable(_authorize(project_id, x_project_token))
@@ -1477,6 +1554,19 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
     for section in sections:
         section["title"] = _normalize_report_text(str(section.get("title") or ""), _title_numbers)
     labels = section_labels(sections, outline=outline_for_grouping(project_id))
+    # 建议草案（方案 §四 line 52~55）：只列**当前有效**的（`superseded` 是历史留存，
+    # 用于回溯"报告曾经提出过什么"，不进当前报告）。逐条带状态，前端据此显示待确认/已确认。
+    recommendations_by_section: dict[str, list[dict]] = {}
+    for item in rows(
+        "SELECT * FROM report_recommendations WHERE project_id=? AND status!='superseded' "
+        "ORDER BY rowid", (project_id,),
+    ):
+        entry = dict(item)
+        entry["basis_record_ids"] = json_load(entry.get("basis_record_ids") or "[]")
+        entry["preconditions"] = json_load(entry.get("preconditions") or "[]")
+        entry["parameters"] = json_load(entry.get("parameters_json") or "{}")
+        entry.pop("parameters_json", None)
+        recommendations_by_section.setdefault(entry["section_key"], []).append(entry)
     subject = _project_subject(project_id)
     project_revision = report_state(project_id)
     for section in sections:
@@ -1512,6 +1602,18 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
         }
         section["length_status"] = section.get("length_status") or "not_checked"
         section["length_repair_attempted"] = bool(section.get("length_repair_attempted"))
+        # 计算轨迹（《风控约束分层》§三.1 / §四）：随正文冻结，接口与导出据此对照
+        # "这一章算了哪些指标、哪些通过复算"。回退到确定性正文时该列为空。
+        calculations = json_load(section.pop("calculations_json", "[]") or "[]") or []
+        section["calculations"] = calculations
+        section["calculation_summary"] = {
+            "count": len(calculations),
+            "verified": len([item for item in calculations if item.get("status") == "verified"]),
+            "needs_review": len([item for item in calculations if item.get("status") == "needs_review"]),
+            "rejected": len([item for item in calculations if item.get("status") == "rejected"]),
+        }
+        section["calculation_trace_hash"] = section.get("calculation_trace_hash") or ""
+        section["recommendations"] = recommendations_by_section.get(section["section_key"], [])
         # 生成模式与 Prompt 时效：前端据此提示"该章用哪套 Prompt 生成、是否需要再生"。
         # ``generation_mode`` 目前尚未写入章节契约，必须用 ``.get`` 容错（默认 rewrite）。
         section_key = section["section_key"]
@@ -1536,7 +1638,13 @@ def report(project_id: str, x_project_token: Optional[str] = Header(default=None
         frozen_records = json_load(section.get("evidence_records_json") or "[]") or []
         if frozen_records:
             section["evidence_record_count"] = len(frozen_records)
-            section["support_record_version"] = "evidence-records-v1"
+            # 版本取自**记录自身**冻结的 `record_version`：升版后旧行仍是旧版，
+            # 若跟随当前常量会假报成新版（与冻结记录不一致）。缺字段才回落当前常量。
+            section["support_record_version"] = next(
+                (str(item.get("record_version")) for item in frozen_records
+                 if str(item.get("record_version") or "").strip()),
+                "legacy_unfrozen",
+            )
         else:
             legacy_records = json_load(section.get("table_records_json") or "[]") or []
             section["evidence_record_count"] = len(legacy_records)
@@ -1876,6 +1984,19 @@ def report_prompts(project_id: str, request: Request,
     return output
 
 
+def _strip_global_document_ids(payload: "ReportPromptUpdate") -> "ReportPromptUpdate":
+    """全局默认**不得保存项目文件 ID**（方案 §四 line 57）。
+
+    全局是部署级配置，文件 ID 只对某一次项目解析有效；存进全局后，别的项目会拿到
+    不属于自己的文件引用。这里在编译前清掉，保留材料类型/角色（那两类是通用的）。
+    """
+    config = payload.config
+    if config is None or not config.material_scope.document_ids:
+        return payload
+    config.material_scope.document_ids = []
+    return payload
+
+
 def _compile_prompt_payload(chapter_key: str, payload: "ReportPromptUpdate") -> dict:
     """把请求体编译成落库用的四元组（项目级与全局级共用，避免两处逻辑漂移）。
 
@@ -2050,7 +2171,7 @@ def set_global_report_prompt(project_id: str, chapter_key: str, payload: ReportP
     _ensure_project_writable(_authorize(project_id, x_project_token))
     _prompt_write_guards(chapter_key)
     permissions = _require_global_prompt_editable(project_id, request)
-    compiled = _compile_prompt_payload(chapter_key, payload)
+    compiled = _compile_prompt_payload(chapter_key, _strip_global_document_ids(payload))
     now = now_iso()
     before = row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
     _check_prompt_contract_version(payload.expected_prompt_contract_version)
@@ -2463,6 +2584,11 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
         input_hash=chapter_context.get("input_hash", ""),
         # 与完整生成同口径（计划 §四 line 38）：仅剩未决项的模型稿支持状态记 warning。
         support_status="warning" if generation_status == "model_needs_review" else "pending",
+        # 计算轨迹随正文冻结；回退（确定性稿）时不写——那份轨迹属被否决的模型稿。
+        calculations=(validation.get("calculation_trace") or [])
+        if is_model_content_status(generation_status) else [],
+        recommendations=(validation.get("recommendation_items") or [])
+        if is_model_content_status(generation_status) else [],
     )
     # 正文真正落库后，本次尝试才算采用（accepted=latest=本次）。
     if attempt_id:

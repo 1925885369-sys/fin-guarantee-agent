@@ -51,7 +51,8 @@ def record_chapter_attempt(*, project_id: str, section_key: str, status: str, st
                            draft_content: str = "", repair_content: str = "",
                            assembled_content: str = "", code_fingerprint: str = "",
                            frozen_input: dict | None = None, expected: dict | None = None,
-                           run_id: str = "", attempt_id: str | None = None) -> str:
+                           run_id: str = "", attempt_id: str | None = None,
+                           calculation_trace_hash: str = "") -> str:
     """写入一次章节生成尝试，返回尝试 ID。
 
     只负责落库现场，不触碰 `report_sections`（是否采用由 `set_section_attempt` 决定，且必须
@@ -76,7 +77,8 @@ def record_chapter_attempt(*, project_id: str, section_key: str, status: str, st
             "expected_revision,expected_content_sha256,expected_prompt_sha256,expected_materials_version,"
             "frozen_input_json,draft_json,repair_json,assembled_json,code_fingerprint,"
             "diagnostics_json,status,stage,repair_type,"
-            "adopted,usage_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "adopted,usage_json,calculation_trace_hash,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 attempt_id, project_id, section_key, run_id,
                 int(expected.get("expected_revision") or 0),
@@ -91,7 +93,7 @@ def record_chapter_attempt(*, project_id: str, section_key: str, status: str, st
                 json_dump(diagnostics or {}),
                 str(status or "skipped"), str(stage or ""), str(repair_type or "none"),
                 1 if adopted else 0,
-                json_dump(usage_payload), now_iso(),
+                json_dump(usage_payload), str(calculation_trace_hash or ""), now_iso(),
             ),
         )
     return attempt_id
@@ -320,6 +322,29 @@ def delivery_blockers(project_id: str) -> list[str]:
         problems.append(
             f"{pending_review['count']} 个章节为模型待核验稿，须人工复核后方可最终交付"
         )
+    # 方案 §四 line 54/55：建议必须**逐条**人工确认，未确认或确认已失效都不得最终交付。
+    # 确认只表示"报告采用该建议"，不代表业务担保审批（decision_scope='report_adoption'）。
+    pending_recommendations = row(
+        "SELECT COUNT(*) count FROM report_recommendations WHERE project_id=? "
+        "AND status IN ('pending','stale')",
+        (project_id,),
+    )
+    if pending_recommendations and pending_recommendations["count"]:
+        problems.append(
+            f"{pending_recommendations['count']} 条建议草案尚未人工确认，须逐条确认或驳回后方可最终交付"
+        )
+    # 防御：确认后正文又变了（例如人工编辑没走 reset 漏斗），确认不能继续生效。
+    drifted_recommendations = row(
+        "SELECT COUNT(*) count FROM report_recommendations r "
+        "JOIN report_sections s ON s.project_id=r.project_id AND s.section_key=r.section_key "
+        "WHERE r.project_id=? AND r.status='confirmed' AND r.section_content_sha256!='' "
+        "AND r.section_content_sha256!=s.content_sha256",
+        (project_id,),
+    )
+    if drifted_recommendations and drifted_recommendations["count"]:
+        problems.append(
+            f"{drifted_recommendations['count']} 条已确认建议的正文或依据已变化，请重新确认"
+        )
     # 修订稿 §二.2 末条：待核验事实计入独立指标并阻止最终交付，不能被"材料不足"四字自动豁免。
     # δ 线在 quality 上新增 needs_review_claims；未落地时回退到 report_claims 计数，避免漏网。
     needs_review_claims = quality.get("needs_review_claims")
@@ -436,7 +461,10 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
                          table_blocks: list | None = None,
                          prompt_version: str = "", prompt_sha256: str = "", input_hash: str = "",
                          review_status: str = "draft", support_status: str = "pending",
-                         title: str = "", section_id: str = "") -> dict:
+                         title: str = "", section_id: str = "",
+                         calculations: list[dict] | None = None,
+                         calculation_trace_hash: str = "",
+                         recommendations: list[dict] | None = None) -> dict:
     """写入章节正文，并同步来源、状态、诊断、篇幅与哈希（单一入口）。
 
     调用方负责传入**当次真实依据**（来源、状态、阶段、冻结披露），本函数只做
@@ -508,6 +536,14 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
     if evidence_records is not None:
         # 统一冻结记录（fact/table/metric/rule）：章节校验与后置支持校验的唯一记录来源。
         payload["evidence_records_json"] = json_dump(evidence_records)
+    # 计算轨迹随正文冻结。⚠️ **`None` 表示本次写入与计算无关**（人工编辑、表格刷新）
+    # → 必须**清空**：旧轨迹描述的是旧正文，留着会让接口把过期指标当成本章的计算。
+    payload["calculations_json"] = json_dump(list(calculations or []))
+    trace_hash = str(calculation_trace_hash or "")
+    if not trace_hash and calculations:
+        from .chapter_calculations import trace_hash as _trace_hash
+        trace_hash = _trace_hash(calculations)
+    payload["calculation_trace_hash"] = trace_hash
     with connect() as conn:
         # 修订稿 §3.3：正文一旦被重新写入，恢复章节待复核、撤销旧的「最终复核」标记，
         # 且与正文/状态/哈希**同一事务**。放在 upsert **之前**：人工编辑（update_section）
@@ -529,6 +565,14 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
                 f"INSERT INTO report_sections ({columns}) VALUES ({placeholders})",
                 tuple(payload.values()),
             )
+        # 建议草案与正文**同一事务**写入（方案 §四 line 55）：不能出现"正文换了、建议还是旧的"。
+        if recommendations:
+            replace_section_recommendations(
+                project_id, section_key, list(recommendations), conn=conn,
+                section_content_sha256=content_sha256(content),
+                attempt_id=str(diagnostics.get("attempt_id") or "") if diagnostics else "",
+                input_hash=input_hash,
+            )
         # 表格快照与正文/状态/哈希在**同一事务**冻结（第三点细化方案 §四：禁止提交正文后
         # 另行保存表格快照）；blocks 来自生成期的一次构建（chapter_context["table_blocks"]），
         # 与表格正文、结构化记录同源，不再重新查询当前表格。
@@ -544,6 +588,73 @@ def write_report_section(*, project_id: str, section_key: str, content: str,
     return {"content_sha256": digest, "length_status": length["length_status"],
             "visible_content_chars": length["visible_content_chars"],
             "disclosure_status": disclosure_status, "delivery_status": delivery_status}
+
+
+def stale_section_recommendations(project_id: str, section_key: str, *, conn=None) -> int:
+    """正文变了 → 该章**已确认**的建议退回 `stale`（方案 §四 line 55）。
+
+    "修改建议、正文或相关依据后，原确认失效"——正文改写会让建议失去原本的语境，
+    所以确认不能跟着正文一起漂。幂等：只动 `confirmed` 的行。
+    """
+    def _run(connection) -> int:
+        cursor = connection.execute(
+            "UPDATE report_recommendations SET status='stale', updated_at=? "
+            "WHERE project_id=? AND section_key=? AND status='confirmed'",
+            (now_iso(), project_id, section_key),
+        )
+        return int(cursor.rowcount or 0)
+
+    if conn is not None:
+        return _run(conn)
+    with connect() as connection:
+        return _run(connection)
+
+
+def replace_section_recommendations(project_id: str, section_key: str, items: list[dict], *,
+                                    section_content_sha256: str = "", attempt_id: str = "",
+                                    input_hash: str = "", conn=None) -> int:
+    """写入本轮建议：旧的待确认/已确认/失效行全部 `superseded`，再插入新的 `pending`。
+
+    不删旧行：建议是"报告曾经提出过什么"的证据，删了就无从回溯（失效语义也依赖旧行仍在）。
+    新行一律 `pending`——重新生成出来的建议必须重新确认，不能继承上一版的确认。
+    """
+    if not items:
+        return 0
+    stamp = now_iso()
+    if conn is None:
+        with connect() as connection:
+            return replace_section_recommendations(
+                project_id, section_key, items, section_content_sha256=section_content_sha256,
+                attempt_id=attempt_id, input_hash=input_hash, conn=connection)
+    if True:
+        conn.execute(
+            "UPDATE report_recommendations SET status='superseded', updated_at=? "
+            "WHERE project_id=? AND section_key=? AND status IN ('pending','confirmed','stale')",
+            (stamp, project_id, section_key),
+        )
+        for item in items:
+            conn.execute(
+                "INSERT INTO report_recommendations (id,project_id,section_key,recommendation_id,"
+                "recommendation_type,content,basis,basis_record_ids,preconditions,parameters_json,"
+                "amount_value,amount_unit,rate_value,rate_unit,draft_text,status,decision_scope,"
+                "basis_hash,section_content_sha256,attempt_id,input_hash,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(uuid.uuid4()), project_id, section_key,
+                    str(item.get("recommendation_id") or ""),
+                    str(item.get("recommendation_type") or "other"),
+                    str(item.get("content") or ""), str(item.get("basis") or ""),
+                    json_dump(item.get("basis_record_ids") or []),
+                    json_dump(item.get("preconditions") or []),
+                    json_dump(item.get("parameters") or {}),
+                    str(item.get("amount_value") or ""), str(item.get("amount_unit") or ""),
+                    str(item.get("rate_value") or ""), str(item.get("rate_unit") or ""),
+                    str(item.get("draft_text") or ""), "pending", "report_adoption",
+                    str(item.get("basis_hash") or ""), section_content_sha256,
+                    attempt_id, input_hash, stamp, stamp,
+                ),
+            )
+    return len(items)
 
 
 def reset_section_review(project_id: str, section_key: str, *, conn=None) -> dict:
@@ -581,6 +692,9 @@ def reset_section_review(project_id: str, section_key: str, *, conn=None) -> dic
             "WHERE id=? AND (report_reviewed_revision!=0 OR report_reviewed_at IS NOT NULL)",
             (timestamp, project_id),
         )
+        # 方案 §四 line 55：改正文后原建议确认失效。放在**同一事务**里——正文写了而
+        # 确认没退，界面就会拿旧确认给新正文背书。
+        stale_section_recommendations(project_id, section_key, conn=connection)
 
     if conn is not None:
         _apply(conn)

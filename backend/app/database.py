@@ -297,6 +297,35 @@ CREATE TABLE IF NOT EXISTS report_table_snapshots (
   input_hash TEXT NOT NULL, rule_version TEXT NOT NULL, updated_at TEXT NOT NULL,
   PRIMARY KEY(project_id,chapter_key)
 );
+-- 承保/拒保/额度/费率**建议草案**与逐条复核（风控约束分层 §四 line 52~56）。
+-- 不加 (project_id,section_key,recommendation_id) 唯一约束：重新生成会产生同 ID 的新行，
+-- 旧行靠 status='superseded' 留档——这正是"历史建议不可被静默覆盖"的实现方式。
+CREATE TABLE IF NOT EXISTS report_recommendations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL, section_key TEXT NOT NULL,
+  recommendation_id TEXT NOT NULL,
+  recommendation_type TEXT NOT NULL,
+  content TEXT NOT NULL, basis TEXT NOT NULL DEFAULT '',
+  basis_record_ids TEXT NOT NULL DEFAULT '[]', preconditions TEXT NOT NULL DEFAULT '[]',
+  parameters_json TEXT NOT NULL DEFAULT '{}',
+  amount_value TEXT NOT NULL DEFAULT '', amount_unit TEXT NOT NULL DEFAULT '',
+  rate_value TEXT NOT NULL DEFAULT '', rate_unit TEXT NOT NULL DEFAULT '',
+  draft_text TEXT NOT NULL,
+  -- pending：待确认（阻断最终交付）｜confirmed：已确认采用｜rejected：已驳回
+  -- stale：确认后正文/依据变化，需重新确认｜superseded：被新一轮生成取代
+  status TEXT NOT NULL DEFAULT 'pending',
+  -- 确认只表示"报告采用该建议"，不代表业务担保审批（方案 §四 line 54）
+  decision_scope TEXT NOT NULL DEFAULT 'report_adoption',
+  decision_note TEXT NOT NULL DEFAULT '', decided_by TEXT NOT NULL DEFAULT '', decided_at TEXT,
+  basis_hash TEXT NOT NULL,
+  section_content_sha256 TEXT NOT NULL DEFAULT '',
+  attempt_id TEXT NOT NULL DEFAULT '', input_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_recommendations_project
+  ON report_recommendations(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_report_recommendations_section
+  ON report_recommendations(project_id, section_key, status);
 -- 完成任务时冻结的不可变报告快照：每个 run 最多一份（UNIQUE(run_id)）。
 -- 与 report_sections（可变的"当前正文"）彻底解耦：snapshot 一旦写入不再更新，
 -- 历史报告查看只回放 payload_json，不回查当前库——材料或复核决议后续怎么变，
@@ -552,6 +581,9 @@ MIGRATIONS = {
     # repair_json（**真实**修复响应）并列，三者互不冒充。组装后正文是补回来源边界块、
     # 拼上系统表格、真正落进 report_sections 的那一版。
     "chapter_generation_attempts": {
+        # 输出侧摘要（风控约束分层 §三.3）：输入哈希在模型调用前算定，含不了模型输出；
+        # 计算轨迹的摘要单独存一列，重放时才能区分"输入没变但输出计算变了"。
+        "calculation_trace_hash": "TEXT NOT NULL DEFAULT ''",
         "assembled_json": "TEXT NOT NULL DEFAULT '{}'",
         "code_fingerprint": "TEXT NOT NULL DEFAULT ''",
     },
@@ -648,6 +680,10 @@ MIGRATIONS = {
     },
     "run_artifacts": {"details_json": "TEXT NOT NULL DEFAULT '{}'"},
     "report_sections": {
+        # 计算轨迹随正文一起冻结（风控约束分层 §三.1）：报告接口与导出要能回答
+        # "这一章算了哪些指标、哪些通过复算"。输出侧摘要与 input_hash 分列。
+        "calculations_json": "TEXT NOT NULL DEFAULT '[]'",
+        "calculation_trace_hash": "TEXT NOT NULL DEFAULT ''",
         "support_rate": "REAL NOT NULL DEFAULT 0",
         "validation_status": "TEXT NOT NULL DEFAULT 'pending'",
         "prompt_version": "TEXT NOT NULL DEFAULT ''",

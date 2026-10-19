@@ -226,7 +226,10 @@ def test_chapter_attempt_metrics_use_delivery_fields_not_support_status():
         # 模型结果被采用
         {"section_key": "rating", "generation_status": "model_passed", "content_origin": "model",
          "validation_status": "passed", "delivery_status": "eligible"},
-        {"section_key": "governance", "generation_status": "deterministic", "content_origin": "deterministic",
+        # 确定性章节（`bond_chapters.yaml` 中 llm: false）不计入 LLM 统计。
+        # 此处曾用 governance，但它在当前配置里已是 llm: true——fixture 与配置脱节，
+        # 会让"仅 LLM 章节"的断言按 3 而不是 2 计算（2026-10-18 全量回归发现）。
+        {"section_key": "scope", "generation_status": "deterministic", "content_origin": "deterministic",
          "validation_status": "passed", "delivery_status": "eligible"},
     ]
     attempts = [

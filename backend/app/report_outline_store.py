@@ -299,11 +299,17 @@ def validate_outline(payload: dict) -> None:
 # --------------------------------------------------------------------- 规范化
 
 
-def normalize_outline(payload: dict) -> dict:
+def normalize_outline(payload: dict, *, scope: str = "project") -> dict:
     """校验并规范化：重排 order、派生只读字段、换新 outline_version。
 
     返回**全新对象**，不修改入参。副本/顺序以下游读取为准（spec §一：顺序即顺序）。
+
+    ``scope="global"`` 时**清空 `document_ids`**（方案 §四 line 57）：全局目录是部署级配置，
+    文件 ID 只对某次项目解析有效，存进去别的项目就会拿到不属于自己的文件引用。
+    项目文件归属的严格 422 由保存接口负责；运行时另有 fail-closed 兜底
+    （`chapter_guard._resolve_material_scope`：全部无效 → 空匹配集，不退化全量）。
     """
+    global_scope = str(scope or "project") == "global"
     validate_outline(payload)
     parts_out: list[dict] = []
     for part_index, part in enumerate(payload.get("parts") or [], start=1):
@@ -336,7 +342,7 @@ def normalize_outline(payload: dict) -> dict:
                     str(role).strip() for role in (chapter.get("material_roles") or [])
                     if str(role).strip()
                 ][:MAX_MATERIAL_ROLES],
-                "document_ids": [
+                "document_ids": [] if global_scope else [
                     str(doc).strip() for doc in (chapter.get("document_ids") or [])
                     if str(doc).strip()
                 ][:MAX_DOCUMENT_IDS],
@@ -396,7 +402,7 @@ def save_outline(scope: str, project_id: str, payload: dict) -> dict:
     """
     if scope not in OUTLINE_SCOPES:
         raise ValueError(f"不支持的目录范围：{scope}")
-    normalized = normalize_outline(payload)
+    normalized = normalize_outline(payload, scope=scope)
     identity = _scope_identity(scope, project_id)
     before = row(
         "SELECT * FROM report_outlines WHERE scope=? AND project_id=?", (scope, identity))
