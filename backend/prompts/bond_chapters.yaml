@@ -310,7 +310,11 @@ chapters:
     output_contract:
       required_phrases: [评级机构认为, 不等同于担保机构独立判断]
       required_missing_markers: [材料不足, 材料未披露]
-      forbidden_patterns: [投资建议, 担保机构认为]
+      # 2026-10-20 第七轮复核：只加 rules 措辞不够——模型首稿与修复稿都写了
+      # "拟议保证范围…责任上限23,000万元；拟议反担保折后价值16,000万元…"。
+      # 评级章的 source_kinds 只有信用评级报告，不含增信条款，写出来必然判归属冲突；
+      # 这里升级为硬禁词，逼它在唯一一次修复里删掉（而不是靠 needs_review 兜）。
+      forbidden_patterns: [投资建议, 担保机构认为, 拟议保证范围, 反担保折后价值]
       attribution_mode: rating
     narrative_contract:
       tone: professional_due_diligence
