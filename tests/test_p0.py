@@ -526,3 +526,58 @@ def test_boundary_declaration_and_horizon_window_are_not_fact_claims():
     assert _CLAIM_DECLARATION_RE.search("本章对发行人偿债能力作出判断。") is None
     # 反例⑤：带业务数值的"未来12个月"句仍判数字事实。
     assert _claim_type("公司未来12个月到期债务为500万元。") == "numeric_fact"
+
+
+def test_conflict_parallel_values_degrade_to_review_not_unsupported():
+    """冲突并列：至少一组值有记录时降为待核验，不再判"无证据"。
+
+    2026-10-20 华辰 financial / cashflow 实测：同一张现金流量表在发行文件不同页面
+    有两个版本，模型按「冲突必须并列展示全部来源」（§二 line 16）把两组值都写出来，
+    但只有一组被抽成冻结记录 → 旧口径判 `missing_record`，整章回退。
+    并列是义务、逐值有记录是校验，两条要求在这种材料上互相打架。
+
+    豁免的三条件缺一不可：① 句子有显式冲突措辞；② 至少一个数字被记录接住；
+    ③ 未接住的数字不超过本句数字的一半（"两组版本"结构）。
+    """
+    from backend.app.p0 import (
+        _CONFLICT_PARALLEL_RE, _number_mentions, _numeric_binding_outcome,
+    )
+
+    def record(record_id: str, value: str, period: str) -> dict:
+        return {
+            "record_id": record_id, "record_type": "table", "status": "verified",
+            "value": value, "unit": "万元", "label": "投资活动产生的现金流量净额",
+            "period": period, "subject": "", "scope": "",
+            "source_ids": ["s-1"], "locator": {"page": 33},
+        }
+
+    records = [record("table:c01@v2", "-2232", "2023"), record("table:c02@v2", "-3384", "2024")]
+
+    def outcome(claim: str) -> tuple[str, str]:
+        mentions = _number_mentions(claim)
+        status, reason, _matched = _numeric_binding_outcome("", records, claim, mentions, "fact")
+        return status, reason
+
+    # 正例：两组并列、各 2 个值，其中一组有记录。
+    assert outcome(
+        "投资活动与筹资活动现金流量净额在发行文件不同页面存在数值冲突，2023年至2024年"
+        "分别为-2,232万元与-2,657万元、-3,384万元与-2,948万元"
+    ) == ("needs_review", "conflict_values_unverified")
+
+    # 反例①：没有冲突措辞 → 仍判无记录（不能靠并列"顺带"豁免）。
+    assert outcome(
+        "投资活动净额分别为-2,232万元与-2,657万元、-3,384万元与-2,948万元"
+    ) == ("unsupported", "missing_record")
+
+    # 反例②：两组值全都没有记录 → "冲突"二字不能豁免整段编造。
+    assert outcome(
+        "存在数值冲突：投资活动净额为-9,111万元与-8,222万元、-7,333万元与-6,444万元"
+    ) == ("unsupported", "missing_record")
+
+    # 反例③：未接住的数字超过一半（4 个里 3 个无记录）→ 不是两版本结构，不豁免。
+    assert outcome(
+        "存在数值冲突：投资活动净额-2,232万元与-9,111万元、-8,222万元与-7,333万元"
+    ) == ("unsupported", "missing_record")
+
+    # 反例④：常规勾稽句里的"差异0万元"不是冲突并列。
+    assert _CONFLICT_PARALLEL_RE.search("评级与审计收入差异0万元、有息负债差异0万元") is None

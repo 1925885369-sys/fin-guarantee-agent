@@ -46,6 +46,18 @@ _GAP_EDGE_RE = re.compile(
     r"|无法形成(?:确定性判断|确定结论|结论)|无法区分|无法确认|无法核实)"
 )
 
+# 冲突并列标记（方案 §二 line 16："冲突必须并列展示全部来源，不得自动选值"）。
+# 2026-10-20 华辰 financial / cashflow 实测：同一张现金流量表在发行文件不同页面有两个版本，
+# 模型按规则把两组值都写出来，但只有一组被抽成冻结记录 → 旧口径判 missing_record
+# （"无证据"），整章回退。两条要求在这里打架：并列是义务，逐值有记录是校验。
+# 豁免只认**显式**冲突措辞，不认单字"差异"——"评级与审计收入差异0万元"这类正常勾稽句
+# 不该被当成并列冲突。
+_CONFLICT_PARALLEL_RE = re.compile(
+    r"(数值冲突|存在冲突|数据冲突|相互矛盾|存在差异|数值不一致|列示不一致"
+    r"|未标注来源|无来源标注|来源未标注|另有(?:未标注|披露|列示)值?"
+    r"|并列(?:展示|列示)|两组数值|不同页面)"
+)
+
 # 整句级"方法/过程声明"（2026-10-16 本轮试跑复核新增）："勾稽声明：本章未对任何现金流
 # 数据、偿债指标或覆盖比例**进行自行计算或换算**…"（中邮 cashflow #32 实测）——缺口词
 # （未对）与命中科目（偿债专户）相隔整句，邻域窗口与首尾窗口都装不下；过程声明不含业务
@@ -604,6 +616,20 @@ def _numeric_binding_outcome(project_id: str, records: list[dict], claim: str,
         ):
             # 每个数字都能被记录接住，但至少一个只命中待核验记录 → 待人工核验。
             return "needs_review", "field_ambiguity", matched
+        # 冲突并列豁免（2026-10-20，华辰 financial/cashflow 实测）：句子显式标注了
+        # 数值冲突/未标注来源，说明模型是在**履行"冲突必须并列"的义务**，而不是编数。
+        # 三条同时满足才豁免：
+        #   ① 有冲突措辞；② 至少一个数字被记录接住（不是整段凭空写）；
+        #   ③ 未被接住的数字不超过本句数字的一半（"两组版本"的结构，而不是半句在编）。
+        # 结果降为 needs_review——仍计入未决、仍阻断最终交付，只是不再判"无证据声明"
+        # 把整章打回模板；采用哪一版由人工裁定。
+        allowed_numbers = len(mentions) - len(missing_supported)
+        if (
+            _CONFLICT_PARALLEL_RE.search(claim)
+            and allowed_numbers >= 1
+            and len(missing_supported) * 2 <= len(mentions)
+        ):
+            return "needs_review", "conflict_values_unverified", matched
         return "unsupported", "missing_record", matched
     binding_records = matchable_records(records)
     allowed_entries = evidence_number_keys(binding_records)
