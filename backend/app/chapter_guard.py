@@ -181,6 +181,12 @@ DECISION_VERBS = (
     "核定", "核准", "批准", "审批", "同意", "决定", "确定",
     "给予", "授予", "设定", "批复", "决议",
 )
+# 未来/待办标记：`（材料补齐后）再行确定担保额度与担保费率` 是**尚未发生**的后续动作，
+# 不是已作出的决定。2026-10-21 中邮 financial 实测：模型写「…完成核对后，再行确定担保额度
+# 与担保费率；在此之前，不建议将本章数据作为核定担保额度或费率的唯一依据」，被 DECISION_VERBS
+# 里的「确定」判成 forbidden，整章回退。
+# 只在决策动词**紧邻**（前 6 字）出现未来标记时放行，避免"同意担保，后续再定额度"被整句放行。
+FUTURE_DECISION_MARKERS = ("再行", "另行", "届时", "之后再", "后续再")
 # 提议类标记：出现即视为"建议/提议"，放行（仍要求人工复核，但不硬拒）。
 # 注：暂不含单字"拟"——它可能出现在"模拟"里；等出现真实误判再按需收窄。
 # 只收**明确表示提议**的词。"倾向/主张"太宽（"审批倾向为通过"是在陈述审批进程，
@@ -215,7 +221,14 @@ def _decision_classification(content: str, index: int) -> str:
     # （"建议核定担保额度…"），所以必须先认提议。
     if any(marker in clause for marker in RECOMMENDATION_MARKERS):
         return "safe_recommendation"
-    if any(verb in clause for verb in DECISION_VERBS):
+    decision_positions = [pos for pos in (clause.find(verb) for verb in DECISION_VERBS) if pos >= 0]
+    if decision_positions:
+        # 每个决策动词都处于"再行/另行/届时"这类未来语境时，整句是待办而非已决定。
+        if all(
+            any(marker in clause[max(0, pos - 6):pos] for marker in FUTURE_DECISION_MARKERS)
+            for pos in decision_positions
+        ):
+            return "safe_description"
         return "forbidden"
     return "safe_description"
 # 命中位置之前出现否定词，说明写的是“不得/不应如何”，属于合规边界表述。

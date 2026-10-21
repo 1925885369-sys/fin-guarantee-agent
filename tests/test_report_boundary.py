@@ -67,3 +67,22 @@ def test_decision_marker_in_a_later_clause_does_not_pardon_an_earlier_one():
     """分句隔离：决策记号只作用于**同一分句**，跨句不豁免。"""
     content = "同意担保本次发行。另需说明，募集说明书载明担保函条款。"
     assert _report_boundary_safe(content) is False
+
+
+def test_future_or_pending_wording_is_not_a_made_decision():
+    """待办 vs 已决定：「再行/另行/届时」紧邻决策词时是**尚未发生**的动作。
+
+    2026-10-21 中邮 financial 实测：模型写「材料并完成核对后，再行确定担保额度与担保费率；
+    在此之前，不建议将本章数据作为核定担保额度或费率的唯一依据」，被"确定/核定"判成
+    forbidden（`chapter_guard._decision_classification`）与越权结论（本函数），整章回退。
+    """
+    for content in (
+        "材料补齐后再行核定担保额度；在此之前不建议使用。",
+        "待取得担保合同后另行核定担保费率。",
+        "届时确定担保额度，需人工复核。",
+    ):
+        assert _report_boundary_safe(content) is True, content
+
+    # 反例：已经作出的决定不能被"后续"二字洗白——同一分句里出现决策主语即拦截。
+    assert _report_boundary_safe("本所审核意见：核定担保额度为5亿元。") is False
+    assert _report_boundary_safe("同意担保，后续再行确定担保额度。") is False

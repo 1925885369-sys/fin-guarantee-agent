@@ -1127,6 +1127,8 @@ _BOUNDARY_DECISION_MARKERS = (
 # 提议记号：与禁止词同分句出现时按"建议"处理，直接放行（不判越权结论）。
 # 只收**明确表示提议**的词（"倾向/主张"太宽："审批倾向为通过"是陈述审批进程）。
 _BOUNDARY_RECOMMENDATION_MARKERS = ("建议", "提议", "拟同意")
+# 未来/待办标记：与 `chapter_guard.FUTURE_DECISION_MARKERS` 同值，两处判定必须同序。
+_BOUNDARY_FUTURE_MARKERS = ("再行", "另行", "届时", "之后再", "后续再")
 # 材料与条款语境记号：出现在这些词附近说明是在复述原文/描述条款，不是我们的结论。
 _BOUNDARY_QUOTE_MARKERS = (
     "担保函", "保证合同", "担保合同", "担保协议", "条款", "约定", "视为",
@@ -1152,10 +1154,22 @@ def _boundary_hit_is_decision(content: str, index: int, item: str) -> bool:
     # 是建议而非已同意。
     if any(marker in clause for marker in _BOUNDARY_RECOMMENDATION_MARKERS):
         return False
-    if any(marker in clause for marker in _BOUNDARY_DECISION_MARKERS):
+    decision_hits = [pos for pos in (clause.find(m) for m in _BOUNDARY_DECISION_MARKERS) if pos >= 0]
+    if decision_hits:
+        # 与 `chapter_guard.FUTURE_DECISION_MARKERS` 同源同序：`再行/另行/届时` 紧邻决策词时
+        # 是**待办**（"材料补齐后再行核定担保额度"），不是已作出的决定。
+        if all(
+            any(marker in clause[max(0, pos - 6):pos] for marker in _BOUNDARY_FUTURE_MARKERS)
+            for pos in decision_hits
+        ):
+            return False
         return True
     # 无任何语境记号：保守起见按决策结论处理（宁可误退也不放过越权结论），
-    # 但"同意担保函/拒绝担保函"这类紧邻"函"的前缀已知是引用，直接放行。
+    # 但两种已知非决策形态放行：
+    # ① 禁止词紧邻未来标记——"材料补齐后再行核定担保额度"是待办；
+    # ② "同意担保函/拒绝担保函"紧邻"函"的前缀已知是引用。
+    if any(marker in content[max(0, index - 6):index] for marker in _BOUNDARY_FUTURE_MARKERS):
+        return False
     if item in ("同意担保", "拒绝担保") and "担保函" in content[index:index + len(item) + 1]:
         return False
     return True
