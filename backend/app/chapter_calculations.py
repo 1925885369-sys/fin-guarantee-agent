@@ -153,6 +153,10 @@ def prepare_candidate(
             "precision": calc.get("precision"),
             "status": verdict["status"],
             "reason_code": verdict.get("reason_code") or "",
+            # 复算给出的**可操作说明**（"该科目有 2 条记录、期间为空"、"索引里没有该科目名"）
+            # 必须随轨迹传下去：修复指令只带 reason_code 时，模型知道"输入未冻结"却不知道
+            # 该怎么改（2026-10-22 华辰 cashflow 实测：提示写了但没进修复指令，白改）。
+            "detail": str(verdict.get("detail") or "")[:200],
             "anchor": anchor,
         })
         if verdict["status"] == "rejected":

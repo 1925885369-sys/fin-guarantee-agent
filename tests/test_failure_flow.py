@@ -1052,3 +1052,27 @@ def test_support_failure_details_are_condensed_for_the_repair_prompt():
     assert details["unsupported_claims"][1]["matched_record_ids"] == ["metric:inventory_turnover:2025"]
     # 未声明支持失败时不产生该字段（不制造噪声）
     assert "unsupported_claims" not in llm._safety_repair_details({"support_failed": False})
+
+
+def test_calculation_detail_reaches_the_repair_prompt():
+    """复算的**可操作说明**必须随修复指令下发，否则模型只知道"输入未冻结"。
+
+    2026-10-22 华辰 cashflow 实测：`未来12个月到期债务@2025` 该科目 2 条记录、期间为空，
+    `calculations._missing_input_hint` 已经能说出原因，但 `_safety_repair_details`
+    只带 `reason_code`，提示到不了模型，修复轮只能盲改。
+    """
+    detail = ("计算引用了本次未冻结的输入：未来12个月到期债务@2025；"
+              "该科目有 2 条记录，期间为（无期间），与你写的 `@2025` 不符；"
+              "可去掉 `@期间` 或直接改用 record_id；")
+    validation = {
+        "calculation_trace": [{
+            "calculation_id": "c1", "name": "覆盖倍数", "formula": "v1/v2",
+            "input_record_ids": ["未来12个月到期债务@2025"],
+            "value": "0.32", "computed": "", "status": "rejected",
+            "reason_code": "input_not_frozen", "detail": detail,
+            "anchor": "覆盖约为0.32倍", "inputs": [],
+        }],
+    }
+    details = llm._safety_repair_details(validation)
+    assert details["calculations"][0]["detail"] == detail
+    assert details["calculations"][0]["reason_code"] == "input_not_frozen"

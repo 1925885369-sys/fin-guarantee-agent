@@ -1258,6 +1258,9 @@ def _safety_repair_details(validation: dict) -> dict:
             "input_record_ids": list(item.get("input_record_ids") or [])[:6],
             "declared": str(item.get("value") or ""),
             "computed": str(item.get("computed") or ""),
+            # 复算说明（可操作）："该科目有 2 条记录、期间为空，可去掉 `@期间`"
+            # "记录索引里没有该科目名" —— 只给 reason_code 等于让模型盲猜。
+            "detail": str(item.get("detail") or "")[:200],
             # 输入实际指向：`科目名@期间=值`——让模型看清自己填的是哪一行。
             "inputs": [
                 f"{entry.get('label') or entry.get('record_id')}@{entry.get('period') or '—'}"
