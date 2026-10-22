@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from decimal import (Decimal, DivisionByZero, InvalidOperation, ROUND_HALF_UP, localcontext)
 
@@ -397,6 +398,49 @@ def resolve_input_token(token: str, frozen_records: list[dict], *,
     return [str(item.get("record_id")) for item in hits]
 
 
+def _missing_input_hint(token: str, frozen_records: list[dict]) -> str:
+    """输入 0 命中时给**可操作**的提示：是期间对不上，还是科目名不存在。
+
+    只回一句"引用了未冻结的输入"，模型在唯一一次修复里仍然只能猜。2026-10-22 华辰实测
+    两种 0 命中，修法完全不同：
+
+    - `固定票息@2026`：记录里根本没有这个科目（材料写"票面利率"）→ 要改名；
+    - `未来12个月到期债务@2025`：科目存在、但 2 条记录的 period 都是空 → 要去掉
+      `@期间`，或直接用 record_id。
+
+    提示只用于修复诊断，**不参与任何判定**。
+    """
+    raw = str(token or "").strip()
+    label, _, period = raw.partition("@")
+    label = label.strip()
+    if not label:
+        return ""
+    target = normalize_label_for_match(label)
+    same_label = [
+        item for item in (frozen_records or [])
+        if target and normalize_label_for_match(item.get("label")) == target
+    ]
+    if same_label:
+        periods = sorted({str(item.get("period") or "").strip() for item in same_label})
+        shown = "、".join(item or "（无期间）" for item in periods[:3])
+        return (
+            f"该科目有 {len(same_label)} 条记录，期间为{shown}，与你写的 `@{period}` 不符；"
+            f"可去掉 `@期间` 或直接改用 record_id；"
+        )
+    candidates = sorted({
+        str(item.get("label") or "").strip() for item in (frozen_records or [])
+        if str(item.get("label") or "").strip()
+    })
+    # 只在**相似度确实高**时才猜名字（"应收账款" vs "应收款项" 这类写法差异）。
+    # 不做"共享一个字"的粗筛：实测 `固定票息` 与记录里的 `票面利率` 只共享一个"票"字，
+    # 任何字面启发式都只能给出误导性的候选（"利息支出""分配股利…"），还不如直接
+    # 让它回去照抄索引——模型手上有完整的 label 列表，缺的只是"名字不对"这个信号。
+    close = difflib.get_close_matches(label, candidates, n=3, cutoff=0.6)
+    if close:
+        return f"记录索引里最接近的是：{'、'.join(close)}；"
+    return "记录索引里没有该科目名，请逐字照抄上文“科目索引”里的 label；"
+
+
 def verify_calculation(record: dict, frozen_records: list[dict]) -> dict:
     """核对模型返回的一条 `calculations[]` 记录（方案 §三.2）。
 
@@ -450,12 +494,20 @@ def verify_calculation(record: dict, frozen_records: list[dict]) -> dict:
     if missing:
         return result("rejected", "input_not_frozen",
                       f"计算引用了本次未冻结的输入：{'、'.join(missing[:3])}；"
+                      f"{_missing_input_hint(missing[0], frozen_records)}"
                       f"可写 record_id，或 `科目名@期间`（如 `财务费用@2025`）")
     if ambiguous:
         token, hits = ambiguous[0]
+        # 把候选的 record_id 与实际值一起给出：模型只有一次修复机会，只告诉它"有 2 条"
+        # 它仍然不知道选哪个（2026-10-22 华辰 cashflow：两个"未来12个月到期债务"
+        # 都没有期间标注，补 `@期间` 也没用）。
+        preview = "、".join(
+            f"{str(by_id[hit].get('record_id'))}={by_id[hit].get('value')}"
+            f"{by_id[hit].get('unit') or ''}" for hit in hits[:3] if hit in by_id
+        )
         return result("needs_review", "input_ambiguous",
-                      f"输入 {token} 匹配到 {len(hits)} 条记录（{('、'.join(hits[:3]))}），"
-                      f"请补 `@期间` 或改用 record_id")
+                      f"输入 {token} 匹配到 {len(hits)} 条记录（{preview}），"
+                      f"请补 `@期间` 或直接用上面的 record_id")
     input_ids = resolved
 
     variables: dict[str, Decimal] = {}

@@ -391,3 +391,36 @@ def test_unknown_business_key_is_still_not_frozen():
         "value": "1", "unit": "万元",
     }, _ratio_records())
     assert verdict["status"] == "rejected" and verdict["reason_code"] == "input_not_frozen"
+
+
+def test_missing_input_hint_separates_period_gap_from_unknown_label():
+    """0 命中要能区分"期间对不上"和"科目名不存在"——两种修法不同。
+
+    2026-10-22 华辰实测：`未来12个月到期债务@2025`（该科目 2 条记录、period 均为空，
+    补 `@期间` 永远补不上）与 `固定票息@2026`（记录里叫"票面利率"）。只回一句
+    "未冻结"，模型在唯一一次修复里只能猜。
+    """
+    records = [
+        {"record_id": "d:1", "label": "未来12个月到期债务", "value": "20500",
+         "unit": "万元", "period": "", "status": "verified", "record_type": "disclosure"},
+        {"record_id": "d:2", "label": "未来12个月到期债务", "value": "16810",
+         "unit": "万元", "period": "", "status": "verified", "record_type": "disclosure"},
+        {"record_id": "d:3", "label": "票面利率", "value": "4.8",
+         "unit": "%", "period": "2025", "status": "verified", "record_type": "fact"},
+    ]
+    period_case = verify_calculation({
+        "calculation_id": "c1", "name": "覆盖", "formula": "v1", "value": "20500",
+        "unit": "万元", "input_record_ids": ["未来12个月到期债务@2025"],
+    }, records)
+    assert period_case["reason_code"] == "input_not_frozen"
+    assert "该科目有 2 条记录" in period_case["detail"]
+    assert "无期间" in period_case["detail"]
+    assert "去掉 `@期间`" in period_case["detail"]
+
+    name_case = verify_calculation({
+        "calculation_id": "c2", "name": "利息", "formula": "v1", "value": "4.8",
+        "unit": "%", "input_record_ids": ["固定票息@2025"],
+    }, records)
+    assert name_case["reason_code"] == "input_not_frozen"
+    # 字面相似度低时**不猜名字**：给"票面利率"之外的误导候选还不如让它回去照抄索引。
+    assert "没有该科目名" in name_case["detail"]
