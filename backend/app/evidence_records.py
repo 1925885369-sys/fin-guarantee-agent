@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 # 记录契约版本：随章节正文一起冻结，接口与审计可见（方案 §一"support_record_version"）。
 RECORD_VERSION = "evidence-records-v2"
@@ -1021,7 +1021,37 @@ def evidence_number_keys(records) -> set[tuple[str, str]]:
         text = str(value)
         unit = str(record.get("unit") or "")
         normalized_value, normalized_unit, _ = _canonical_measurement(text, unit)
-        keys.add((normalized_value, normalized_unit))
+        # 单位别名：`_canonical_measurement` 把「个百分点」归一成「百分点」（三个字），而
+        # `_number_mentions` 保留原文的「个百分点」（四个字）。`_mention_allowed` 拿正文的
+        # normalized_unit 当索引键，两边写法不一致就**永远查不到**——2026-10-22 北投
+        # financial："回落约 1.22 个百分点" 明明有 calc 记录 `-1.2175 百分点`，仍被判
+        # missing_record，整章算作疑似误退、机制侧未通过。两种写法都登记，成本极低。
+        unit_keys = (
+            (normalized_unit, "个百分点") if normalized_unit == "百分点" else (normalized_unit,)
+        )
+        for unit_key in unit_keys:
+            keys.add((normalized_value, unit_key))
+        if str(record.get("record_type") or "") == "calculation":
+            # 派生计算是长小数（`-1.2175`、`8.729256132194650084345051343`），正文按**展示
+            # 精度**写（"回落约 1.22 个百分点""占 8.73%"）。只登记原值会让按精度展示的数字
+            # 查不到（2026-10-22 北投 financial 实测：calc -1.2175 百分点 vs 正文"约 1.22
+            # 个百分点"，主张被判 missing_record、整章算作疑似误退 —— 机制侧因此未通过）。
+            # 按 0~4 位小数都登记：它们是**同一个数的不同展示**，且记录自身带 status
+            # （待核验的仍只进 review 索引），不会凭空造出"支持"。
+            # 不依赖 `precision` 字段：实测 `precision=4` 的记录，正文只写了 2 位。
+            for digits in range(0, 5):
+                try:
+                    rounded = Decimal(text).quantize(
+                        Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+                except (InvalidOperation, ValueError, TypeError):
+                    break
+                for unit_key in unit_keys:
+                    keys.add((_normalize_number(str(rounded)), unit_key))
+                    # 变化量的**方向写在文字里**：记录 "-1.2175 个百分点"、正文写"回落约
+                    # 1.22 个百分点"——数值是幅度、符号在"回落/上升"上。金额/比率不做这个
+                    # 别名，符号错误（-5亿 vs 5亿）仍须能被分辨。
+                    if unit_key == "个百分点":
+                        keys.add((_normalize_number(str(abs(rounded))), unit_key))
         if unit:
             keys.add((_normalize_number(text), ""))
         elif str(record.get("record_type") or "") == "disclosure":

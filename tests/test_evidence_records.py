@@ -932,3 +932,30 @@ def test_disclosure_aggregate_and_coverage_value_forms():
     # 负例②：科目短语 <4 字不登记（避免"该公司"类指代被当成科目）。
     short = build_evidence_records(evidence=[{"quote": "该公司合计达100万元。", "source_id": "s-1"}])
     assert not [item for item in short if item["value"] == "100"]
+
+
+def test_calculation_records_register_display_precision_and_unit_alias():
+    """派生计算要按**展示精度**和「个百分点」别名登记。
+
+    2026-10-22 北投 financial 实测：calc 记录 `value=-1.2175`、`unit=百分点`（三个字，
+    `_canonical_measurement` 归一后），正文写「回落约 1.22 个百分点」（四个字，
+    `_number_mentions` 保留原文）。两边**单位写法不同 + 精度不同**，数字永远查不到，
+    主张被判 `missing_record`、整章算作疑似误退 —— 机制侧因此未通过验收。
+    """
+    from backend.app.evidence_records import evidence_number_keys
+
+    keys = evidence_number_keys([{
+        "record_id": "calc:x:c1", "record_type": "calculation",
+        "value": "-1.2175", "unit": "百分点", "status": "needs_review",
+    }])
+    assert ("1.22", "个百分点") in keys, sorted(keys)     # 展示精度 + 正文单位写法
+    assert ("-1.22", "百分点") in keys, sorted(keys)      # 取整后 + 记录单位写法
+    assert ("-1.2175", "百分点") in keys, sorted(keys)
+
+    # 金额不做符号别名：`-5亿` 与 `5亿` 必须能分辨（符号错误是真实错误）。
+    money = evidence_number_keys([{
+        "record_id": "calc:x:c2", "record_type": "calculation",
+        "value": "-50000", "unit": "万元", "status": "derived",
+    }])
+    assert ("50000", "万元") not in money
+    assert not [key for key in money if key[0].lstrip("-") == "50000" and not key[0].startswith("-")]
