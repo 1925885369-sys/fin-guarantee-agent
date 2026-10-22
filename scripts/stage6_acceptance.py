@@ -425,16 +425,24 @@ def _collect_project(project_id: str, label: str, run_id: str, out_dir: Path, ke
     # 只冻结轨迹，`elapsed_ms` 留在尝试台账的 `calculation_summary` 里，所以从这里汇。
     # 多轮复算（首稿 + 修复稿）**累加**是有意的——它回答的是"这一章一共花了多久复算"。
     verify_ms = 0
+    # **尝试侧**统计：回退章的 `calculations_json` 是空的（写库只写采纳稿），只看采纳稿
+    # 会得出"模型一条都没算"的错误结论——2026-10-22 第十三轮实证：华辰 debt 实际声明
+    # 10 条计算（5 条复算通过），报告却显示"自主计算 0 条"。按章取最后一行的 summary，
+    # 让"模型到底有没有在算"能被看见。
+    attempt_calc: dict[str, dict] = {}
     if row("SELECT name FROM sqlite_master WHERE type='table' AND name='chapter_generation_attempts'"):
         for item in rows(
-            "SELECT diagnostics_json FROM chapter_generation_attempts WHERE project_id=?",
-            (project_id,),
+            "SELECT section_key,diagnostics_json FROM chapter_generation_attempts "
+            "WHERE project_id=? ORDER BY created_at", (project_id,),
         ):
             try:
                 diag = json.loads(item.get("diagnostics_json") or "{}")
             except (TypeError, ValueError):
                 continue
             verify_ms += int((diag.get("calculation_summary") or {}).get("elapsed_ms") or 0)
+            summary = diag.get("calculation_summary") or {}
+            if summary.get("count"):
+                attempt_calc[str(item.get("section_key") or "")] = summary
     data["calculations"] = {
         "sections": calc_sections,
         "count": sum(v["count"] for v in calc_sections.values()),
@@ -442,6 +450,13 @@ def _collect_project(project_id: str, label: str, run_id: str, out_dir: Path, ke
         "needs_review": sum(v["needs_review"] for v in calc_sections.values()),
         "rejected": sum(v["rejected"] for v in calc_sections.values()),
         "verify_ms": verify_ms,
+        # 尝试侧（含回退章）：`attempted_*` 与采纳侧分开，避免把"算过但没采纳"
+        # 混进"采纳了多少"。
+        "attempted_sections": attempt_calc,
+        "attempted_count": sum(int(v.get("count") or 0) for v in attempt_calc.values()),
+        "attempted_verified": sum(int(v.get("verified") or 0) for v in attempt_calc.values()),
+        "attempted_needs_review": sum(int(v.get("needs_review") or 0) for v in attempt_calc.values()),
+        "attempted_rejected": sum(int(v.get("rejected") or 0) for v in attempt_calc.values()),
     }
     # 建议复核：按状态计数。`superseded` 是历史留档（重新生成产生的新行），单列出来。
     data["recommendations"] = {}
@@ -651,7 +666,16 @@ def main() -> int:
         )
         calc = item.get("calculations") or {}
         rec = item.get("recommendations") or {}
-        if calc:
+        if calc.get("attempted_count"):
+            # 优先报**尝试侧**：回退章也会算，只看采纳稿会把"算了 10 条"显示成 0 条。
+            lines.append(
+                f"  - 自主计算：尝试 {calc.get('attempted_count', 0)} 条"
+                f"（复算通过 {calc.get('attempted_verified', 0)} / "
+                f"待核验 {calc.get('attempted_needs_review', 0)} / "
+                f"未通过 {calc.get('attempted_rejected', 0)}），"
+                f"采纳稿 {calc.get('count', 0)} 条"
+            )
+        elif calc:
             lines.append(
                 f"  - 自主计算：{calc.get('count', 0)} 条（复算通过 {calc.get('verified', 0)} / "
                 f"待核验 {calc.get('needs_review', 0)} / 未通过 {calc.get('rejected', 0)}）"
@@ -669,7 +693,9 @@ def main() -> int:
     detail_lines: list[str] = []
     for item in summary:
         calc = item.get("calculations") or {}
-        for section_key, stats in (calc.get("sections") or {}).items():
+        # 明细用**尝试侧**（含回退章）：这才是"模型自己算了什么"的完整答案。
+        sections = calc.get("attempted_sections") or calc.get("sections") or {}
+        for section_key, stats in sections.items():
             detail_lines.append(
                 f"- [{item.get('label')}] {section_key}：{stats.get('count')} 条"
                 f"（通过 {stats.get('verified')} / 待核验 {stats.get('needs_review')} / "
