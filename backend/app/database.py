@@ -349,6 +349,14 @@ CREATE TABLE IF NOT EXISTS report_prompt_overrides (
   migration_mode TEXT NOT NULL DEFAULT 'structured',
   UNIQUE(project_id, chapter_key)
 );
+-- 部署级「全局指令」（2026-10-23）：**跨全部章节**追加到 System Prompt 最末，
+-- 冲突时以这一段为准（见 `chapter_prompts.apply_global_directive`）。
+-- 与已废弃的 global_report_prompts 不同：这里只有一行，不是"每章一条"。
+CREATE TABLE IF NOT EXISTS global_prompt_directives (
+  directive_key TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 -- 已废弃（2026-10-23）：全局默认兜底层已移除（chapter_prompt 不再读取本表），
 -- 表仅作为历史留档保留，便于回滚与审计；不要在新代码里读写它。
 CREATE TABLE IF NOT EXISTS global_report_prompts (

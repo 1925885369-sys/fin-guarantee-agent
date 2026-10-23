@@ -29,7 +29,7 @@ import type {
   BondSummary, EntityProfileSummary, MaterialQAResponse, ProjectEntity, ProjectProfileSnapshot, ProjectSummary,
   ProjectUpdatePayload,
   OutlineChapter, OutlinePart, OutlineSubsection, ReportOutline, ReportOutlineState,
-  PromptConstraints, PromptEditableConfig, ReportBlock, ReportBlockCell, ReportBlockRow, ReportPrompt, ReportQuality, ReportSection,
+  PromptConstraints, PromptDirective, PromptEditableConfig, ReportBlock, ReportBlockCell, ReportBlockRow, ReportPrompt, ReportQuality, ReportSection,
   ReportSnapshot, ReportSnapshotSummary,
   ReportTableBlock, ReviewApplyResult, ReviewSummary, ReviewTask, Risk, Run, RunArtifact, RunNode, Severity, WorkflowStage,
   TableMatrix, TableSummary,
@@ -1031,6 +1031,12 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const [savingOutline, setSavingOutline] = useState(false);
   const [renameChapterId, setRenameChapterId] = useState("");
   const [renameValue, setRenameValue] = useState("");
+  // 部署级「全局指令」：不是章节，所以在章节树里单独成项，右侧渲染独立面板。
+  const [showDirective, setShowDirective] = useState(false);
+  const [directive, setDirective] = useState<PromptDirective | null>(null);
+  const [directiveDraft, setDirectiveDraft] = useState("");
+  const [directiveLoading, setDirectiveLoading] = useState(true);
+  const [directiveSaving, setDirectiveSaving] = useState(false);
 
   // 当前范围的目录基准与草稿（均按范围缓存，切换范围互不影响）。
   const outlineDraft = outlineDrafts[outlineScope];
@@ -1072,6 +1078,17 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   }, [project.id, token, outlineScope]);
 
   useEffect(() => { load(); }, [load]);
+
+  // 全局指令与章节列表并行加载：它不属于任何章，失败不影响 Prompt 编辑（降级为空）。
+  useEffect(() => {
+    let cancelled = false;
+    setDirectiveLoading(true);
+    api.reportPromptDirective(project.id, token)
+      .then((data) => { if (!cancelled) { setDirective(data); setDirectiveDraft(data.content); } })
+      .catch(() => { if (!cancelled) { setDirective(null); setDirectiveDraft(""); } })
+      .finally(() => { if (!cancelled) setDirectiveLoading(false); });
+    return () => { cancelled = true; };
+  }, [project.id, token]);
 
   // 目录保存/重置后**只重读章节配置**（P1-2）：目录变了，章节集合与自定义章节的
   // 键都会变，Prompt 列表必须跟着刷新；已编辑未保存的草稿按 key 保留，不被这次
@@ -1259,6 +1276,31 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     finally { setSaving(""); }
   };
 
+  // 部署级「全局指令」：跨全部章节追加到 System Prompt 最末，冲突时以它为准。
+  const directiveDirty = Boolean(directive && directiveDraft !== directive.content);
+  const directiveEditable = directive?.global_editable !== false;
+  const saveDirective = async () => {
+    if (!directiveEditable || directiveSaving) return;
+    setDirectiveSaving(true); setMessage(""); setLoadError("");
+    try {
+      const saved = await api.savePromptDirective(project.id, directiveDraft, token);
+      setDirective(saved); setDirectiveDraft(saved.content);
+      setMessage("全局指令已保存；下次生成时追加到全部章节的 Prompt 最末（不会自动重跑）。");
+    } catch (reason) { setLoadError(reason instanceof Error ? reason.message : "保存全局指令失败"); }
+    finally { setDirectiveSaving(false); }
+  };
+  const resetDirective = async () => {
+    if (!directiveEditable || directiveSaving) return;
+    if (!window.confirm("清空全局指令后，各章只保留自己的 Prompt。确定继续？")) return;
+    setDirectiveSaving(true); setMessage(""); setLoadError("");
+    try {
+      const cleared = await api.resetPromptDirective(project.id, token);
+      setDirective(cleared); setDirectiveDraft("");
+      setMessage("全局指令已清空。");
+    } catch (reason) { setLoadError(reason instanceof Error ? reason.message : "清空全局指令失败"); }
+    finally { setDirectiveSaving(false); }
+  };
+
   const constraints: PromptConstraints = active?.constraints || { required_inputs: [], input_contract: {}, preserve_blocks: [], forbidden: [], output_contract: {}, global_rules: {} };
   useEffect(() => {
     let cancelled = false;
@@ -1291,9 +1333,9 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   // 所有目录编辑只改当前范围的草稿；保存成功后用服务端响应整体替换草稿与基准。
   const mutateOutline = (mutator: (outline: ReportOutline) => ReportOutline) => {
     setOutlineDrafts((current) => {
-      const base = current[scope];
+      const base = current[outlineScope];
       if (!base) return current;
-      return { ...current, [scope]: normalizeOutline(mutator(base)) };
+      return { ...current, [outlineScope]: normalizeOutline(mutator(base)) };
     });
   };
   const patchChapter = (chapterId: string, patch: Partial<OutlineChapter>) => mutateOutline((outline) => ({ ...outline, parts: outline.parts.map((part) => ({ ...part, chapters: part.chapters.map((chapter) => chapter.chapter_id === chapterId ? { ...chapter, ...patch } : chapter) })) }));
@@ -1365,6 +1407,25 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
       : "作为所有未单独设置目录的项目的默认结构。"}</span>
   </div>;
 
+  // 全局指令面板：**不属于任何章**，选中左侧「全局指令」时单独渲染。
+  const directivePanel = <section className="prompt-directive-panel">
+    <header className="prompt-detail-head"><div><span>部署级配置 · 全部章节</span><h2>全局指令</h2></div><div className="prompt-detail-badges"><span className="llm">最高优先级</span></div></header>
+    <p className="prompt-scope-note">追加到全部章节 System Prompt 的最末；与前述任何要求冲突时，以本段为准。保存不调用模型，下次生成时生效。</p>
+    {directiveLoading ? <div className="loading-page prompt-loading"><LoaderCircle className="spin" size={24} />正在载入全局指令</div> : <>
+      <section className="prompt-card">
+        <div className="prompt-card-head"><strong>指令内容</strong><small>一条规则覆盖全部章节；留空即视为不设置</small></div>
+        <div className="prompt-card-body">
+          <textarea className="prompt-directive-input" rows={14} value={directiveDraft} disabled={!directiveEditable || directiveSaving} onChange={(event) => setDirectiveDraft(event.target.value)} placeholder="例如：正文不得出现「资料01」这类系统编号；统一用「发行文件」「外部信用评价文件」指代材料。" />
+        </div>
+      </section>
+      <footer className="prompt-action-bar"><span>{directiveDirty ? "存在未保存的修改" : directive?.content ? "已保存" : "尚未设置全局指令"}</span><div>
+        {directive?.content && <button className="text-button" type="button" disabled={!directiveEditable || directiveSaving} onClick={resetDirective}>清空</button>}
+        <button className="primary-button" type="button" disabled={!directiveEditable || !directiveDirty || directiveSaving} onClick={saveDirective}>{directiveSaving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存全局指令</button>
+      </div></footer>
+      {!directiveEditable && <p className="prompt-readonly">{directive?.global_edit_reason || "当前环境不允许修改全局指令。"}</p>}
+    </>}
+  </section>;
+
   const subsectionEditor = activeOutlineChapter ? <section className="outline-subsection-editor">
     <div className="outline-subsection-head">
       <div className="outline-subsection-head-copy"><strong>三级小节</strong><HelpTip label="三级小节说明">小节用于拆分本章的写作顺序与要求，保存后写入报告目录。留空的 Prompt 沿用本章要求；取消勾选则暂不参与生成。</HelpTip></div>
@@ -1399,9 +1460,9 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     {loadError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{loadError}<button className="icon-button" onClick={() => setLoadError("")} title="关闭"><X size={14} /></button></div>}
     {outlineError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{outlineError}<button className="icon-button" onClick={() => setOutlineError("")} title="关闭"><X size={14} /></button></div>}
     {loading || !navChapters.length ? <div className="loading-page prompt-loading"><LoaderCircle className="spin" size={24} />正在载入章节 Prompt</div> : <section className="prompt-workbench">
-      <aside className="prompt-chapter-nav" aria-label="报告章节"><div className="prompt-chapter-nav-head"><strong>报告章节</strong><span>{navChapters.length}</span></div>{navParts.map((part) => <div className="prompt-part-group" key={part.partId}><div className="prompt-part-label">{part.partTitle}</div>{part.chapters.map((chapter) => { const promptItem = prompts.find((item) => item.chapter_key === (chapter.templateKey || chapter.chapterId)); const dirty = chapter.outlineDirty || (promptItem ? JSON.stringify(drafts[`${scope}:${promptItem.chapter_key}`] || promptItem.editable_config) !== JSON.stringify(promptItem.editable_config) : false); const canEditChapter = Boolean(outlineDraft && !outlineReadOnly); return <div className="outline-nav-row" key={chapter.chapterId}>{renameChapterId === chapter.chapterId ? <div className="outline-nav-rename"><input value={renameValue} autoFocus maxLength={60} aria-label="章节名称" onChange={(event) => setRenameValue(event.target.value.replace(/[\r\n]+/g, " "))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitRename(); } else if (event.key === "Escape") { setRenameChapterId(""); } }} /><button className="icon-button compact" type="button" aria-label="确认改名" title="确认" onClick={commitRename}><Check size={14} /></button><button className="icon-button compact" type="button" aria-label="取消改名" title="取消" onClick={() => setRenameChapterId("")}><X size={14} /></button></div> : <><button className={`prompt-chapter-option ${chapter.chapterId === activeChapterId ? "active" : ""}`} aria-current={chapter.chapterId === activeChapterId ? "page" : undefined} onClick={() => { setActiveChapterId(chapter.chapterId); setTab("structured"); }}><span className="prompt-index">{chapter.index}、</span><span><strong>{chapter.title}</strong></span>{dirty && <i title="存在未保存修改" />}</button>{canEditChapter && <div className="outline-nav-actions"><button className="icon-button compact" type="button" aria-label="重命名章节" title="重命名" onClick={() => beginRename(chapter)}><Pencil size={13} /></button><button className="icon-button compact" type="button" aria-label="上移章节" title="上移" disabled={chapter.index <= 1} onClick={() => moveChapter(part.partId, chapter.chapterId, -1)}><ArrowUp size={13} /></button><button className="icon-button compact" type="button" aria-label="下移章节" title="下移" disabled={chapter.index >= part.chapters.length} onClick={() => moveChapter(part.partId, chapter.chapterId, 1)}><ArrowDown size={13} /></button><button className="icon-button compact danger" type="button" aria-label="删除章节" title="删除" onClick={() => confirmRemoveChapter(chapter)}><Trash2 size={13} /></button></div>}</>}</div>; })}{outlineDraft && !outlineReadOnly && <button className="outline-add-chapter" type="button" disabled={totalChapters >= 60} onClick={() => addChapter(part.partId)}><FolderPlus size={14} />新增章节</button>}</div>)}</aside>
+      <aside className="prompt-chapter-nav" aria-label="报告章节"><div className="prompt-chapter-nav-head"><strong>报告章节</strong><span>{navChapters.length}</span></div><button className={`prompt-chapter-option prompt-directive-entry ${showDirective ? "active" : ""}`} aria-current={showDirective ? "page" : undefined} onClick={() => { setShowDirective(true); setTab("structured"); }}><span><strong>全局指令</strong></span></button>{navParts.map((part) => <div className="prompt-part-group" key={part.partId}><div className="prompt-part-label">{part.partTitle}</div>{part.chapters.map((chapter) => { const promptItem = prompts.find((item) => item.chapter_key === (chapter.templateKey || chapter.chapterId)); const dirty = chapter.outlineDirty || (promptItem ? JSON.stringify(drafts[promptItem.chapter_key] || promptItem.editable_config) !== JSON.stringify(promptItem.editable_config) : false); const canEditChapter = Boolean(outlineDraft && !outlineReadOnly); return <div className="outline-nav-row" key={chapter.chapterId}>{renameChapterId === chapter.chapterId ? <div className="outline-nav-rename"><input value={renameValue} autoFocus maxLength={60} aria-label="章节名称" onChange={(event) => setRenameValue(event.target.value.replace(/[\r\n]+/g, " "))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitRename(); } else if (event.key === "Escape") { setRenameChapterId(""); } }} /><button className="icon-button compact" type="button" aria-label="确认改名" title="确认" onClick={commitRename}><Check size={14} /></button><button className="icon-button compact" type="button" aria-label="取消改名" title="取消" onClick={() => setRenameChapterId("")}><X size={14} /></button></div> : <><button className={`prompt-chapter-option ${chapter.chapterId === activeChapterId ? "active" : ""}`} aria-current={chapter.chapterId === activeChapterId ? "page" : undefined} onClick={() => { setShowDirective(false); setActiveChapterId(chapter.chapterId); setTab("structured"); }}><span className="prompt-index">{chapter.index}、</span><span><strong>{chapter.title}</strong></span>{dirty && <i title="存在未保存修改" />}</button>{canEditChapter && <div className="outline-nav-actions"><button className="icon-button compact" type="button" aria-label="重命名章节" title="重命名" onClick={() => beginRename(chapter)}><Pencil size={13} /></button><button className="icon-button compact" type="button" aria-label="上移章节" title="上移" disabled={chapter.index <= 1} onClick={() => moveChapter(part.partId, chapter.chapterId, -1)}><ArrowUp size={13} /></button><button className="icon-button compact" type="button" aria-label="下移章节" title="下移" disabled={chapter.index >= part.chapters.length} onClick={() => moveChapter(part.partId, chapter.chapterId, 1)}><ArrowDown size={13} /></button><button className="icon-button compact danger" type="button" aria-label="删除章节" title="删除" onClick={() => confirmRemoveChapter(chapter)}><Trash2 size={13} /></button></div>}</>}</div>; })}{outlineDraft && !outlineReadOnly && <button className="outline-add-chapter" type="button" disabled={totalChapters >= 60} onClick={() => addChapter(part.partId)}><FolderPlus size={14} />新增章节</button>}</div>)}</aside>
       <main className="prompt-detail"><div className="prompt-mobile-picker"><label htmlFor="prompt-chapter-picker">报告章节</label><select id="prompt-chapter-picker" value={activeChapterId} onChange={(event) => { setActiveChapterId(event.target.value); setTab("structured"); }}>{navParts.map((part) => <optgroup label={part.partTitle} key={part.partId}>{part.chapters.map((chapter) => <option value={chapter.chapterId} key={chapter.chapterId}>{chapter.index}、{chapter.title}</option>)}</optgroup>)}</select></div>
-        {active && activeDraft ? <>
+        {showDirective ? directivePanel : active && activeDraft ? <>
         <header className="prompt-detail-head"><div><span>{active.part || "报告章节"} · 第 {activeChapterNumber + 1} 章</span><h2>{active.title}</h2></div><div className="prompt-detail-badges"><span className={active.llm ? "llm" : "deterministic"}>{active.llm ? "模型生成" : "确定性生成"}</span><PromptGenerationHelp llm={active.llm} />{!activeNavChapter?.templateKey && <span className="custom">自定义章节</span>}<span className={active.source === "system" ? "default" : "custom"}>{sourceText(active)}</span>{active.migration_mode !== "structured" && <span className="legacy">历史配置已迁移</span>}</div></header>
         <div className="prompt-tabs" role="tablist"><button className={tab === "structured" ? "active" : ""} role="tab" aria-selected={tab === "structured"} onClick={() => setTab("structured")}><SlidersHorizontal size={16} />结构化配置</button><button className={tab === "preview" ? "active" : ""} role="tab" aria-selected={tab === "preview"} onClick={() => setTab("preview")}><Eye size={16} />完整 Prompt</button></div>
         {tab === "structured" ? <div className="prompt-structured"><fieldset disabled={!canEdit}>

@@ -324,7 +324,21 @@ class ReportPromptUpdate(BaseModel):
         return self
 
 
+class PromptDirectiveUpdate(BaseModel):
+    """部署级「全局指令」的请求体（2026-10-23）。
+
+    与 `PromptEditableConfig` **完全无关**：那是每章一份的结构化配置，而这里是
+    跨全部章节的一段自由文本，追加到 System Prompt 最末、冲突时以它为准。
+    刻意不并入前者——否则会被卷进每章的 `structured_json`，变成"每章一份"。
+    """
+
+    content: str = Field(default="", max_length=8000)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ReportPromptPreview(BaseModel):
+
     model_config = ConfigDict(extra="forbid")
 
     config: PromptEditableConfig

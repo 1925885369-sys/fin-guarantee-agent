@@ -24,7 +24,7 @@ from .chapter_guard import (
     NO_MODEL_REASON, _materials_fingerprint, assess_chapter_length, build_chapter_context, count_report_chars,
 )
 from .chapter_prompts import (
-    BOND_CHAPTER_KEYS, BOND_CHAPTER_PART, BOND_CHAPTER_TITLES, PROMPT_CONTRACT_VERSION,
+    BOND_CHAPTER_KEYS, BOND_CHAPTER_PART, BOND_CHAPTER_TITLES, GLOBAL_DIRECTIVE_MARK, PROMPT_CONTRACT_VERSION,
     chapter_default_prompt, chapter_prompt,
     chapter_uses_llm, compile_structured_prompt, editable_config_from_factory, effective_chapter_config,
     load_chapter_config,
@@ -73,7 +73,7 @@ from .report_outline_store import (
 from .schemas import (
     CandidateDecision, DocumentUpdate, EntityProfileCreate, EntityProfileUpdate, ReportOutlineUpdate,
     ReportRecommendationDecision, ReportTableRefresh,
-    FactGroupResolve, FactUpdate, MaterialQARequest, ProfileImportCommit, ProjectCreate, ProjectUpdate, PromptEditableConfig, ReportPromptPreview, ReportPromptUpdate, ReviewTaskUpdate, RunCreate, SectionRegenerateRequest, SectionUpdate, TableCellReview,
+    FactGroupResolve, FactUpdate, MaterialQARequest, ProfileImportCommit, ProjectCreate, ProjectUpdate, PromptDirectiveUpdate, PromptEditableConfig, ReportPromptPreview, ReportPromptUpdate, ReviewTaskUpdate, RunCreate, SectionRegenerateRequest, SectionUpdate, TableCellReview,
 )
 from .security import check_rate, cleanup_expired_projects, validate_magic
 from .retrieval import index_diagnostics, retrieval_status, retrieve_chunks
@@ -2117,6 +2117,74 @@ def _outline_chapter_meta(project_id: str, chapter_key: str) -> tuple[str, str]:
     except Exception:
         return "", ""
     return "", ""
+
+
+# ------------------------------------------- 全局指令（部署级，跨全部章节）--
+
+@app.get("/api/projects/{project_id}/report-prompt-directive")
+def get_report_prompt_directive(project_id: str, request: Request,
+                                x_project_token: Optional[str] = Header(default=None)) -> dict:
+    """读部署级「全局指令」。
+
+    2026-10-23：这是替代原"全局默认"的那一层——跨全部章节、追加到 System Prompt
+    最末、冲突时以它为准。接口挂在项目路径下只为复用项目令牌；读写的是**部署级**
+    配置，因此写权限用 `_require_global_prompt_editable`（非公开 + 本机直连）。
+    """
+    _authorize(project_id, x_project_token)
+    permissions = prompt_edit_permissions(project_id, request)
+    content, updated_at = "", None
+    try:
+        item = row("SELECT content,updated_at FROM global_prompt_directives WHERE directive_key='default'")
+    except Exception:
+        item = None
+    if item:
+        content = str(item.get("content") or "")
+        updated_at = item.get("updated_at")
+    return {
+        "content": content,
+        "updated_at": updated_at,
+        "mark": GLOBAL_DIRECTIVE_MARK,
+        **_prompt_permission_fields(permissions),
+    }
+
+
+@app.patch("/api/projects/{project_id}/report-prompt-directive")
+def update_report_prompt_directive(project_id: str, payload: PromptDirectiveUpdate, request: Request,
+                                   x_project_token: Optional[str] = Header(default=None)) -> dict:
+    """保存全局指令。**不调用模型、不改历史正文**；下次生成时生效。"""
+    _ensure_project_writable(_authorize(project_id, x_project_token))
+    permissions = _require_global_prompt_editable(project_id, request)
+    content = str(payload.content or "").strip()
+    now = now_iso()
+    before = row("SELECT content FROM global_prompt_directives WHERE directive_key='default'")
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO global_prompt_directives (directive_key,content,updated_at) VALUES ('default',?,?) "
+            "ON CONFLICT(directive_key) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at",
+            (content, now),
+        )
+    audit_event(project_id, "report_prompt_directive_update", "report_prompt", "global-directive",
+                before, {"content": content}, "human")
+    return {
+        "content": content, "updated_at": now, "mark": GLOBAL_DIRECTIVE_MARK,
+        **_prompt_permission_fields(permissions),
+    }
+
+
+@app.delete("/api/projects/{project_id}/report-prompt-directive")
+def reset_report_prompt_directive(project_id: str, request: Request,
+                                  x_project_token: Optional[str] = Header(default=None)) -> dict:
+    """清空全局指令（幂等）：删除后各章回到"只有本章 Prompt"的状态。"""
+    _ensure_project_writable(_authorize(project_id, x_project_token))
+    permissions = _require_global_prompt_editable(project_id, request)
+    before = row("SELECT content FROM global_prompt_directives WHERE directive_key='default'")
+    execute("DELETE FROM global_prompt_directives WHERE directive_key='default'")
+    audit_event(project_id, "report_prompt_directive_reset", "report_prompt", "global-directive",
+                before, {}, "human")
+    return {
+        "content": "", "updated_at": None, "mark": GLOBAL_DIRECTIVE_MARK,
+        **_prompt_permission_fields(permissions),
+    }
 
 
 # ------------------------------------------------ P1-1：报告版本化目录（report-outline）--

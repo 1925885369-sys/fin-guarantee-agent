@@ -4,7 +4,7 @@ import type {
   FinancialMetric, FinancialTieOut, Health, Inventory, LatestRun, MetricTrace, PolicyInfo, Project,
   BondSummary, EntityProfileDetail, EntityProfileReadiness, EntityProfileSummary, ProjectCreatePayload,
   ProjectEntity, ProjectProfileSnapshot, ProjectSummary, ProjectUpdatePayload, ProjectUpdateResult, ReportQuality, ReportRecommendation, ReportSection, ReviewApplyResult, ReviewSummary,
-  ReviewTask, Risk, Run, RunNode, RunArtifact, ReportPrompt,
+  ReviewTask, Risk, Run, RunNode, RunArtifact, ReportPrompt, PromptDirective,
   ReportOutline, ReportOutlineState,
   ReportSnapshot, ReportSnapshotSummary,
     TableMatrix, TableSummary, TableCellReviewRecord,
@@ -250,6 +250,18 @@ export const api = {
   previewReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"], token?: string) => request<{ chapter_key: string; prompt: string }>(`/api/projects/${id}/report-prompts/${chapterKey}/preview`, {
     method: "POST", headers: headers(token, true), body: JSON.stringify({ config }),
   }),
+  // 部署级「全局指令」（2026-10-23）：跨全部章节追加到 System Prompt 最末，
+  // 冲突时以它为准。与"每章一份"的 Prompt 配置无关，因此单独一套接口。
+  reportPromptDirective: (id: string, token?: string) =>
+    request<PromptDirective>(`/api/projects/${id}/report-prompt-directive`, { headers: headers(token) }),
+  savePromptDirective: (id: string, content: string, token?: string) =>
+    request<PromptDirective>(`/api/projects/${id}/report-prompt-directive`, {
+      method: "PATCH", headers: headers(token, true), body: JSON.stringify({ content }),
+    }),
+  resetPromptDirective: (id: string, token?: string) =>
+    request<PromptDirective>(`/api/projects/${id}/report-prompt-directive`, {
+      method: "DELETE", headers: headers(token),
+    }),
   citation: (id: string, token?: string) => request<Citation>(`/api/citations/${id}`, { headers: headers(token) }),
   run: (id: string, token?: string) => request<Run>(`/api/runs/${id}`, { headers: headers(token) }),
   latestRun: (projectId: string, token?: string) => request<LatestRun>(`/api/projects/${projectId}/runs/latest`, { headers: headers(token) }),

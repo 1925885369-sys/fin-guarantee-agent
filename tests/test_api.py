@@ -529,6 +529,49 @@ def test_real_reference_prompt_edit_requires_local_direct():
             _delete_test_project(project_id)
 
 
+def test_global_directive_appends_to_every_chapter_prompt():
+    """全局指令（2026-10-23）：跨全部章节追加到 System Prompt **最末**，冲突以它为准。
+
+    与已删除的"全局默认"不同——那是会被项目覆盖整段吞掉的兜底；这条是读取时追加，
+    任何章节（含 legacy 存库文本）都带得上，且哨兵保证只出现一次。
+    """
+    from backend.app.chapter_prompts import chapter_prompt
+
+    with TestClient(app, client=("127.0.0.1", 42319)) as client:
+        created = client.post("/api/projects", json={
+            "company_name": "Directive test project", "amount": 500, "term_months": 12,
+            "purpose": "working capital", "data_consent": True,
+        })
+        assert created.status_code == 201
+        project_id, token = created.json()["id"], created.json()["accessToken"]
+        headers = {"X-Project-Token": token}
+        try:
+            empty = client.get(f"/api/projects/{project_id}/report-prompt-directive", headers=headers).json()
+            assert empty["content"] == ""
+            assert empty["global_editable"] is True
+
+            saved = client.patch(
+                f"/api/projects/{project_id}/report-prompt-directive",
+                json={"content": "正文不得出现资料编号。"}, headers=headers,
+            )
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["content"] == "正文不得出现资料编号。"
+
+            # 追加在**最末**，且只出现一次（哨兵幂等）。
+            for chapter_key in ("financial", "rating"):
+                text = chapter_prompt(chapter_key, project_id)
+                assert text.rstrip().endswith("正文不得出现资料编号。"), chapter_key
+                assert text.count("【全局强制指令】") == 1, chapter_key
+
+            cleared = client.delete(
+                f"/api/projects/{project_id}/report-prompt-directive", headers=headers)
+            assert cleared.status_code == 200, cleared.text
+            assert "【全局强制指令】" not in chapter_prompt("financial", project_id)
+        finally:
+            execute("DELETE FROM global_prompt_directives WHERE directive_key='default'")
+            _delete_test_project(project_id)
+
+
 def test_prompt_outdated_compares_generated_hash_and_never_regenerates():
     """§四 line 41：`prompt_outdated` = 当前有效 Prompt 哈希 ≠ **生成时**哈希；保存 Prompt 不自动再生。
 

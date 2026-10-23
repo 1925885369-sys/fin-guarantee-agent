@@ -224,6 +224,17 @@ export interface ReportPrompt {
   real_reference?: boolean;
 }
 
+/** 部署级「全局指令」（2026-10-23）：跨全部章节追加到 System Prompt 最末，
+ *  冲突时以它为准。只有一条，不是"每章一份"。 */
+export interface PromptDirective {
+  content: string;
+  updated_at: string | null;
+  /** 注入时的哨兵（`【全局强制指令】`），前端只用于提示，不参与渲染逻辑 */
+  mark?: string;
+  global_editable?: boolean;
+  global_edit_reason?: string;
+}
+
 /** 篇幅目标：就是用户在章节 Prompt 里设置的区间，没有第二套系统上限。 */
 export interface LengthPolicy {
   effective_min_chars?: number;

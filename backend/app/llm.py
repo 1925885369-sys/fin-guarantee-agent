@@ -11,7 +11,7 @@ from typing import Callable, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from .chapter_prompts import CONTEXT_SCHEMA_VERSION, chapter_prompt, load_chapter_config
+from .chapter_prompts import CONTEXT_SCHEMA_VERSION, apply_global_directive, chapter_prompt, load_chapter_config
 from .config import settings
 from .database import connect, now_iso, row
 from .facts import FACT_REGISTRY
@@ -1670,6 +1670,10 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
             request.pop("required_sections", None)
             request.pop("required_elements", None)
             request["required_subsections"] = subsections
+    # 全局指令必须在**所有**路径的最后一道注入：`chapter_prompt` 与
+    # `compile_structured_prompt` 已各加过一次，这里兜住 `preserved_legacy` 的旧存库文本
+    # 与首稿/压缩/安全修复/JSON 修复四条调用链。哨兵保证不会重复出现。
+    system_prompt = apply_global_directive(system_prompt)
     return system_prompt, request, alias_to_citation, context or LlmCallContext(task_type="report"), allowed
 
 

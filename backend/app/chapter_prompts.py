@@ -835,7 +835,7 @@ def compile_structured_prompt(chapter_key: str, editable: dict) -> str:
     if int(output_contract.get("max_citations") or 0) > 0:
         lines.append(f"本章最多引用 {int(output_contract['max_citations'])} 条允许的引用 ID。")
     lines.append(structured_json_shape(merged) + structured_array_contract(merged))
-    return " ".join(lines)
+    return apply_global_directive(" ".join(lines))
 
 
 def _decode_structured(value: object) -> dict | None:
@@ -939,6 +939,44 @@ def chapter_default_prompt(chapter_key: str) -> str:
     return chapter_system_prompt(chapter_key)
 
 
+# 部署级「全局指令」：跨全部章节追加到 System Prompt **最末**，冲突时以它为准。
+# 与已删除的"全局默认"不同——那不是最高优先级，是会被项目覆盖整段吞掉的兜底。
+GLOBAL_DIRECTIVE_MARK = "【全局强制指令】"
+
+
+def load_global_directive() -> str:
+    """读全局指令正文；没有配置（或读不到）时返回空串。"""
+    try:
+        from .database import row
+
+        item = row("SELECT content FROM global_prompt_directives WHERE directive_key='default'")
+    except Exception:
+        # 旧库/热加载期间缺表不应阻断生成：没有指令就等于没配置。
+        return ""
+    return str((item or {}).get("content") or "").strip()
+
+
+def apply_global_directive(prompt: str) -> str:
+    """把全局指令追加到 prompt 最末；**幂等**（先截到哨兵之前再整体重注入）。
+
+    哨兵扫尾的做法与 `apply_subsection_contract` 同源：同一段 prompt 可能被
+    `chapter_prompt()`、`compile_structured_prompt()`、`llm._report_request()`
+    各加一次，必须保证最终只出现一份。
+    """
+    base = str(prompt or "")
+    mark_at = base.find(GLOBAL_DIRECTIVE_MARK)
+    if mark_at >= 0:
+        base = base[:mark_at].rstrip()
+    content = load_global_directive()
+    if not content:
+        return base
+    return (
+        f"{base}\n\n{GLOBAL_DIRECTIVE_MARK}"
+        "以下为最高优先级要求；与前述任何段落冲突时，以本段为准。\n"
+        f"{content}"
+    )
+
+
 def chapter_prompt(chapter_key: str, project_id: str | None = None) -> str:
     """Return the effective system prompt for a chapter.
 
@@ -960,12 +998,12 @@ def chapter_prompt(chapter_key: str, project_id: str | None = None) -> str:
                 (project_id, chapter_key),
             )
             if item and str(item.get("prompt") or "").strip():
-                return str(item["prompt"])
+                return apply_global_directive(str(item["prompt"]))
         except Exception:
             # A missing table during an old-process hot reload must not break
             # report generation; the checked-in contract remains the fallback.
             pass
-    return chapter_default_prompt(chapter_key)
+    return apply_global_directive(chapter_default_prompt(chapter_key))
 
 
 def migrate_legacy_prompt_overrides() -> None:
