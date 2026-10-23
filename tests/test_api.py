@@ -474,15 +474,12 @@ def _insert_real_reference_project(project_id: str) -> None:
     )
 
 
-def test_real_reference_prompt_edit_requires_local_direct_for_both_scopes():
+def test_real_reference_prompt_edit_requires_local_direct():
     """真实参考项目**项目级** Prompt 仅本机直连且无代理转发头时允许保存/重置。
 
-    ⚠️ 旧口径"全局默认一律禁止修改"已被新决定替代（`PLAN_new.md` §一 /
-    `PLAN_new_p0_p1.md` P0-1 / `PLAN.md` §二 P0-A）：全局默认是**部署级**配置，
-    允许非公开环境 + 本机直连 + 无转发头的请求修改，**与项目是否真实参考无关**。
-    所以本用例验证的是：
-    - 非环回客户端：项目级与全局级**都**拒绝；
-    - 环回客户端：项目级可写；全局级**也可写**（且真实参考项目不构成额外限制）。
+    2026-10-23：全局默认兜底层已删除，"全局级 Prompt"不再存在。`global_editable`
+    字段保留，改为表示部署级「全局指令」的写权限（同判据：非公开 + 本机直连 + 无转发头）。
+    本用例验证：非环回客户端（含带转发头）拒绝；环回客户端可写。
     """
     from uuid import uuid4
 
@@ -503,13 +500,6 @@ def test_real_reference_prompt_edit_requires_local_direct_for_both_scopes():
                 headers={"x-forwarded-for": "203.0.113.9"},
             )
             assert forwarded.status_code == 403
-            # 全局默认同样过不了"本机直连"这一关（非环回客户端）。
-            assert client.patch(
-                f"/api/projects/{project_id}/report-prompts/global/financial", json=payload,
-            ).status_code == 403
-            assert client.delete(
-                f"/api/projects/{project_id}/report-prompts/global/financial",
-            ).status_code == 403
         finally:
             _delete_test_project(project_id)
 
@@ -525,30 +515,17 @@ def test_real_reference_prompt_edit_requires_local_direct_for_both_scopes():
             body = saved.json()
             assert body["overridden"] is True
             assert body["editable"] is True
-            # 新口径：本机直连下全局默认可编辑（全局是部署级配置，与项目类型无关）。
+            # 部署级「全局指令」的写权限同判据（与项目类型无关）。
             assert body["global_editable"] is True
 
             listed = client.get(f"/api/projects/{project_id}/report-prompts").json()
-            assert all(item["editable"] is True and item["global_editable"] is True
-                       for item in listed)
-
-            # 全局保存对真实参考项目同样可用（且不删除刚建的项目覆盖）。
-            global_saved = client.patch(
-                f"/api/projects/{project_id}/report-prompts/global/financial", json=payload,
-            )
-            assert global_saved.status_code == 200, global_saved.text
-            assert global_saved.json()["global_overridden"] is True
-            assert row("SELECT COUNT(*) c FROM report_prompt_overrides "
-                       "WHERE project_id=? AND chapter_key='financial'", (project_id,))["c"] == 1
+            assert all(item["editable"] is True for item in listed)
+            assert all(item["global_editable"] is True for item in listed)
 
             assert client.delete(
                 f"/api/projects/{project_id}/report-prompts/financial",
             ).status_code == 200
-            assert client.delete(
-                f"/api/projects/{project_id}/report-prompts/global/financial",
-            ).status_code == 200
         finally:
-            _purge_global("financial")
             _delete_test_project(project_id)
 
 
@@ -609,175 +586,6 @@ def _p0a_project(client: TestClient) -> tuple[str, dict]:
     return created.json()["id"], {"X-Project-Token": created.json()["accessToken"]}
 
 
-def _global_row(chapter_key: str):
-    return row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
-
-
-def _purge_global(chapter_key: str) -> None:
-    execute("DELETE FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
-
-
-def test_global_prompt_save_reset_scope_and_priority():
-    """P0-A：全局默认可保存/重置/按范围读取；优先级 项目覆盖 > 全局 > YAML。
-
-    且全局保存**不删除项目覆盖、不调用模型、不修改历史正文**（P0-1 明文）。
-    """
-    # 本机直连（环回）才允许写全局——TestClient 默认 client.host 是 "testclient"，
-    # 显式指定环回地址与真实部署一致。
-    with TestClient(app, client=("127.0.0.1", 42317)) as client:
-        project_id, headers = _p0a_project(client)
-        try:
-            listed = client.get(f"/api/projects/{project_id}/report-prompts?scope=global",
-                                headers=headers).json()
-            fin = next(item for item in listed if item["chapter_key"] == "financial")
-            assert fin["scope"] == "global"
-            assert fin["global_editable"] is True
-            assert fin["global_overridden"] is False
-            assert fin["global_prompt"] == fin["default_prompt"]
-            assert fin["effective_source"] == "system"
-            assert fin["prompt_contract_version"], "响应必须带当前编译器版本"
-
-            saved = client.patch(f"/api/projects/{project_id}/report-prompts/global/financial",
-                                 headers=headers, json={"prompt": "全局默认：只用已批准证据。"})
-            assert saved.status_code == 200, saved.text
-            body = saved.json()
-            assert body["global_overridden"] is True
-            assert body["global_config_sha256"], "必须有并发基准哈希"
-
-            # 无项目覆盖时，全局立刻生效
-            fin = next(item for item in client.get(f"/api/projects/{project_id}/report-prompts",
-                                                   headers=headers).json()
-                       if item["chapter_key"] == "financial")
-            assert fin["effective_source"] == "global"
-
-            # 建一个项目覆盖 → 全局保存不再影响该项目（优先级：项目 > 全局）
-            assert client.patch(f"/api/projects/{project_id}/report-prompts/financial",
-                                headers=headers, json={"prompt": "项目级配置。"}).status_code == 200
-            fin = next(item for item in client.get(f"/api/projects/{project_id}/report-prompts",
-                                                   headers=headers).json()
-                       if item["chapter_key"] == "financial")
-            assert fin["effective_source"] == "project"
-
-            # 保存不调用模型、不写正文
-            assert row("SELECT COUNT(*) c FROM llm_attempts WHERE project_id=?",
-                       (project_id,))["c"] == 0
-            assert row("SELECT COUNT(*) c FROM report_sections WHERE project_id=?",
-                       (project_id,))["c"] == 0
-
-            # 重置全局：回落出厂，**项目覆盖仍在**
-            reset = client.delete(f"/api/projects/{project_id}/report-prompts/global/financial",
-                                  headers=headers)
-            assert reset.status_code == 200, reset.text
-            assert reset.json()["global_overridden"] is False
-            fin = next(item for item in client.get(f"/api/projects/{project_id}/report-prompts",
-                                                   headers=headers).json()
-                       if item["chapter_key"] == "financial")
-            assert fin["overridden"] is True, "重置全局不得连带删除项目覆盖"
-            assert _global_row("financial") is None
-
-            # 审计留痕
-            with connect() as conn:
-                actions = {dict(record)["action"] for record in conn.execute(
-                    "SELECT action FROM audit_events WHERE project_id=?", (project_id,)).fetchall()}
-            assert {"report_prompt_global_update", "report_prompt_global_reset"} <= actions
-        finally:
-            _purge_global("financial")
-            _delete_test_project(project_id)
-
-
-def test_global_prompt_write_requires_local_and_non_public(monkeypatch):
-    """P0-A：全局写入门禁——公开演示环境或带代理转发头一律 403（项目级不受影响）。"""
-    with TestClient(app, client=("127.0.0.1", 42318)) as client:
-        project_id, headers = _p0a_project(client)
-        try:
-            # 公开演示环境：settings 是 frozen dataclass（不能直接 setattr），且整对象替换
-            # 会波及无关字段 → 用只覆盖 public_demo、其余透传的代理替换 main 模块里的 settings。
-            from backend.app import main as main_module
-
-            class _SettingsWithPublicDemo:
-                def __init__(self, value: bool) -> None:
-                    self._value = value
-
-                def __getattr__(self, name: str):
-                    return self._value if name == "public_demo" else getattr(settings, name)
-
-            monkeypatch.setattr(main_module, "settings", _SettingsWithPublicDemo(True))
-            denied = client.patch(f"/api/projects/{project_id}/report-prompts/global/financial",
-                                  headers=headers, json={"prompt": "x"})
-            assert denied.status_code == 403
-            assert "公开演示" in denied.json()["detail"]
-            listed = client.get(f"/api/projects/{project_id}/report-prompts?scope=global",
-                                headers=headers).json()
-            assert next(i for i in listed if i["chapter_key"] == "financial")["global_editable"] is False
-            monkeypatch.setattr(main_module, "settings", _SettingsWithPublicDemo(False))
-
-            # 带代理转发头 → 无法确认本机直连
-            forwarded = client.patch(f"/api/projects/{project_id}/report-prompts/global/financial",
-                                     headers={**headers, "X-Forwarded-For": "10.0.0.1"},
-                                     json={"prompt": "x"})
-            assert forwarded.status_code == 403
-            assert "代理转发头" in forwarded.json()["detail"]
-            assert _global_row("financial") is None, "被拒的写入不得落库"
-        finally:
-            _purge_global("financial")
-            _delete_test_project(project_id)
-
-
-def test_global_prompt_concurrency_hash_and_contract_version():
-    """P0-A / `PLAN.md` §四.2：写入前检查配置哈希与**编译器版本**，不符一律 409。"""
-    from backend.app.chapter_prompts import PROMPT_CONTRACT_VERSION
-
-    with TestClient(app, client=("127.0.0.1", 42319)) as client:
-        project_id, headers = _p0a_project(client)
-        try:
-            first = client.patch(f"/api/projects/{project_id}/report-prompts/global/financial",
-                                 headers=headers, json={"prompt": "第一版。"})
-            assert first.status_code == 200
-            base = first.json()["global_config_sha256"]
-
-            stale = client.patch(f"/api/projects/{project_id}/report-prompts/global/financial",
-                                 headers=headers,
-                                 json={"prompt": "第二版。", "expected_config_sha256": "0" * 64})
-            assert stale.status_code == 409
-            assert "已被其他会话修改" in stale.json()["detail"]
-
-            ok = client.patch(f"/api/projects/{project_id}/report-prompts/global/financial",
-                              headers=headers,
-                              json={"prompt": "第二版。", "expected_config_sha256": base})
-            assert ok.status_code == 200
-
-            bad_version = client.patch(
-                f"/api/projects/{project_id}/report-prompts/global/financial", headers=headers,
-                json={"prompt": "第三版。", "expected_prompt_contract_version": "contract-0-old"})
-            assert bad_version.status_code == 409
-            assert "编译器版本" in bad_version.json()["detail"]
-
-            right_version = client.patch(
-                f"/api/projects/{project_id}/report-prompts/global/financial", headers=headers,
-                json={"prompt": "第三版。", "expected_prompt_contract_version": PROMPT_CONTRACT_VERSION})
-            assert right_version.status_code == 200
-            # 被拒的写入不得落库：库里应是"第三版。"
-            assert _global_row("financial")["prompt"] == right_version.json()["global_prompt"]
-        finally:
-            _purge_global("financial")
-            _delete_test_project(project_id)
-
-
-def test_global_prompt_guards_for_deterministic_and_unknown_chapters():
-    """P0-A：确定性章节 422、未知章节 404、归档项目不可写（沿用既有门禁）。"""
-    with TestClient(app, client=("127.0.0.1", 42320)) as client:
-        project_id, headers = _p0a_project(client)
-        try:
-            assert client.patch(f"/api/projects/{project_id}/report-prompts/global/tasks",
-                                headers=headers, json={"prompt": "x"}).status_code == 422
-            assert client.patch(f"/api/projects/{project_id}/report-prompts/global/not-a-chapter",
-                                headers=headers, json={"prompt": "x"}).status_code == 404
-            assert client.delete(f"/api/projects/{project_id}/report-prompts/global/not-a-chapter",
-                                 headers=headers).status_code == 404
-        finally:
-            _delete_test_project(project_id)
-
-
 def test_project_prompt_reset_honours_concurrency_basis():
     """P0-A / `PLAN.md` §四.2：项目级**重置**与保存共用同一条并发基准（重置同样会覆盖别人的改动）。
 
@@ -811,5 +619,4 @@ def test_project_prompt_reset_honours_concurrency_basis():
             assert client.delete(f"/api/projects/{project_id}/report-prompts/financial",
                                  headers=headers).status_code == 200
         finally:
-            _purge_global("financial")
             _delete_test_project(project_id)

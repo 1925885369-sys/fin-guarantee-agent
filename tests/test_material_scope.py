@@ -1,17 +1,16 @@
-"""B4 材料范围：单一解析器、fail-closed、全局不存项目文件 ID。
+"""B4 材料范围：单一解析器、fail-closed。
 
-对应《风控约束分层》方案 §二 line 16 / §四 line 56~57。守三条：
+对应《风控约束分层》方案 §二 line 16 / §四 line 56~57。守两条：
 1. 优先级 Prompt 业务层 > 目录章节 > 不额外收窄；
 2. 显式 `document_ids` **全部无效时 fail-closed**，绝不退化成"全部材料"（否则用户
-   明确排除的文件会被偷偷放回来）；
-3. 全局配置**不保存项目文件 ID**（保存时剥离、读取时清洗历史脏行）。
+   明确排除的文件会被偷偷放回来）。
+
+2026-10-23：原第 3 条「全局配置不保存项目文件 ID」随"全局默认"兜底层一起删除，
+相关用例（`_strip_global_document_ids` / `global_prompt_edit_state`）已移除。
 """
 from __future__ import annotations
 
 from backend.app import chapter_guard
-from backend.app.chapter_prompts import global_prompt_edit_state
-from backend.app.main import _strip_global_document_ids
-from backend.app.schemas import PromptEditableConfig, ReportPromptUpdate
 
 
 def _scope(config=None, outline=None, owned=("doc-1", "doc-2")):
@@ -74,30 +73,6 @@ def test_all_invalid_document_ids_fail_closed():
 
 
 # ------------------------------------------------------------- 全局文件 ID --
-
-def test_global_save_strips_document_ids_but_keeps_kinds_and_roles():
-    payload = ReportPromptUpdate(config=PromptEditableConfig(
-        role="财务分析员", goal="分析财务结构",
-        material_scope={"source_kinds": ["募集说明书"], "material_roles": ["审计报告"],
-                        "document_ids": ["doc-1", "doc-2"]},
-    ))
-    stripped = _strip_global_document_ids(payload)
-    assert stripped.config.material_scope.document_ids == []
-    assert stripped.config.material_scope.source_kinds == ["募集说明书"]
-    assert stripped.config.material_scope.material_roles == ["审计报告"]
-
-
-def test_global_save_without_document_ids_is_untouched():
-    payload = ReportPromptUpdate(config=PromptEditableConfig(role="财务分析员", goal="分析财务结构"))
-    assert _strip_global_document_ids(payload).config.material_scope.document_ids == []
-
-
-def test_global_prompt_edit_state_drops_document_ids():
-    """读取侧清洗历史脏行：全局链上不应出现项目文件 ID。"""
-    config, source, _mode = global_prompt_edit_state("financial")
-    assert source in {"global", "system"}
-    assert (config.get("material_scope") or {}).get("document_ids") in (None, [])
-
 
 # --------------------------------------------------------------- 类型证据 --
 

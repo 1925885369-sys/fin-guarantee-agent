@@ -28,12 +28,12 @@ from .chapter_prompts import (
     chapter_default_prompt, chapter_prompt,
     chapter_uses_llm, compile_structured_prompt, editable_config_from_factory, effective_chapter_config,
     load_chapter_config,
-    global_prompt_edit_state, legacy_prompt_config, migrate_legacy_prompt_overrides,
+    legacy_prompt_config, migrate_legacy_prompt_overrides,
     prompt_config_payload, prompt_edit_state,
     recompile_structured_prompts,
 )
-# 注意：chapter_prompts.seed_global_prompts_from_latest_overrides（把项目 Prompt 自动
-# 提升为全局默认）已按修订稿要求从所有启动入口移除，这里也不得再导入/调用。
+# 2026-10-23：全局默认兜底层（`global_report_prompts`）已移除，`global_prompt_edit_state`
+# 与 `seed_global_prompts_from_latest_overrides` 一并删除。部署级约束改由「全局指令」承担。
 from .database import connect, execute, init_db, json_dump, json_load, now_iso, recover_interrupted_runs, row, rows
 from .exports import docx_report, markdown_report
 from .facts import FACT_REGISTRY, decode_facts, material_inventory
@@ -1863,69 +1863,48 @@ def refresh_report_tables(
     }
 
 
-def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[dict] = None,
-                      scope: str = "project") -> dict:
-    """Effective prompt row for a chapter: project override > global default > YAML.
+def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[dict] = None) -> dict:
+    """Effective prompt row for a chapter: project override > checked-in YAML.
 
-    ``permissions`` 为 ``prompt_edit_permissions`` 的结果；缺失时按"项目级可编辑、
-    全局不可编辑"处理（与 GET 未显式传入时保持一致的保守默认）。
+    ``permissions`` 为 ``prompt_edit_permissions`` 的结果；缺失时按"可编辑"处理。
 
-    ``scope`` 决定**可变的那一份**是哪个范围（`PLAN_new_p0_p1.md` P0-1 的"项目配置／全局默认"
-    切换）：``project`` 用 项目覆盖 > 全局 > YAML 链；``global`` 只用 全局覆盖 > YAML 链
-    （不掺项目覆盖，否则在"全局默认"范围里会看到并保存项目配置）。
-    两个范围的并发基准哈希都返回，前端切范围时用对应那一个。
+    2026-10-23：**删除"全局默认"兜底层**后不再有 scope 概念——每章只有一份配置
+    （项目覆盖或出厂 YAML）。``global_editable`` 字段保留，它现在管的是「全局指令」
+    的写权限（部署级配置，仍限本机直连 + 非公开环境）。
     """
     project_override = row(
         "SELECT prompt,updated_at,structured_json,migration_mode FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?",
         (project_id, chapter_key),
     )
-    global_override = row(
-        "SELECT prompt,updated_at,structured_json,migration_mode FROM global_report_prompts WHERE chapter_key=?",
-        (chapter_key,),
-    )
     default_prompt = chapter_default_prompt(chapter_key)
-    effective_config, source, migration_mode = prompt_edit_state(chapter_key, project_id)
-    global_config, global_source, global_migration_mode = global_prompt_edit_state(chapter_key)
-    global_prompt = (str(global_override["prompt"])
-                     if global_override and str(global_override.get("prompt") or "").strip()
-                     else default_prompt)
-    if scope == "global":
-        editable_config, migration_mode = global_config, global_migration_mode
-        prompt = global_prompt
-    else:
-        editable_config = effective_config
-        prompt = chapter_prompt(chapter_key, project_id)
+    editable_config, source, migration_mode = prompt_edit_state(chapter_key, project_id)
+    prompt = chapter_prompt(chapter_key, project_id)
+    row_updated_at = project_override.get("updated_at") if project_override else None
     # 并发基准：项目级保存/重置改写的是项目覆盖行；尚无覆盖时为空串
     # （`_check_prompt_concurrency` 对空值同样拦截，避免"以为在改一份不存在的覆盖"）。
     project_config_sha = _prompt_config_sha256(
         (project_override or {}).get("prompt") or "", (project_override or {}).get("structured_json") or "")
-    global_config_sha = _prompt_config_sha256(
-        (global_override or {}).get("prompt") or "", (global_override or {}).get("structured_json") or "")
     return {
         "title": BOND_CHAPTER_TITLES.get(chapter_key, chapter_key),
         "part": BOND_CHAPTER_PART.get(chapter_key, ""),
         "prompt": prompt,
         "default_prompt": default_prompt,
         "overridden": bool(project_override and str(project_override.get("prompt") or "").strip()),
-        "updated_at": project_override.get("updated_at") if project_override else None,
-        "global_overridden": bool(global_override and str(global_override.get("prompt") or "").strip()),
-        "global_updated_at": global_override.get("updated_at") if global_override else None,
-        # 全局视图的"当前全局生效 Prompt"（全局覆盖，否则出厂 YAML）：前端"全局默认"范围
-        # 在没有覆盖时也要能看到并编辑出厂配置。
-        "global_prompt": global_prompt,
-        "scope": scope,
-        # `PLAN_new_p0_p1.md` P0-1：项目/全局两个范围各自的并发基准哈希。
-        "config_sha256": project_config_sha,
-        "global_config_sha256": global_config_sha,
+        "updated_at": row_updated_at,
         # 当前编译器版本（`PLAN.md` §四.2）：前端读取后原样回传，版本不符时保存被 409。
         "prompt_contract_version": PROMPT_CONTRACT_VERSION,
-        # 当前**生效**来源：项目覆盖 > 全局默认 > YAML。前端据此提示"有项目覆盖时项目仍优先"。
         "effective_source": source,
-        "global_source": global_source,
         "editable_config": editable_config,
         "factory_config": editable_config_from_factory(chapter_key),
         # 篇幅的运行时口径由后端给出（= 保存校验/生成校验用的那一份），前端只展示不推算。
-        "length_policy": effective_chapter_config(chapter_key, project_id).get("length_policy", {}),
+        # 篇幅口径与 effective_chapter_config 完全一致（同样由 narrative_contract 计算）。
+        "length_policy": {
+            "effective_min_chars": int(((editable_config.get("narrative_contract") or {}).get("preferred_min_chars")) or 0),
+            "effective_max_chars": int(((editable_config.get("narrative_contract") or {}).get("preferred_max_chars")) or 0),
+            "unit": "visible_chars",
+            "source": source,
+        },
+        "config_sha256": project_config_sha,
         "constraints": {
             "required_inputs": load_chapter_config(chapter_key).get("required_inputs", []),
             "input_contract": load_chapter_config(chapter_key).get("input_contract", {}),
@@ -1936,20 +1915,18 @@ def _prompt_row_state(project_id: str, chapter_key: str, permissions: Optional[d
         },
         "source": source,
         "migration_mode": migration_mode,
-        # 权限：项目级是否可编辑 + 全局是否可编辑（全局 = 非公开且本机直连无转发头）。
+        # 权限：项目级是否可编辑 + 全局指令是否可编辑（后者 = 非公开且本机直连无转发头）。
         **_prompt_permission_fields(permissions),
     }
 
 
 @app.get("/api/projects/{project_id}/report-prompts")
 def report_prompts(project_id: str, request: Request,
-                   x_project_token: Optional[str] = Header(default=None),
-                   scope: str = Query(default="project", pattern="^(project|global)$")) -> list[dict]:
+                   x_project_token: Optional[str] = Header(default=None)) -> list[dict]:
     """Return every report chapter's effective prompt and its contract metadata.
 
-    ``scope=global`` 返回**全局默认**范围：每章的 `prompt`/`editable_config` 取
-    全局覆盖 > 出厂 YAML 链（不含项目覆盖），供前端"全局默认"页加载与回填。
-    两种范围返回同一套字段，前端切换时可原样复用渲染与保存逻辑。
+    2026-10-23：删除"全局默认"层后不再有 ``scope`` 参数——每章只有一份配置
+    （项目覆盖或出厂 YAML）。部署级约束走独立的「全局指令」接口。
     """
     _authorize(project_id, x_project_token)
     permissions = prompt_edit_permissions(project_id, request)
@@ -1975,7 +1952,7 @@ def report_prompts(project_id: str, request: Request,
         output.append({
             "chapter_key": chapter_key,
             # 目录分部级标题与章节标题覆盖内置映射（自定义章节也能拿到所在分部名与改名标题）。
-            **(_prompt_row_state(project_id, chapter_key, permissions, scope)),
+            **(_prompt_row_state(project_id, chapter_key, permissions)),
             "title": chapter_title or BOND_CHAPTER_TITLES.get(chapter_key, chapter_key),
             "part": part_title or BOND_CHAPTER_PART.get(chapter_key, ""),
             "llm": config.get("llm", False),
@@ -1984,21 +1961,8 @@ def report_prompts(project_id: str, request: Request,
     return output
 
 
-def _strip_global_document_ids(payload: "ReportPromptUpdate") -> "ReportPromptUpdate":
-    """全局默认**不得保存项目文件 ID**（方案 §四 line 57）。
-
-    全局是部署级配置，文件 ID 只对某一次项目解析有效；存进全局后，别的项目会拿到
-    不属于自己的文件引用。这里在编译前清掉，保留材料类型/角色（那两类是通用的）。
-    """
-    config = payload.config
-    if config is None or not config.material_scope.document_ids:
-        return payload
-    config.material_scope.document_ids = []
-    return payload
-
-
 def _compile_prompt_payload(chapter_key: str, payload: "ReportPromptUpdate") -> dict:
-    """把请求体编译成落库用的四元组（项目级与全局级共用，避免两处逻辑漂移）。
+    """把请求体编译成落库用的四元组（项目级专用）。
 
     返回 ``{prompt, structured_json, migration_mode, legacy_prompt}``：
     - 提交 ``config``（新客户端）→ 结构化配置，由服务端用固定编译器产出生效文本；
@@ -2153,68 +2117,6 @@ def _outline_chapter_meta(project_id: str, chapter_key: str) -> tuple[str, str]:
     except Exception:
         return "", ""
     return "", ""
-
-
-@app.patch("/api/projects/{project_id}/report-prompts/global/{chapter_key}")
-def set_global_report_prompt(project_id: str, chapter_key: str, payload: ReportPromptUpdate, request: Request,
-                             x_project_token: Optional[str] = Header(default=None)) -> dict:
-    """保存**全局默认** Prompt（`PLAN_new_p0_p1.md` P0-1）。
-
-    旧口径"全局一律禁止写入"（修订稿 §4）已被新决定替代：全局默认允许**非公开环境 +
-    本机直连 + 无代理转发头**的请求修改。接口挂在项目路径下只是为了复用项目令牌与归档
-    门禁——写入的是**部署级**配置，因此不叠加"是否真实参考项目"这一项目级条件。
-
-    保存语义（P0-1 明文）：**不删除项目覆盖、不调用模型、不修改历史正文**，只更新配置、
-    审计与 Prompt 哈希。生效优先级保持 项目覆盖 > 全局默认 > YAML，所以已有项目覆盖的
-    项目在保存全局后**仍然使用项目配置**——响应里的 `effective_source` 会如实说明。
-    """
-    _ensure_project_writable(_authorize(project_id, x_project_token))
-    _prompt_write_guards(chapter_key)
-    permissions = _require_global_prompt_editable(project_id, request)
-    compiled = _compile_prompt_payload(chapter_key, _strip_global_document_ids(payload))
-    now = now_iso()
-    before = row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
-    _check_prompt_contract_version(payload.expected_prompt_contract_version)
-    _check_prompt_concurrency(
-        payload.expected_config_sha256,
-        _prompt_config_sha256((before or {}).get("prompt") or "", (before or {}).get("structured_json") or ""),
-        "全局 Prompt 配置",
-    )
-    with connect() as conn:
-        conn.execute(
-            "INSERT INTO global_report_prompts (chapter_key,prompt,updated_at,structured_json,legacy_prompt,migration_mode) VALUES (?,?,?,?,?,?) "
-            "ON CONFLICT(chapter_key) DO UPDATE SET prompt=excluded.prompt,updated_at=excluded.updated_at,structured_json=excluded.structured_json,legacy_prompt=excluded.legacy_prompt,migration_mode=excluded.migration_mode",
-            (chapter_key, compiled["prompt"], now, compiled["structured_json"],
-             compiled["legacy_prompt"], compiled["migration_mode"]),
-        )
-    audit_event(project_id, "report_prompt_global_update", "report_prompt", chapter_key, before,
-                {"prompt": compiled["prompt"], "scope": "global",
-                 "config": payload.config.model_dump(mode="json") if payload.config else None}, "human")
-    return {"chapter_key": chapter_key, **_prompt_row_state(project_id, chapter_key, permissions)}
-
-
-@app.delete("/api/projects/{project_id}/report-prompts/global/{chapter_key}")
-def reset_global_report_prompt(project_id: str, chapter_key: str, request: Request,
-                               x_project_token: Optional[str] = Header(default=None),
-                               expected_config_sha256: Optional[str] = Query(default=None)) -> dict:
-    """重置**全局默认** Prompt：删除全局覆盖，回落 YAML 出厂配置（P0-1）。
-
-    只删 `global_report_prompts` 那一行；**项目覆盖原样保留**，因此有项目覆盖的项目
-    在重置后仍然使用项目配置。幂等：没有全局覆盖时同样返回成功（已是出厂状态）。
-    """
-    _ensure_project_writable(_authorize(project_id, x_project_token))
-    _prompt_write_guards(chapter_key)
-    permissions = _require_global_prompt_editable(project_id, request)
-    before = row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
-    _check_prompt_concurrency(
-        expected_config_sha256,
-        _prompt_config_sha256((before or {}).get("prompt") or "", (before or {}).get("structured_json") or ""),
-        "全局 Prompt 配置",
-    )
-    execute("DELETE FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
-    audit_event(project_id, "report_prompt_global_reset", "report_prompt", chapter_key, before,
-                {"scope": "global"}, "human")
-    return {"chapter_key": chapter_key, **_prompt_row_state(project_id, chapter_key, permissions)}
 
 
 # ------------------------------------------------ P1-1：报告版本化目录（report-outline）--

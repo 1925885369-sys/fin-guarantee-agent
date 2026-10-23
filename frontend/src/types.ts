@@ -196,7 +196,7 @@ export interface ReportPrompt {
   editable_config: PromptEditableConfig;
   factory_config: PromptEditableConfig;
   constraints: PromptConstraints;
-  source: "project" | "global" | "system" | string;
+  source: "project" | "system" | string;
   migration_mode: "structured" | "parsed_legacy" | "preserved_legacy" | string;
   overridden: boolean;
   updated_at: string | null;
@@ -204,28 +204,17 @@ export interface ReportPrompt {
   required_sections: string[];
   /** 篇幅的运行时口径（后端计算，前端只展示）：当前章节 Prompt 的目标范围 */
   length_policy?: LengthPolicy;
-  /** 该章是否存在网页设置的“全局默认”(对所有未单独覆盖项目生效) */
-  global_overridden?: boolean;
-  global_updated_at?: string | null;
   /** 项目级编辑权限（后端按环境/本机直连判定；真实参考项目仅本机直连、非公开环境可编辑） */
   editable?: boolean;
-  /** 全局默认是否可编辑：非公开环境 + 本机直连 + 无代理转发头时为 true
-   *  （`PLAN.md` P0-A；旧口径"恒 false"已被替代） */
+  /** 全局**指令**是否可编辑：非公开环境 + 本机直连 + 无代理转发头时为 true。
+   *  2026-10-23：原「全局默认」兜底层已删除，这个标志现在只用于部署级「全局指令」。 */
   global_editable?: boolean;
-  /** 全局默认不可编辑的原因（对应 editable 的 edit_reason） */
+  /** 全局指令不可编辑的原因 */
   global_edit_reason?: string;
-  /** 当前请求的范围：project（项目配置）/ global（全局默认），与 `?scope=` 一致 */
-  scope?: "project" | "global" | string;
-  /** **全局链**生效的 Prompt（全局覆盖 > 出厂 YAML，不掺项目覆盖），"全局默认"页据此回填 */
-  global_prompt?: string;
-  /** 全局链来源：global（有全局覆盖）/ system（出厂） */
-  global_source?: "project" | "global" | "system" | string;
-  /** 章节当前**生效**来源：项目覆盖 > 全局默认 > 出厂。有项目覆盖时项目仍优先 */
-  effective_source?: "project" | "global" | "system" | string;
+  /** 章节当前**生效**来源：项目覆盖 / 出厂 YAML（不再有 global 这一级） */
+  effective_source?: "project" | "system" | string;
   /** **项目级**并发基准哈希（保存/重置项目配置时回传，不符则后端 409） */
   config_sha256?: string;
-  /** **全局级**并发基准哈希（保存/重置全局默认时回传，不符则后端 409） */
-  global_config_sha256?: string;
   /** 当前 Prompt 编译器版本：升级后同一份结构化配置会渲染出不同文本，
    *  客户端按旧版本编辑时保存会被 409（`PLAN.md` §四.2） */
   prompt_contract_version?: string;

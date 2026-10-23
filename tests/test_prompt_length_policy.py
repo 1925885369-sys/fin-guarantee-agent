@@ -48,30 +48,20 @@ def _cleanup() -> None:
     execute("DELETE FROM report_prompt_overrides WHERE project_id=?", (PROJECT_ID,))
 
 
-def test_effective_config_resolves_project_then_global_then_yaml():
+def test_effective_config_resolves_project_then_yaml():
+    """2026-10-23：全局默认层已删除，生效链只剩「项目覆盖 > 出厂 YAML」。
+
+    原用例还验证了「全局覆盖 > YAML」这一级；随兜底层删除一起移除。
+    """
     startup()
-    saved_global = row("SELECT * FROM global_report_prompts WHERE chapter_key=?", (CHAPTER,))
+    factory_narrative = load_chapter_config(CHAPTER)["narrative_contract"]
+
+    system = effective_chapter_config(CHAPTER, PROJECT_ID)
+    assert system["length_policy"]["source"] == "system"
+    assert system["narrative_contract"]["preferred_max_chars"] == factory_narrative["preferred_max_chars"]
+
     try:
-        execute("DELETE FROM global_report_prompts WHERE chapter_key=?", (CHAPTER,))
-        factory_narrative = load_chapter_config(CHAPTER)["narrative_contract"]
-
-        system = effective_chapter_config(CHAPTER, PROJECT_ID)
-        assert system["length_policy"]["source"] == "system"
-        assert system["narrative_contract"]["preferred_max_chars"] == factory_narrative["preferred_max_chars"]
-
-        global_narrative = dict(factory_narrative, preferred_max_chars=1200, preferred_min_chars=600)
         editable = prompt_edit_state(CHAPTER, PROJECT_ID)[0]
-        editable["narrative_contract"].update(global_narrative)
-        execute(
-            "INSERT OR REPLACE INTO global_report_prompts "
-            "(chapter_key,prompt,updated_at,structured_json,legacy_prompt,migration_mode) VALUES (?,?,?,?,?,?)",
-            (CHAPTER, compile_structured_prompt(REPAIR_CHAPTER, editable), "2026-01-01T00:00:00+00:00",
-             json.dumps(editable, ensure_ascii=False), "", "structured"),
-        )
-        from_global = effective_chapter_config(CHAPTER, PROJECT_ID)
-        assert from_global["length_policy"]["source"] == "global"
-        assert from_global["narrative_contract"]["preferred_max_chars"] == 1200
-
         project_narrative = dict(factory_narrative, preferred_max_chars=900, preferred_min_chars=300)
         editable["narrative_contract"].update(project_narrative)
         _save_project_override(editable)
@@ -80,14 +70,6 @@ def test_effective_config_resolves_project_then_global_then_yaml():
         assert from_project["narrative_contract"]["preferred_max_chars"] == 900
     finally:
         _cleanup()
-        execute("DELETE FROM global_report_prompts WHERE chapter_key=?", (CHAPTER,))
-        if saved_global:
-            execute(
-                "INSERT OR REPLACE INTO global_report_prompts "
-                "(chapter_key,prompt,updated_at,structured_json,legacy_prompt,migration_mode) VALUES (?,?,?,?,?,?)",
-                (CHAPTER, saved_global["prompt"], saved_global["updated_at"], saved_global["structured_json"],
-                 saved_global["legacy_prompt"], saved_global["migration_mode"]),
-            )
 
 
 def test_output_contract_has_no_system_character_cap():

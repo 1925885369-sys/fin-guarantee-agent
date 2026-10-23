@@ -213,12 +213,12 @@ export const api = {
     method: "POST", headers: headers(token, true),
     body: JSON.stringify({ chapters, expected_report_revision: expectedRevision, section_hashes: sectionHashes }),
   }),
-  // Prompt 编辑支持"项目配置／全局默认"两种范围（PLAN.md §二 P0-A）：
-  // `scope=global` 时后端返回的是**全局链**（全局覆盖 > 出厂 YAML，不掺项目覆盖）。
-  reportPrompts: (id: string, token?: string, scope: "project" | "global" = "project") =>
-    request<ReportPrompt[]>(`/api/projects/${id}/report-prompts?scope=${scope}`, { headers: headers(token) }),
-  // 报告目录配置（report-outline）：三接口挂在项目路径下，读写权限与 P0-A 同一判据。
-  // `scope=global` 时读的是全局链（全局覆盖 > 内置），与 Prompt 的范围语义一致。
+  // 2026-10-23：Prompt 只剩一种配置（项目覆盖或出厂 YAML），不再有 scope 参数；
+  // 原"全局默认"兜底层已删除，部署级约束改由「全局指令」单独接口管理。
+  reportPrompts: (id: string, token?: string) =>
+    request<ReportPrompt[]>(`/api/projects/${id}/report-prompts`, { headers: headers(token) }),
+  // 报告目录仍保留「项目 / 全局」两种范围（全局目录是多项目共用的默认目录），
+  // 与 Prompt 的范围无关，切分在目录区。
   reportOutline: (id: string, token: string | undefined, scope: "project" | "global") =>
     request<ReportOutlineState>(`/api/projects/${id}/report-outline?scope=${scope}`, { headers: headers(token) }),
   // 保存完整目录（PUT）：并发基准随范围取该 scope 的 `outline_version` / `config_sha256`，
@@ -247,21 +247,9 @@ export const api = {
     request<ReportPrompt>(`/api/projects/${id}/report-prompts/${chapterKey}`, {
       method: "DELETE", headers: headers(token),
     }),
-  setGlobalReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"] | string, token?: string, concurrency: PromptConcurrency = {}) =>
-    request<ReportPrompt>(`/api/projects/${id}/report-prompts/global/${chapterKey}`, {
-      method: "PATCH", headers: headers(token, true),
-      body: JSON.stringify({
-        ...(typeof config === "string" ? { prompt: config } : { config }),
-        ..._concurrencyBody(concurrency),
-      }),
-    }),
   previewReportPrompt: (id: string, chapterKey: string, config: ReportPrompt["editable_config"], token?: string) => request<{ chapter_key: string; prompt: string }>(`/api/projects/${id}/report-prompts/${chapterKey}/preview`, {
     method: "POST", headers: headers(token, true), body: JSON.stringify({ config }),
   }),
-  resetGlobalReportPrompt: (id: string, chapterKey: string, token?: string, concurrency: PromptConcurrency = {}) =>
-    request<ReportPrompt>(`/api/projects/${id}/report-prompts/global/${chapterKey}${_concurrencyQuery(concurrency)}`, {
-      method: "DELETE", headers: headers(token),
-    }),
   citation: (id: string, token?: string) => request<Citation>(`/api/citations/${id}`, { headers: headers(token) }),
   run: (id: string, token?: string) => request<Run>(`/api/runs/${id}`, { headers: headers(token) }),
   latestRun: (projectId: string, token?: string) => request<LatestRun>(`/api/projects/${projectId}/runs/latest`, { headers: headers(token) }),

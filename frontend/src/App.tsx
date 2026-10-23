@@ -1006,7 +1006,9 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   // 草稿按「范围:章节」双键缓存：切换范围或章节再切回来，未保存的编辑都在
   // （P0-A 要求"两种编辑范围分别缓存草稿，切换章节不丢未保存内容"）。
   const [drafts, setDrafts] = useState<Record<string, PromptEditableConfig>>({});
-  const [scope, setScope] = useState<"project" | "global">("project");
+  // 2026-10-23：Prompt 不再有"项目/全局"两种范围（全局默认兜底层已删除）。
+  // 这个 scope 只服务**报告目录**（项目目录 / 全局目录），与章节 Prompt 无关。
+  const [outlineScope, setOutlineScope] = useState<"project" | "global">("project");
   const [activeChapterId, setActiveChapterId] = useState("");
   const [tab, setTab] = useState<"structured" | "preview">("structured");
   const [loading, setLoading] = useState(true);
@@ -1031,26 +1033,27 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const [renameValue, setRenameValue] = useState("");
 
   // 当前范围的目录基准与草稿（均按范围缓存，切换范围互不影响）。
-  const outlineDraft = outlineDrafts[scope];
-  const outlineState = outlineStates[scope];
+  const outlineDraft = outlineDrafts[outlineScope];
+  const outlineState = outlineStates[outlineScope];
 
-  const draftKey = useCallback((chapterKey: string) => `${scope}:${chapterKey}`, [scope]);
+  // 草稿键只按章节：Prompt 不再分项目/全局两份。
+  const draftKey = useCallback((chapterKey: string) => chapterKey, []);
 
   const load = useCallback(async () => {
     setLoading(true); setOutlineLoading(true);
     setLoadError(""); setOutlineError("");
     // 目录加载失败只影响目录区、不崩整页：两块并行拉取，各自落到自己的错误位。
     const [promptResult, outlineResult] = await Promise.allSettled([
-      api.reportPrompts(project.id, token, scope),
-      api.reportOutline(project.id, token, scope),
+      api.reportPrompts(project.id, token),
+      api.reportOutline(project.id, token, outlineScope),
     ]);
     if (promptResult.status === "fulfilled") {
       const rows = promptResult.value;
       setPrompts(rows);
-      // **保留已有草稿**：同一个范围内已经编辑过、尚未保存的内容不能被这次加载覆盖。
-      // 首次进入该范围时没有草稿，才用服务端返回的配置填充。
+      // **保留已有草稿**：已经编辑过、尚未保存的内容不能被这次加载覆盖。
+      // 首次进入时没有草稿，才用服务端返回的配置填充。
       setDrafts((current) => Object.fromEntries(rows.map((item) => {
-        const key = `${scope}:${item.chapter_key}`;
+        const key = item.chapter_key;
         return [key, current[key] ?? clonePromptConfig(item.editable_config)];
       })));
     } else {
@@ -1059,14 +1062,14 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     }
     if (outlineResult.status === "fulfilled") {
       const state = outlineResult.value;
-      setOutlineStates((current) => ({ ...current, [scope]: state }));
+      setOutlineStates((current) => ({ ...current, [outlineScope]: state }));
       // 同样保留已有草稿：未保存的目录编辑不被这次加载覆盖。
-      setOutlineDrafts((current) => current[scope] ? current : { ...current, [scope]: cloneOutline(state.outline) });
+      setOutlineDrafts((current) => current[outlineScope] ? current : { ...current, [outlineScope]: cloneOutline(state.outline) });
     } else {
       setOutlineError(outlineResult.reason instanceof Error ? outlineResult.reason.message : "无法读取报告目录");
     }
     setLoading(false); setOutlineLoading(false);
-  }, [project.id, token, scope]);
+  }, [project.id, token, outlineScope]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1075,16 +1078,16 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   // 重读覆盖（新增章节没有草稿，用服务端返回的配置填充）。
   const reloadPrompts = useCallback(async () => {
     try {
-      const rows = await api.reportPrompts(project.id, token, scope);
+      const rows = await api.reportPrompts(project.id, token);
       setPrompts(rows);
       setDrafts((current) => Object.fromEntries(rows.map((item) => {
-        const key = `${scope}:${item.chapter_key}`;
+        const key = item.chapter_key;
         return [key, current[key] ?? clonePromptConfig(item.editable_config)];
       })));
     } catch (reason) {
       setLoadError(reason instanceof Error ? reason.message : "无法读取报告 Prompt");
     }
-  }, [project.id, token, scope]);
+  }, [project.id, token]);
 
   const chapterGroups = useMemo(() => {
     const groups: { part: string; items: { item: ReportPrompt; index: number }[] }[] = [];
@@ -1154,18 +1157,15 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
       : (navChapters.find((chapter) => chapter.templateKey && prompts.find((item) => item.chapter_key === chapter.templateKey)?.llm) || navChapters[0]).chapterId);
   }, [navChapters, prompts]);
 
-  // 编辑权限以**后端返回的权限字段**为准：范围不同判据不同——项目级看 `editable`，
-  // 全局级看 `global_editable`（全局是部署级配置，只要求非公开 + 本机直连 + 无转发头）。
-  // 权限字段缺失（旧响应）时才退回 data_class 判断。
-  const scopeEditable = scope === "global" ? active?.global_editable : active?.editable;
-  const readOnly = scopeEditable === undefined
+  // 编辑权限以**后端返回的权限字段**为准。2026-10-23：Prompt 只剩项目级一种配置，
+  // 直接看 `editable`；目录仍有项目/全局两种范围，按 `outlineScope` 取对应字段。
+  const readOnly = active?.editable === undefined
     ? project.data_class === "real_reference"
-    : scopeEditable === false;
-  const scopeEditReason = scope === "global" ? active?.global_edit_reason : active?.edit_reason;
-  // 目录权限与 Prompt 同一口径：项目级看 editable、全局级看 global_editable。
-  const outlineScopeEditable = scope === "global" ? outlineState?.global_editable : outlineState?.editable;
+    : active.editable === false;
+  const scopeEditReason = active?.edit_reason;
+  const outlineScopeEditable = outlineScope === "global" ? outlineState?.global_editable : outlineState?.editable;
   const outlineReadOnly = outlineScopeEditable === undefined ? project.data_class === "real_reference" : outlineScopeEditable === false;
-  const outlineEditReason = (scope === "global" ? outlineState?.global_edit_reason : outlineState?.edit_reason) || "";
+  const outlineEditReason = (outlineScope === "global" ? outlineState?.global_edit_reason : outlineState?.edit_reason) || "";
   const outlineDirty = Boolean(outlineDraft && outlineState && JSON.stringify(outlineDraft) !== JSON.stringify(outlineState.outline));
   const totalChapters = outlineDraft ? outlineDraft.parts.reduce((sum, part) => sum + part.chapters.length, 0) : 0;
   const previewSignature = activeDraft ? JSON.stringify(activeDraft) : "";
@@ -1215,17 +1215,15 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     };
     return { ...current, [key]: merged };
   });
-  const sourceText = (item: ReportPrompt) => item.source === "project" ? "项目自定义" : item.source === "global" ? "全局默认" : "系统默认";
+  const sourceText = (item: ReportPrompt) => item.source === "project" ? "项目自定义" : "系统默认";
   const canEdit = Boolean(active?.llm && !readOnly);
   const isChanged = Boolean(active && activeDraft && JSON.stringify(activeDraft) !== JSON.stringify(active.editable_config));
-  const canSetGlobalDefault = Boolean(active?.llm && !readOnly && saving !== active.chapter_key && activeDraft);
-  const effectiveUpdatedAt = active?.overridden ? active.updated_at : active?.global_overridden ? active.global_updated_at : null;
-  // 并发基准随范围取：项目级用 `config_sha256`，全局级用 `global_config_sha256`；
-  // 两者都带 `prompt_contract_version`（编译器升级后同一份配置会渲染出不同文本）。
-  // 该范围尚无覆盖时哈希为空串，`_concurrencyBody/_concurrencyQuery` 会整体省略该字段，
-  // 避免"预期为空"被后端当成冲突。
+  const effectiveUpdatedAt = active?.overridden ? active.updated_at : null;
+  // 并发基准：项目级用 `config_sha256`，并带 `prompt_contract_version`
+  // （编译器升级后同一份配置会渲染出不同文本）。尚无覆盖时哈希为空串，
+  // `_concurrencyBody/_concurrencyQuery` 会整体省略该字段，避免"预期为空"被当成冲突。
   const concurrencyBasis = (): PromptConcurrency => ({
-    configSha256: scope === "global" ? active?.global_config_sha256 : active?.config_sha256,
+    configSha256: active?.config_sha256,
     promptContractVersion: active?.prompt_contract_version,
   });
   const concurrencyHint = (reason: unknown) => {
@@ -1239,15 +1237,11 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     setSaving(active.chapter_key); setMessage("");
     try {
       const basis = concurrencyBasis();
-      const saved = scope === "global"
-        ? await api.setGlobalReportPrompt(project.id, active.chapter_key, activeDraft, token, basis)
-        : await api.saveReportPrompt(project.id, active.chapter_key, activeDraft, token, basis);
+      const saved = await api.saveReportPrompt(project.id, active.chapter_key, activeDraft, token, basis);
       updateRow(active.chapter_key, saved);
       setDrafts((current) => ({ ...current, [draftKey(active.chapter_key)]: clonePromptConfig(saved.editable_config) }));
       setPreviewPrompt(saved.prompt);
-      setMessage(scope === "global"
-        ? `已保存“${active.title}”的全局默认配置；有项目覆盖的项目仍优先使用项目配置（保存不会自动调用模型）。现有报告不变，需要时在项目内重新生成该章。`
-        : `已保存“${active.title}”的项目级配置；对应章节将在报告中标记为待再生（保存不会自动调用模型），需要时在该章重新生成。`);
+      setMessage(`已保存“${active.title}”的项目级配置；对应章节将在报告中标记为待再生（保存不会自动调用模型），需要时在该章重新生成。`);
     } catch (reason) { setLoadError(concurrencyHint(reason) || "保存 Prompt 失败"); }
     finally { setSaving(""); }
   };
@@ -1256,47 +1250,12 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     setSaving(active.chapter_key); setMessage("");
     try {
       const basis = concurrencyBasis();
-      const resetRow = scope === "global"
-        ? await api.resetGlobalReportPrompt(project.id, active.chapter_key, token, basis)
-        : await api.resetReportPrompt(project.id, active.chapter_key, token, basis);
+      const resetRow = await api.resetReportPrompt(project.id, active.chapter_key, token, basis);
       updateRow(active.chapter_key, resetRow);
       setDrafts((current) => ({ ...current, [draftKey(active.chapter_key)]: clonePromptConfig(resetRow.editable_config) }));
       setPreviewPrompt(resetRow.prompt);
-      setMessage(scope === "global"
-        ? `“${active.title}”的全局默认已撤销，回落系统出厂配置；已有项目覆盖不受影响。`
-        : `“${active.title}”已恢复为${resetRow.global_overridden ? "全局默认" : "系统默认"}配置。`);
+      setMessage(`“${active.title}”已恢复为系统默认配置。`);
     } catch (reason) { setLoadError(concurrencyHint(reason) || "恢复默认配置失败"); }
-    finally { setSaving(""); }
-  };
-  // "设为全局默认"是范围切换的快捷方式：把当前草稿写进全局链（项目覆盖不动）。
-  const setGlobalDefault = async () => {
-    if (!active || !activeDraft || !canEdit) return;
-    setSaving(active.chapter_key); setMessage("");
-    try {
-      const globalRow = await api.setGlobalReportPrompt(project.id, active.chapter_key, activeDraft, token, {
-        configSha256: active.global_config_sha256,
-        promptContractVersion: active.prompt_contract_version,
-      });
-      updateRow(active.chapter_key, globalRow);
-      if (!active.overridden) setDrafts((current) => ({ ...current, [`global:${active.chapter_key}`]: clonePromptConfig(globalRow.editable_config) }));
-      setPreviewPrompt(globalRow.prompt);
-      setMessage(`“${active.title}”已${active.global_overridden ? "更新" : "设为"}全局默认配置。`);
-    } catch (reason) { setLoadError(concurrencyHint(reason) || "设置全局默认失败"); }
-    finally { setSaving(""); }
-  };
-  const resetGlobalDefault = async () => {
-    if (!active) return;
-    setSaving(active.chapter_key); setMessage("");
-    try {
-      const row = await api.resetGlobalReportPrompt(project.id, active.chapter_key, token, {
-        configSha256: active.global_config_sha256,
-        promptContractVersion: active.prompt_contract_version,
-      });
-      updateRow(active.chapter_key, row);
-      if (!active.overridden) setDrafts((current) => ({ ...current, [`global:${active.chapter_key}`]: clonePromptConfig(row.editable_config) }));
-      setPreviewPrompt(row.prompt);
-      setMessage(`“${active.title}”的全局默认已撤销。`);
-    } catch (reason) { setLoadError(concurrencyHint(reason) || "撤销全局默认失败"); }
     finally { setSaving(""); }
   };
 
@@ -1364,45 +1323,46 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     if (!outlineDraft || !outlineState || outlineReadOnly || savingOutline) return;
     setSavingOutline(true); setMessage(""); setOutlineError("");
     try {
-      const saved = await api.saveReportOutline(project.id, token, scope, outlineDraft, {
+      const saved = await api.saveReportOutline(project.id, token, outlineScope, outlineDraft, {
         expectedOutlineVersion: outlineState.outline_version,
         expectedOutlineSha256: outlineState.config_sha256,
       });
-      setOutlineStates((current) => ({ ...current, [scope]: saved }));
-      setOutlineDrafts((current) => ({ ...current, [scope]: cloneOutline(saved.outline) }));
+      setOutlineStates((current) => ({ ...current, [outlineScope]: saved }));
+      setOutlineDrafts((current) => ({ ...current, [outlineScope]: cloneOutline(saved.outline) }));
       await reloadPrompts();
-      setMessage(scope === "global"
-        ? "已保存全局默认报告目录；对所有未单独覆盖的项目生效（保存不会自动再生报告）。"
+      setMessage(outlineScope === "global"
+        ? "已保存全局报告目录；对所有未单独覆盖的项目生效（保存不会自动再生报告）。"
         : "已保存项目报告目录；相关报告将标记为待再生（保存不会自动再生报告）。");
     } catch (reason) { setOutlineError(concurrencyHint(reason) || "保存目录失败"); }
     finally { setSavingOutline(false); }
   };
   const resetOutline = async () => {
     if (!outlineState || savingOutline) return;
-    if (!window.confirm(scope === "global" ? "恢复默认目录将撤销本范围的目录自定义并回落内置目录，确定继续？" : "恢复默认目录将撤销本项目目录覆盖并回落全局/内置目录，确定继续？")) return;
+    if (!window.confirm(outlineScope === "global" ? "恢复默认目录将撤销全局目录的自定义并回落内置目录，确定继续？" : "恢复默认目录将撤销本项目目录覆盖并回落全局/内置目录，确定继续？")) return;
     setSavingOutline(true); setMessage(""); setOutlineError("");
     try {
-      const state = await api.resetReportOutline(project.id, token, scope, {
+      const state = await api.resetReportOutline(project.id, token, outlineScope, {
         expectedOutlineVersion: outlineState.outline_version,
         expectedOutlineSha256: outlineState.config_sha256,
       });
-      setOutlineStates((current) => ({ ...current, [scope]: state }));
-      setOutlineDrafts((current) => ({ ...current, [scope]: cloneOutline(state.outline) }));
+      setOutlineStates((current) => ({ ...current, [outlineScope]: state }));
+      setOutlineDrafts((current) => ({ ...current, [outlineScope]: cloneOutline(state.outline) }));
       await reloadPrompts();
       setMessage("已恢复默认报告目录。");
     } catch (reason) { setOutlineError(concurrencyHint(reason) || "恢复默认目录失败"); }
     finally { setSavingOutline(false); }
   };
 
-  // 范围切换对**目录与 Prompt 两块同时生效**（同一 scope 状态）。
-  const scopeSwitch = <div className="prompt-scope-bar">
-    <div className="prompt-scope-switch" role="group" aria-label="编辑范围">
-      <button type="button" className={scope === "project" ? "active" : ""} aria-pressed={scope === "project"} onClick={() => setScope("project")}>项目配置</button>
-      <button type="button" className={scope === "global" ? "active" : ""} aria-pressed={scope === "global"} onClick={() => setScope("global")}>全局默认</button>
+  // **只服务报告目录**的范围切换（2026-10-23）：章节 Prompt 不再有项目/全局之分，
+  // 所以这组按钮下沉到目录区，不再出现在每章顶部。
+  const outlineScopeSwitch = <div className="prompt-scope-bar">
+    <div className="prompt-scope-switch" role="group" aria-label="报告目录范围">
+      <button type="button" className={outlineScope === "project" ? "active" : ""} aria-pressed={outlineScope === "project"} onClick={() => setOutlineScope("project")}>项目目录</button>
+      <button type="button" className={outlineScope === "global" ? "active" : ""} aria-pressed={outlineScope === "global"} onClick={() => setOutlineScope("global")}>全局目录</button>
     </div>
-    <span className="prompt-scope-note">{scope === "project"
-      ? "只影响当前项目；已有项目覆盖时优先于全局默认。"
-      : "对所有未单独覆盖的项目生效。"}</span>
+    <span className="prompt-scope-note">{outlineScope === "project"
+      ? "只影响当前项目的章节结构。"
+      : "作为所有未单独设置目录的项目的默认结构。"}</span>
   </div>;
 
   const subsectionEditor = activeOutlineChapter ? <section className="outline-subsection-editor">
@@ -1434,7 +1394,7 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
       <button className="primary-button" type="button" disabled={!outlineDirty || outlineReadOnly || savingOutline} onClick={saveOutline}>{savingOutline ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存目录</button>
     </div>
   </footer> : null;
-  return <div className="view-content prompt-workspace"><div className="page-heading"><div><span className="eyebrow">报告交付配置</span><div className="page-title-row"><h1>报告 Prompt</h1><HelpTip label="报告 Prompt 页面说明">业务写作要求可编辑；证据范围、引用约束和禁止事项固定由系统执行，不随章节配置改变。</HelpTip></div></div><div className="prompt-summary"><FileCog size={16} /><span>{prompts.filter((item) => item.overridden).length} 个项目自定义 · {prompts.filter((item) => item.global_overridden).length} 个全局默认</span></div></div>
+  return <div className="view-content prompt-workspace"><div className="page-heading"><div><span className="eyebrow">报告交付配置</span><div className="page-title-row"><h1>报告 Prompt</h1><HelpTip label="报告 Prompt 页面说明">业务写作要求可编辑；证据范围、引用约束和禁止事项固定由系统执行，不随章节配置改变。</HelpTip></div></div><div className="prompt-summary"><FileCog size={16} /><span>{prompts.filter((item) => item.overridden).length} 个项目自定义</span></div></div>
     {message && <div className="inline-success prompt-feedback"><Check size={15} />{message}</div>}
     {loadError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{loadError}<button className="icon-button" onClick={() => setLoadError("")} title="关闭"><X size={14} /></button></div>}
     {outlineError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{outlineError}<button className="icon-button" onClick={() => setOutlineError("")} title="关闭"><X size={14} /></button></div>}
@@ -1443,15 +1403,12 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
       <main className="prompt-detail"><div className="prompt-mobile-picker"><label htmlFor="prompt-chapter-picker">报告章节</label><select id="prompt-chapter-picker" value={activeChapterId} onChange={(event) => { setActiveChapterId(event.target.value); setTab("structured"); }}>{navParts.map((part) => <optgroup label={part.partTitle} key={part.partId}>{part.chapters.map((chapter) => <option value={chapter.chapterId} key={chapter.chapterId}>{chapter.index}、{chapter.title}</option>)}</optgroup>)}</select></div>
         {active && activeDraft ? <>
         <header className="prompt-detail-head"><div><span>{active.part || "报告章节"} · 第 {activeChapterNumber + 1} 章</span><h2>{active.title}</h2></div><div className="prompt-detail-badges"><span className={active.llm ? "llm" : "deterministic"}>{active.llm ? "模型生成" : "确定性生成"}</span><PromptGenerationHelp llm={active.llm} />{!activeNavChapter?.templateKey && <span className="custom">自定义章节</span>}<span className={active.source === "system" ? "default" : "custom"}>{sourceText(active)}</span>{active.migration_mode !== "structured" && <span className="legacy">历史配置已迁移</span>}</div></header>
-        {scopeSwitch}
-        {scope === "global" && active.overridden && <div className="prompt-scope-warning"><AlertTriangle size={15} /><span>当前项目已为本章设置项目配置，<strong>仍优先使用项目配置</strong>；本次改动只影响其他未覆盖的项目。</span></div>}
-        {scope === "global" && !active.overridden && active.effective_source === "global" && <div className="prompt-scope-note prompt-scope-effective">当前项目尚未覆盖本章，正在生效的就是这套全局默认。</div>}
         <div className="prompt-tabs" role="tablist"><button className={tab === "structured" ? "active" : ""} role="tab" aria-selected={tab === "structured"} onClick={() => setTab("structured")}><SlidersHorizontal size={16} />结构化配置</button><button className={tab === "preview" ? "active" : ""} role="tab" aria-selected={tab === "preview"} onClick={() => setTab("preview")}><Eye size={16} />完整 Prompt</button></div>
         {tab === "structured" ? <div className="prompt-structured"><fieldset disabled={!canEdit}>
           <section className="prompt-card"><div className="prompt-card-head"><strong>写作视角</strong></div><div className="prompt-field-grid"><section className="prompt-field"><label htmlFor="prompt-role">角色</label><small>定义本章的业务写作视角</small><input id="prompt-role" value={activeDraft.role} onChange={(event) => updateDraft(active.chapter_key, { role: event.target.value })} /></section><section className="prompt-field"><label htmlFor="prompt-tone">行文语气</label><small>在正式尽调语言范围内调整表达</small><input id="prompt-tone" value={activeDraft.narrative_contract.tone} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { tone: event.target.value } })} /></section></div></section>
           <section className="prompt-card prompt-business"><div className="prompt-card-head"><strong>业务生成设置</strong><small>控制本章能看到哪些材料、能不能自主计算与提建议；属于业务规则层，不与只读事实底线重叠</small></div><div className="prompt-card-body">
             <section className="prompt-field"><div className="prompt-field-head"><div><label>材料类型</label><small>不选=沿用本章契约允许的全部类型；只选其中几类会同时收窄检索、事实、指标与计算输入</small></div></div><div className="prompt-chip-row">{chapterSourceKinds.length ? chapterSourceKinds.map((kind) => <button key={kind} type="button" className={`prompt-chip ${draftScope.source_kinds.includes(kind) ? "active" : ""}`} aria-pressed={draftScope.source_kinds.includes(kind)} onClick={() => toggleScopeValue("source_kinds", kind)}>{kind}</button>) : <span className="prompt-field-hint">本章契约未限定材料类型</span>}</div></section>
-            <section className="prompt-field"><div className="prompt-field-head"><div><label>具体文件</label><small>{scope === "global" ? "全局默认不保存项目文件 ID（保存时会被剥离），请到项目范围设置" : `只选其中几份材料时，其余文件的证据与数字不会进入本章；已解析 ${projectDocuments.length} 份`}</small></div></div>{scope === "global" ? <p className="prompt-field-hint">全局范围仅支持材料类型与角色。</p> : projectDocuments.length ? <div className="prompt-chip-row prompt-chip-scroll">{projectDocuments.map((document) => <button key={document.id} type="button" className={`prompt-chip ${draftScope.document_ids.includes(document.id) ? "active" : ""}`} aria-pressed={draftScope.document_ids.includes(document.id)} title={document.filename} onClick={() => toggleScopeValue("document_ids", document.id)}>{document.filename}</button>)}</div> : <p className="prompt-field-hint">尚未载入到可选择的材料文件。</p>}{draftScope.document_ids.length > 0 && <p className="prompt-field-hint">已选 {draftScope.document_ids.length} 份：模型只会看到这些文件的证据。</p>}</section>
+            <section className="prompt-field"><div className="prompt-field-head"><div><label>具体文件</label><small>{`只选其中几份材料时，其余文件的证据与数字不会进入本章；已解析 ${projectDocuments.length} 份`}</small></div></div>{projectDocuments.length ? <div className="prompt-chip-row prompt-chip-scroll">{projectDocuments.map((document) => <button key={document.id} type="button" className={`prompt-chip ${draftScope.document_ids.includes(document.id) ? "active" : ""}`} aria-pressed={draftScope.document_ids.includes(document.id)} title={document.filename} onClick={() => toggleScopeValue("document_ids", document.id)}>{document.filename}</button>)}</div> : <p className="prompt-field-hint">尚未载入到可选择的材料文件。</p>}{draftScope.document_ids.length > 0 && <p className="prompt-field-hint">已选 {draftScope.document_ids.length} 份：模型只会看到这些文件的证据。</p>}</section>
             <div className="prompt-field-grid">
               <section className="prompt-field"><label htmlFor="prompt-calculation-mode">计算模式</label><small>系统预计算之外的指标是否允许模型自主计算（结果一律由系统复算）</small><select id="prompt-calculation-mode" value={draftCalculationMode} onChange={(event) => updateDraft(active.chapter_key, { calculation_mode: event.target.value as PromptEditableConfig["calculation_mode"] })}><option value="off">关闭：只引用系统预计算结果</option><option value="system_only">仅系统预计算（默认）</option><option value="model">允许自主计算并声明口径</option></select></section>
               <section className="prompt-field"><label htmlFor="prompt-recommendation-mode">建议模式</label><small>承保/拒保/额度/费率建议必须结构化，并逐条人工确认后才可最终交付</small><select id="prompt-recommendation-mode" value={draftRecommendationMode} onChange={(event) => updateDraft(active.chapter_key, { recommendation_mode: event.target.value as PromptEditableConfig["recommendation_mode"] })}><option value="off">关闭：不输出建议</option><option value="qualitative">仅定性建议</option><option value="structured">结构化建议（需逐条确认）</option></select></section>
@@ -1470,15 +1427,13 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
           </div></div></details>
           <details className="prompt-card prompt-collapsible prompt-extra"><summary><div><strong>补充业务要求</strong><HelpTip label="补充业务要求说明">用于保留历史整段 Prompt，或录入本章额外的写作要求。</HelpTip></div><span className="prompt-card-brief">{activeDraft.additional_requirements.trim() ? `已填写 ${activeDraft.additional_requirements.trim().length} 字` : "未填写"}</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><textarea id="prompt-extra" aria-label="补充业务要求" rows={8} value={activeDraft.additional_requirements} onChange={(event) => updateDraft(active.chapter_key, { additional_requirements: event.target.value })} placeholder="输入补充要求；系统仍会执行下方只读风控约束。" /></div></details>
         </fieldset>
-          {!active.llm && <div className="deterministic-prompt-note"><ShieldCheck size={17} /><div><strong>本章配置只读</strong><p>可查看章节配置全文，不能修改业务写作要求。</p></div></div>}{readOnly && active.llm && <p className="prompt-readonly">{scopeEditReason || (scope === "global" ? "当前环境不允许修改全局默认 Prompt。" : "当前环境不允许修改本项目 Prompt 配置。")}</p>}
+          {!active.llm && <div className="deterministic-prompt-note"><ShieldCheck size={17} /><div><strong>本章配置只读</strong><p>可查看章节配置全文，不能修改业务写作要求。</p></div></div>}{readOnly && active.llm && <p className="prompt-readonly">{scopeEditReason || "当前环境不允许修改本项目 Prompt 配置。"}</p>}
           <section className="prompt-constraints-summary"><div><ShieldCheck size={16} /><div><strong>只读风控约束</strong><HelpTip label="只读风控约束说明">固定事实底线（不得伪造来源与核验结果、不得把建议写成已确认事实）由系统强制校验；写作要求、结构与篇幅可在上方编辑，文风偏差只提示不退回。</HelpTip></div></div><button className="secondary-button small" type="button" onClick={() => setConstraintModalOpen(true)}>查看详情</button></section>
-          {active.llm && !readOnly && <footer className="prompt-action-bar"><span>{isChanged ? "存在未保存的修改" : effectiveUpdatedAt ? `当前配置已保存 · 最近更新：${formatPromptUpdatedAt(effectiveUpdatedAt)}` : "当前使用系统默认配置"}</span><div>{scope === "global"
-              ? <>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : null}撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存全局默认</button></>
-              : <>{active.overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>撤销项目覆盖</button>}<button className="secondary-button" disabled={!canSetGlobalDefault} onClick={setGlobalDefault}>{active.global_overridden ? "更新全局默认" : "设为全局默认"}</button>{active.global_overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={resetGlobalDefault}>撤销全局默认</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存项目配置</button></>}</div></footer>}
+          {active.llm && !readOnly && <footer className="prompt-action-bar"><span>{isChanged ? "存在未保存的修改" : effectiveUpdatedAt ? `当前配置已保存 · 最近更新：${formatPromptUpdatedAt(effectiveUpdatedAt)}` : "当前使用系统默认配置"}</span><div>{active.overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>撤销项目覆盖</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存配置</button></div></footer>}
         </div> : <div className="prompt-preview"><div><strong>{active.llm ? "最终发送给模型的指令" : "章节配置全文"}</strong><span>{active.llm ? "由服务端使用当前草稿实时编译" : "由系统固定规则生成"}</span></div>{active.llm ? previewLoading ? <div className="prompt-preview-loading"><LoaderCircle className="spin" size={20} />正在编译完整 Prompt</div> : previewError ? <div className="inline-error"><AlertTriangle size={15} />{previewError}</div> : <textarea aria-label={`${active.title} 完整 Prompt`} value={previewPrompt || active.prompt} readOnly /> : <textarea aria-label={`${active.title} 章节配置全文`} value={active.prompt} readOnly />}</div>}
         </> : <>
         <header className="prompt-detail-head"><div><span>{active?.part || "报告目录"}</span><h2>{activeNavChapter?.title || "报告目录"}</h2></div><div className="prompt-detail-badges"><span className="llm">模型生成</span><span className="custom">自定义章节</span></div></header>
-        {scopeSwitch}
+        {outlineScopeSwitch}
         <p className="prompt-readonly">该章节尚无可用 Prompt 配置；请先保存报告目录，或等待服务端同步后重试。</p>
         </>}
         {outlineLoading && !outlineDraft && <div className="outline-loading"><LoaderCircle className="spin" size={16} />正在载入报告目录</div>}

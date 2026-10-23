@@ -349,6 +349,8 @@ CREATE TABLE IF NOT EXISTS report_prompt_overrides (
   migration_mode TEXT NOT NULL DEFAULT 'structured',
   UNIQUE(project_id, chapter_key)
 );
+-- 已废弃（2026-10-23）：全局默认兜底层已移除（chapter_prompt 不再读取本表），
+-- 表仅作为历史留档保留，便于回滚与审计；不要在新代码里读写它。
 CREATE TABLE IF NOT EXISTS global_report_prompts (
   chapter_key TEXT PRIMARY KEY, prompt TEXT NOT NULL, updated_at TEXT NOT NULL,
   structured_json TEXT NOT NULL DEFAULT '', legacy_prompt TEXT NOT NULL DEFAULT '',

@@ -749,7 +749,7 @@ def _merge_editable(base: dict, editable: dict) -> dict:
 def effective_chapter_config(chapter_key: str, project_id: str | None = None) -> dict:
     """Return the chapter contract actually in force for this project.
 
-    Resolution is project structured override > global default > checked-in YAML,
+    Resolution is project structured override > checked-in YAML,
     for the editor-exposed fields only; evidence/decision boundaries stay fixed by
     the contract. The narrative contract is what the model is told *and* what the
     validator measures against — reading the factory YAML on the validation side
@@ -926,41 +926,11 @@ def prompt_edit_state(chapter_key: str, project_id: str | None = None) -> tuple[
     try:
         from .database import row
         project = row("SELECT structured_json,prompt,migration_mode FROM report_prompt_overrides WHERE project_id=? AND chapter_key=?", (project_id, chapter_key))
-        global_row = row("SELECT structured_json,prompt,migration_mode FROM global_report_prompts WHERE chapter_key=?", (chapter_key,))
     except Exception:
         return factory, "system", "structured"
-    for item, source in ((project, "project"), (global_row, "global")):
-        merged = _merge_override(factory, item)
-        if merged:
-            return merged[0], source, merged[1]
-    return factory, "system", "structured"
-
-
-def global_prompt_edit_state(chapter_key: str) -> tuple[dict, str, str]:
-    """**全局默认**的生效链：全局覆盖 > 出厂 YAML，**不含任何项目覆盖**（P0-1）。
-
-    前端"全局默认"范围要用它来加载与回填——若复用 ``prompt_edit_state``（含项目链），
-    在有项目覆盖的项目上编辑"全局默认"会看到项目覆盖的内容，保存后把项目配置写进全局。
-    """
-    factory = editable_config_from_factory(chapter_key)
-    try:
-        from .database import row
-        global_row = row(
-            "SELECT structured_json,prompt,migration_mode FROM global_report_prompts WHERE chapter_key=?",
-            (chapter_key,),
-        )
-    except Exception:
-        return factory, "system", "structured"
-    merged = _merge_override(factory, global_row)
+    merged = _merge_override(factory, project)
     if merged:
-        config = merged[0]
-        # 全局链**不保留项目文件 ID**（历史脏行也在这里清掉）：全局是部署级配置，
-        # 文件 ID 只对某次项目解析有效，留给别的项目就是越权引用。
-        scope = dict(config.get("material_scope") or {})
-        if scope.get("document_ids"):
-            scope["document_ids"] = []
-            config["material_scope"] = scope
-        return config, "global", merged[1]
+        return merged[0], "project", merged[1]
     return factory, "system", "structured"
 
 
@@ -972,8 +942,12 @@ def chapter_default_prompt(chapter_key: str) -> str:
 def chapter_prompt(chapter_key: str, project_id: str | None = None) -> str:
     """Return the effective system prompt for a chapter.
 
-    Resolution order: project override > global default (web-set, persisted in
-    ``global_report_prompts``) > checked-in YAML contract.
+    Resolution order: project override > checked-in YAML contract.
+
+    2026-10-23：**删除了"全局默认"兜底层**（原 ``global_report_prompts``）。
+    那层是「项目覆盖 > 全局默认 > YAML」里的第二级，整段替换，且会被项目覆盖
+    完全吞掉——既不是最高优先级，也没有独立价值。现在只剩两层，语义更直白；
+    跨章统一的约束改由「全局指令」在读取时追加（见 ``apply_global_directive``）。
 
     The database import is deliberately lazy so the prompt pack remains usable by
     isolated validation/tests without initializing the application database.
@@ -991,25 +965,7 @@ def chapter_prompt(chapter_key: str, project_id: str | None = None) -> str:
             # A missing table during an old-process hot reload must not break
             # report generation; the checked-in contract remains the fallback.
             pass
-    global_prompt = global_chapter_prompt(chapter_key)
-    if global_prompt:
-        return global_prompt
     return chapter_default_prompt(chapter_key)
-
-
-def global_chapter_prompt(chapter_key: str) -> str | None:
-    """Web-set global default for a chapter, or None when unset."""
-    try:
-        from .database import row
-        item = row(
-            "SELECT prompt FROM global_report_prompts WHERE chapter_key=?",
-            (chapter_key,),
-        )
-    except Exception:
-        return None
-    if item and str(item.get("prompt") or "").strip():
-        return str(item["prompt"])
-    return None
 
 
 def migrate_legacy_prompt_overrides() -> None:
@@ -1025,30 +981,28 @@ def migrate_legacy_prompt_overrides() -> None:
     except Exception:
         return
     with connect() as conn:
-        for table, identity in (
-            ("report_prompt_overrides", "id"),
-            ("global_report_prompts", "chapter_key"),
-        ):
-            records = conn.execute(
-                f"SELECT {identity},chapter_key,prompt,structured_json,legacy_prompt,migration_mode FROM {table}"
-            ).fetchall()
-            for record in records:
-                item = dict(record)
-                prompt = str(item.get("legacy_prompt") or item.get("prompt") or "").strip()
-                structured = _decode_structured(item.get("structured_json"))
-                if not prompt or (structured and item.get("migration_mode") != "preserved_legacy"):
-                    continue
-                chapter_key = str(item.get("chapter_key") or "")
-                if chapter_key not in BOND_CHAPTER_KEYS:
-                    continue
-                config, mode = legacy_prompt_config(chapter_key, prompt)
-                if structured and mode == "preserved_legacy":
-                    continue
-                compiled = compile_structured_prompt(chapter_key, config)
-                conn.execute(
-                    f"UPDATE {table} SET prompt=?,structured_json=?,legacy_prompt=?,migration_mode=? WHERE {identity}=?",
-                    (compiled, json_dump(config), prompt, mode, item[identity]),
-                )
+        # 2026-10-23：全局默认层已删除，迁移只处理项目覆盖（`report_prompt_overrides`）。
+        records = conn.execute(
+            "SELECT id,chapter_key,prompt,structured_json,legacy_prompt,migration_mode "
+            "FROM report_prompt_overrides"
+        ).fetchall()
+        for record in records:
+            item = dict(record)
+            prompt = str(item.get("legacy_prompt") or item.get("prompt") or "").strip()
+            structured = _decode_structured(item.get("structured_json"))
+            if not prompt or (structured and item.get("migration_mode") != "preserved_legacy"):
+                continue
+            chapter_key = str(item.get("chapter_key") or "")
+            if chapter_key not in BOND_CHAPTER_KEYS:
+                continue
+            config, mode = legacy_prompt_config(chapter_key, prompt)
+            if structured and mode == "preserved_legacy":
+                continue
+            compiled = compile_structured_prompt(chapter_key, config)
+            conn.execute(
+                "UPDATE report_prompt_overrides SET prompt=?,structured_json=?,legacy_prompt=?,migration_mode=? WHERE id=?",
+                (compiled, json_dump(config), prompt, mode, item["id"]),
+            )
 
 
 def recompile_structured_prompts() -> int:
@@ -1066,69 +1020,30 @@ def recompile_structured_prompts() -> int:
         return 0
     updated = 0
     with connect() as conn:
-        for table, identity in (
-            ("report_prompt_overrides", "id"),
-            ("global_report_prompts", "chapter_key"),
-        ):
-            records = conn.execute(
-                f"SELECT {identity},chapter_key,prompt,structured_json FROM {table} "
-                "WHERE migration_mode='structured'"
-            ).fetchall()
-            for record in records:
-                item = dict(record)
-                chapter_key = str(item.get("chapter_key") or "")
-                config = _decode_structured(item.get("structured_json"))
-                if not config or chapter_key not in BOND_CHAPTER_KEYS:
-                    continue
-                try:
-                    compiled = compile_structured_prompt(chapter_key, config)
-                except Exception:
-                    # 单条历史配置异常不应中断服务启动；该行继续用原文本。
-                    continue
-                if compiled == item.get("prompt"):
-                    continue
-                conn.execute(
-                    f"UPDATE {table} SET prompt=? WHERE {identity}=?",
-                    (compiled, item[identity]),
-                )
-                updated += 1
-    return updated
-
-
-def seed_global_prompts_from_latest_overrides() -> None:
-    """One-time bootstrap: prime empty global defaults from the most recent
-    project-level override of each chapter, so prompt tuning performed on a
-    real project becomes the system-wide default without losing the edit."""
-    try:
-        from .database import connect, now_iso, row, rows
-    except Exception:
-        return
-    try:
-        chapters = rows("SELECT DISTINCT chapter_key FROM report_prompt_overrides")
-    except Exception:
-        return
-    inserts = []
-    for chapter in chapters:
-        latest = row(
-            "SELECT prompt,structured_json,legacy_prompt,migration_mode FROM report_prompt_overrides WHERE chapter_key=? ORDER BY updated_at DESC,rowid DESC LIMIT 1",
-            (chapter["chapter_key"],),
-        )
-        if latest and str(latest.get("prompt") or "").strip():
-            inserts.append((
-                chapter["chapter_key"], str(latest["prompt"]), now_iso(),
-                str(latest.get("structured_json") or ""), str(latest.get("legacy_prompt") or ""),
-                str(latest.get("migration_mode") or "structured"),
-            ))
-    if not inserts:
-        return
-    try:
-        with connect() as conn:
-            conn.executemany(
-                "INSERT OR IGNORE INTO global_report_prompts (chapter_key,prompt,updated_at,structured_json,legacy_prompt,migration_mode) VALUES (?,?,?,?,?,?)",
-                inserts,
+        # 2026-10-23：全局默认层已删除，重编译只处理项目覆盖。
+        records = conn.execute(
+            "SELECT id,chapter_key,prompt,structured_json FROM report_prompt_overrides "
+            "WHERE migration_mode='structured'"
+        ).fetchall()
+        for record in records:
+            item = dict(record)
+            chapter_key = str(item.get("chapter_key") or "")
+            config = _decode_structured(item.get("structured_json"))
+            if not config or chapter_key not in BOND_CHAPTER_KEYS:
+                continue
+            try:
+                compiled = compile_structured_prompt(chapter_key, config)
+            except Exception:
+                # 单条历史配置异常不应中断服务启动；该行继续用原文本。
+                continue
+            if compiled == item.get("prompt"):
+                continue
+            conn.execute(
+                "UPDATE report_prompt_overrides SET prompt=? WHERE id=?",
+                (compiled, item["id"]),
             )
-    except Exception:
-        pass
+            updated += 1
+    return updated
 
 
 def chapter_prompt_is_overridden(chapter_key: str, project_id: str | None = None) -> bool:
