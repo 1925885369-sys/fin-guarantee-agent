@@ -442,13 +442,11 @@ def _document_for(source_ids: object) -> str:
 
 
 def source_reference(source_id: str) -> str:
-    """来源 ID → 成品口径的定位，例如「发行文件〔资料01〕第 29 页」。
+    """来源 ID → 成品口径的定位，例如「发行文件第 29 页」。
 
-    成品里不出现内部来源 ID 与 UUID；工作台的证据详情仍显示真实文件名——
-    那是另一条读取路径，本函数不改动任何证据存储。
+    成品里不出现内部来源 ID、UUID，也不再出现「资料NN」编号；工作台的证据详情仍显示
+    真实文件名——那是另一条读取路径，本函数不改动任何证据存储。
     """
-    from .delivery_wording import document_series
-
     key = str(source_id or "")
     if not key:
         return ""
@@ -464,9 +462,10 @@ def source_reference(source_id: str) -> str:
         return ""
     item = record[0]
     label = MATERIAL_LABELS.get(str(item.get("document_role") or ""), str(item.get("kind") or "材料"))
-    series = document_series(str(item.get("project_id") or "")).get(str(item.get("document_id")), "")
     page = item.get("page")
-    reference = f"{label}〔{series}〕" if series else label
+    # 2026-10-23：成品不再拼「〔资料NN〕」编号（业务方看的是真实文件，编号是内部定位）。
+    # `document_series` 仍保留给对账/日志用，但不再进入任何展示文本。
+    reference = label
     if page:
         reference = f"{reference}第 {page} 页"
     _SOURCE_CACHE[key] = reference

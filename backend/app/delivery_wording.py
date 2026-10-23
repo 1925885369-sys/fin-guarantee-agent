@@ -53,6 +53,8 @@ _INTERNAL_UUID = re.compile(
 PAGE_REFERENCE_PATTERN = r"第\s*[\d,，、\s\-~～—–―－至]+\s*页"
 CITATION_ALIAS_PATTERN = r"\bE\d{2,}\b"
 REFERENCE_PATTERN = re.compile(rf"〔\s*资料\s*\d+\s*〕|{PAGE_REFERENCE_PATTERN}|{CITATION_ALIAS_PATTERN}")
+# 单独一份，供**展示层剔除**使用（`REFERENCE_PATTERN` 还含页码与引用别名，不能拿来删正文）。
+MATERIAL_SERIES_PATTERN = re.compile(r"〔\s*资料\s*\d+\s*〕")
 
 
 def strip_references(text: str) -> str:
@@ -102,14 +104,19 @@ def material_numbers(project_id: str) -> dict[str, str]:
 
 
 def normalize_report_text(text: str, numbers: dict[str, str] | None = None) -> str:
-    """把成品文本里的材料种类名换成规范化表述。幂等。"""
+    """把成品文本里的材料种类名换成规范化表述。幂等。
+
+    2026-10-23：**成品不再出现「资料01」这类系统编号**。业务方看的是自己的真实文件，
+    编号只是内部对账用的定位（`document_series`），写进报告反而像内部痕迹。
+    这里做两件事：
+    1. 剔除正文里**已经存着**的旧编号（历史正文下次导出即干净，不动存量数据）；
+    2. 材料名只替换成规范名称，不再追加 `〔资料NN〕`。
+    """
     if not text:
         return text
-    lookup = numbers or {}
-    output = text
-    for source, target, label in MATERIAL_ALIASES:
-        series = lookup.get(label, "") if label else ""
-        output = output.replace(source, f"{target}〔{series}〕" if series else target)
+    output = MATERIAL_SERIES_PATTERN.sub("", text)
+    for source, target, _label in MATERIAL_ALIASES:
+        output = output.replace(source, target)
     return output
 
 

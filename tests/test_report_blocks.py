@@ -423,5 +423,6 @@ def test_exports_have_no_forbidden_wording(project) -> None:
             text += "\n" + " | ".join(cell.text for cell in row.cells)
     assert wording_violations(text) == [], wording_violations(text)
     assert ORIGINAL_FILENAME not in text
-    # 附录里的来源标签走成品口径（材料名 + 资料编号），不是原件名。
-    assert "发行文件〔资料01〕" in text
+    # 附录里的来源标签走成品口径（材料名 + 页码），2026-10-23 起**不再带「资料NN」编号**。
+    assert "发行文件" in text
+    assert "〔资料" not in text

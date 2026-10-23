@@ -25,10 +25,20 @@ def client():
 
 
 def test_alias_table_maps_material_names_to_product_wording() -> None:
+    """2026-10-23：成品不再带「资料NN」编号，只保留规范名称。
+
+    业务方看的是真实文件；编号是内部对账用的定位（`document_series` 仍保留）。
+    """
     numbers = {"发行文件": "资料01", "外部信用评价文件": "资料02"}
-    assert normalize_report_text("募集说明书", numbers) == "发行文件〔资料01〕"
-    assert normalize_report_text("信用评级报告", numbers) == "外部信用评价文件〔资料02〕"
-    assert normalize_report_text("评级报告", numbers) == "外部信用评价文件〔资料02〕"
+    assert normalize_report_text("募集说明书", numbers) == "发行文件"
+    assert normalize_report_text("信用评级报告", numbers) == "外部信用评价文件"
+    assert normalize_report_text("评级报告", numbers) == "外部信用评价文件"
+
+
+def test_stored_series_numbers_are_stripped_from_display() -> None:
+    """历史正文里**已经存着**的「〔资料01〕」在展示时剔除——不动存量数据。"""
+    assert normalize_report_text("发行文件〔资料01〕第 28 页") == "发行文件第 28 页"
+    assert normalize_report_text("外部信用评价文件〔资料02〕") == "外部信用评价文件"
 
 
 def test_specific_alias_wins_over_the_shorter_one() -> None:
@@ -140,8 +150,9 @@ def test_table_block_normalization_covers_header_cells_and_notes() -> None:
     )
     numbers = {"发行文件": "资料01", "外部信用评价文件": "资料02"}
     clean = normalize_table_block(raw, numbers)
-    assert clean.columns[0].label == "外部信用评价文件〔资料02〕"
-    assert clean.rows[0].cells[0].raw == "外部信用评价文件〔资料02〕"
+    # 2026-10-23：表格单元格同样不带「资料NN」编号。
+    assert clean.columns[0].label == "外部信用评价文件"
+    assert clean.rows[0].cells[0].raw == "外部信用评价文件"
     assert "评级报告" not in clean.notes[0]
     assert "信用评级报告" not in clean.scope
     assert clean.title == "主体评级历史"
@@ -167,9 +178,9 @@ def test_section_blocks_normalizes_frozen_table_snapshot(monkeypatch, client) ->
     section = {"section_key": "rating", "content": "本章分析。", "title": "评级报告复核及评级差异"}
     blocks = report_blocks.section_blocks("demo-bond-huachen", section, subject="华辰精密制造有限公司")
     table = next(block for block in blocks if block["kind"] == "table")
-    assert table["columns"][0]["label"] == "外部信用评价文件〔资料02〕"
+    assert table["columns"][0]["label"] == "外部信用评价文件"
     assert all("评级报告" not in line for line in table["rows"])
-    assert any("外部信用评价文件〔资料02〕" in line for line in table["rows"])
+    assert any("外部信用评价文件" in line for line in table["rows"])
     assert "评级报告" not in table["notes"][0]
     assert raw.notes[0] == "注：来源为评级报告。"
 
@@ -237,7 +248,10 @@ def test_write_normalizes_before_hashing(client) -> None:
         ("demo-bond-huachen", "wording_probe"),
     )
     assert "募集说明书" not in stored["content"]
-    assert "发行文件〔资料01〕" in stored["content"]
+    # 2026-10-23：规范化只换名称，不再追加「资料NN」编号。
+    assert "发行文件" in stored["content"]
+    assert "外部信用评价文件" in stored["content"]
+    assert "〔资料" not in stored["content"]
     # 冻结披露必须与正文同样规范化，否则「逐字保留」比对会判失败。
     assert "募集说明书" not in stored["required_disclosures"]
     assert stored["content_sha256"] == hashlib.sha256(stored["content"].encode("utf-8")).hexdigest()
