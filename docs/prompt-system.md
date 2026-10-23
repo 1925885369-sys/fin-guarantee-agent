@@ -4,18 +4,26 @@
 
 ---
 
-## 1. 三层 Prompt 解析（重要）
+## 1. Prompt 解析（重要）
 
-任一 LLM 章节（`llm: true`）生成时的 System Prompt 按以下优先级取第一个存在项：
+任一 LLM 章节（`llm: true`）生成时的 System Prompt 按以下顺序构造：
 
 ```
 ① 项目覆盖   report_prompt_overrides(project_id, chapter_key)   —— 只影响该项目
-② 全局默认   global_report_prompts(chapter_key)                 —— 网页“设为全局默认”，影响所有未①覆盖的项目
-③ 出厂默认   backend/prompts/{bond_,}chapters.yaml 渲染         —— 代码内置
+② 出厂默认   backend/prompts/{bond_,}chapters.yaml 渲染         —— 代码内置
+③ 全局指令   global_prompt_directives('default')                —— 部署级，追加到最末
 ```
 
-实现：`backend/app/chapter_prompts.py::chapter_prompt(chapter_key, project_id)`；
-运行接线：`backend/app/llm.py::rewrite_section()`（`system_prompt = chapter_prompt(...)`）。
+①/② 是**二选一**（有项目覆盖就整段用它，否则用 YAML）；③ 是**追加**，不是覆盖——
+无论前面取到哪一份，都把全局指令拼到最末，并声明"与前述任何段落冲突时以本段为准"。
+
+> **2026-10-23 变更**：原「全局默认」层（`global_report_prompts`，每章一行）已删除。
+> 它排在项目覆盖之后、且是整段替换，任何有项目覆盖的章节都用不到它——既不是最高优先级，
+> 也没有独立价值。表保留仅为历史留档，代码不再读写。
+
+实现：`chapter_prompts.chapter_prompt()`（①/②）+ `apply_global_directive()`（③，哨兵幂等）；
+运行接线：`llm._report_request()` 末尾还会再注入一次，兜住 `preserved_legacy` 旧存库文本
+与首稿/压缩/安全修复/JSON 修复四条调用链。
 
 > 注意：覆盖只替换 **System Prompt 文本**。结构化契约（事实白名单、输出形状、引用上限、
 > 数值/支持率校验）始终来自 YAML 与 `chapter_guard`/`p0` 校验器，网页改 Prompt 无法绕过这些硬校验；
@@ -152,12 +160,10 @@
 | 表 | 键 | 含义 |
 |---|---|---|
 | `report_prompt_overrides` | (project_id, chapter_key) | 项目级覆盖，网页“保存 Prompt”写入 |
-| `global_report_prompts` | chapter_key | 全局默认，网页“设为全局默认”写入 |
-| `audit_events` | — | `report_prompt_update/reset/global_update/global_reset` 全程留痕 |
+| `global_prompt_directives` | `directive_key='default'` | **全局指令**（部署级，单行）：追加到全部章节 System Prompt 最末 |
+| `global_report_prompts` | chapter_key | **已废弃**（2026-10-23）：原「全局默认」兜底，仅历史留档 |
+| `audit_events` | — | `report_prompt_update/reset`、`report_prompt_directive_update/reset` 全程留痕 |
 | `report_sections` / `llm_attempts` | — | 生成时记录 prompt_version/prompt_sha256/input_hash、调用哈希（追溯用） |
-
-启动迁移：`seed_global_prompts_from_latest_overrides()`（`main.startup()` 调用，一次性）——
-若全局表为空，取各章“最近一次项目覆盖”作为全局默认初值。
 
 启动重编译：`recompile_structured_prompts()`（`main.startup()` / `lifespan` 调用）——
 `chapter_prompt()` 返回的是**存库的 `prompt` 文本**，而结构化行的该文本由 `structured_json`
@@ -167,20 +173,22 @@
 ### 2.3 REST 端点（均在项目鉴权下）
 | 方法/路径 | 作用 |
 |---|---|
-| GET  `/api/projects/{id}/report-prompts` | 每章返回：`title`(中文，元数据源)、`part`(所属分部)、`prompt`(生效值)、`default_prompt`(出厂)、`overridden`(项目)、`updated_at`、`global_overridden`、`global_updated_at`、`llm`、`required_sections` |
+| GET  `/api/projects/{id}/report-prompts` | 每章返回：`title`(中文，元数据源)、`part`(所属分部)、`prompt`(生效值)、`default_prompt`(出厂)、`overridden`(项目)、`updated_at`、`llm`、`required_sections` |
 | PATCH `/api/projects/{id}/report-prompts/{key}` | 保存项目覆盖 |
-| DELETE `/api/projects/{id}/report-prompts/{key}` | 撤销项目覆盖（回落全局/出厂） |
-| PATCH `/api/projects/{id}/report-prompts/global/{key}` | **设为/更新全局默认**（DB 落盘、跨重启生效） |
-| DELETE `/api/projects/{id}/report-prompts/global/{key}` | 撤销全局默认（回落出厂 YAML） |
+| DELETE `/api/projects/{id}/report-prompts/{key}` | 撤销项目覆盖（回落出厂 YAML） |
+| GET  `/api/projects/{id}/report-prompt-directive` | 读**全局指令**（部署级单行） |
+| PATCH 同上 | 保存全局指令（追加到全部章节最末；不调用模型） |
+| DELETE 同上 | 清空全局指令（幂等） |
 
-约束：`real_reference` 项目只读（403）；章节键必须在 `BOND_CHAPTER_KEYS`。
+约束：`real_reference` 项目只读（403）；章节键必须在 `BOND_CHAPTER_KEYS`；
+全局指令的写权限只看"非公开环境 + 本机直连 + 无转发头"，与项目类型无关。
 
 ### 2.4 生成运行时的接线
 ```
 workflow.draft 节点
  └─ chapter_guard.build_chapter_context()  → 确定性草稿 + 证据 + 冲突块 + 输入白名单
      └─ llm.rewrite_section(chapter_key, chapter_context)
-         ├─ system = chapter_prompt(chapter_key, project_id)      # ①→②→③
+         ├─ system = apply_global_directive(chapter_prompt(...))  # ①/② 取一份，③ 追加到最末
          ├─ user   = JSON{确定性草稿、required_sections/preserve_blocks、允许引用、证据}
          └─ 返回后 chapter_guard.validate_chapter_output()
               → 通过则入库；不通过/异常则回退确定性草稿（validation_status=fallback 并审计）
@@ -193,22 +201,22 @@ verify 节点 → validate_report_support() 再校验证据/引用 → Word 导�
 - 布局：左侧章节导航按 API `part` 字段分为六大部分展示（中文分部名 + 中文章节名，序号 01–17 连续）；
   右侧配置面板按"写作视角 / 章节目标 / 内容要求 / 行文组织 / 补充业务要求"五张卡片分组，
   只读风控约束默认折叠，移动端用 `<optgroup>` 分组下拉。
-- 数据：`api.reportPrompts()` 拉全章；编辑态仅存本地 `drafts`，**点按钮才写后端**。
-- 每章状态徽标：`项目自定义` / `全局默认`（该项目未覆盖但全局存在）/ `出厂默认`；
-  头部汇总显示"X 个项目自定义 · Y 个全局默认"。
+- 数据：`api.reportPrompts()` 拉全章（**不再有 scope 参数**）；编辑态仅存本地 `drafts`，**点按钮才写后端**。
+- 每章状态徽标：`项目自定义` / `出厂默认`；头部汇总显示"X 个项目自定义"。
 - 按钮（仅 LLM 章节可编辑；真实参考项目整页只读）：
-  - 保存 Prompt → 项目覆盖（PATCH project）；
-  - 撤销本项目覆盖 → DELETE project；
-  - **设为/更新全局默认** → PATCH `…/global/{key}`，立即对所有未覆盖项目生效；
-  - **撤销全局默认** → DELETE `…/global/{key}`，回落出厂。
-- api 封装：`frontend/src/api.ts`（`saveReportPrompt/resetReportPrompt/setGlobalReportPrompt/resetGlobalReportPrompt`）；
-  类型 `ReportPrompt` 见 `frontend/src/types.ts`（含 `global_overridden/global_updated_at`）。
+  - 保存配置 → 项目覆盖（PATCH project）；
+  - 撤销项目覆盖 → DELETE project。
+- **全局指令**是章节树顶部的独立一项（不属于任何章）：选中后右侧只有一个文本框，
+  保存/清空走 `…/report-prompt-directive`。它不参与"每章一份"的结构。
+- api 封装：`frontend/src/api.ts`（`saveReportPrompt/resetReportPrompt/reportPromptDirective/savePromptDirective/resetPromptDirective`）；
+  类型 `ReportPrompt` / `PromptDirective` 见 `frontend/src/types.ts`。
 
 生效时机：**重新生成该章节**或**重新运行 Agent** 时读取最新 Prompt；已生成内容不追溯改写。
 
 ## 4. 运维速查
-- 改全局默认：网页每章「设为全局默认」（存 DB，永久）；或改 YAML（需重启进程）。
-- 恢复出厂：网页「撤销全局默认」。
-- 项目级差异：网页「保存 Prompt」，仅该项目生效；优先级高于全局。
+- 改全局指令：网页「报告 Prompt → 全局指令」（存 DB，永久、立即对所有章节生效）；
+  或改 YAML 的 `global_rules`（需重启进程）。
+- 恢复出厂：网页「撤销项目覆盖」。
+- 项目级差异：网页「保存配置」，仅该项目生效。
 - 排查某次生成用了哪版 Prompt：`llm_attempts.request_hash` + `audit_events` + 章节 `prompt_version/prompt_sha256`。
-- 已保存覆盖迁移为全局默认：启动时自动一次性执行（全局表为空时）。
+- 成品不再出现「资料NN」编号：编号只用于内部对账（`document_series`），展示/导出层统一剔除。
