@@ -1,143 +1,116 @@
-研担债券担保尽调 Agent - 本地启动指南
-=======================================
+研担债券尽调 Agent - Windows 本地启动指南
+=========================================
 
-项目目录：
-C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+一、准备环境和项目
+------------------
+安装 Python 3.12、Node.js 24.11.1（推荐 npm 11.6.2）和 Git。
 
+首次下载，在准备存放代码的目录执行：
 
-一、首次启动
-------------
+git clone https://github.com/1925885369-sys/fin-guarantee-agent.git
+cd fin-guarantee-agent
 
-1. 打开 PowerShell，进入项目目录：
+已有项目时不要重新克隆。打开已有 fin-guarantee-agent 文件夹，
+在该文件夹打开 PowerShell。以下命令默认从项目根目录执行。
 
-cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+二、首次安装和构建
+------------------
+创建项目 .venv 并安装基础依赖：
 
-2. 安装 Python 依赖：
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
-python -m pip install -r requirements.txt
+默认仅安装基础依赖，BM25 检索可直接使用。也可手动执行：
 
-3. 安装前端依赖并构建前端：
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+两种 Python 安装方式选择一种即可。然后安装前端依赖并构建网页：
 
 cd frontend
-npm.cmd install
+npm.cmd ci
 npm.cmd run build
 cd ..
 
+请确认每一步成功后再执行下一步。
 
-二、配置模型 API
-----------------
-
-如果需要新建项目、上传自己的募集说明书和评级报告并运行 Agent，
-请在启动服务前，在同一个 PowerShell 窗口中执行：
+三、启动前配置模型（可选）
+--------------------------
+只查看已有案例可跳过本节；需要调用模型进行分析时，在启动后端的
+同一个 PowerShell 窗口执行：
 
 $secureKey = Read-Host "请输入模型 API Key" -AsSecureString
 $env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
-$env:LLM_BASE_URL = "https://api.deepseek.com"
-$env:LLM_MODEL = "deepseek-v4-flash"
+$env:LLM_BASE_URL = Read-Host "服务商 OpenAI 兼容接口地址（例如 https://api.deepseek.com）"
+$env:LLM_MODEL = Read-Host "服务商支持的精确模型 ID"
 
-检查 API Key 是否已配置：
+接口地址、模型 ID 和密钥须来自对应服务商的可用配置。
+环境变量只对当前终端和子进程有效；关闭窗口后下次需要重新配置。
+本地启动脚本不会自动读取 .env，复制 .env.example 不等于配置已加载。
+不要把真实密钥写入代码、前端或提交到 Git。
 
-python -c "import os; print('Key configured:', bool(os.getenv('LLM_API_KEY')))"
-
-输出 Key configured: True 表示配置已生效。
-
-注意：
-1. API 配置只在当前 PowerShell 窗口中有效。
-2. 关闭窗口后，下次启动需要重新配置。
-3. 不要把真实 API Key 写入项目文件或提交到 Git。
-4. LLM_MODEL 必须填写模型服务商实际支持的模型名称。
-
-
-三、启动系统
-------------
-
-确认当前目录为项目根目录，然后执行：
+四、日常使用：一个端口启动完整系统
+----------------------------------
+在项目根目录执行：
 
 powershell -ExecutionPolicy Bypass -File .\run.ps1
 
-看到以下内容表示启动成功：
-
-Uvicorn running on http://127.0.0.1:8000
-
-浏览器访问：
+看到 Application startup complete 和 Uvicorn running 后，浏览器访问：
 
 http://127.0.0.1:8000
 
-API 健康检查：
+健康检查：
 
 http://127.0.0.1:8000/api/health
 
+首次启动会生成虚构案例材料，请等待启动完成。
+终端持续显示日志、不能继续输入命令是正常现象；其他命令请另开终端。
+停止服务按 Ctrl+C。修改后端或模型环境变量后，停止并重新启动服务。
+日常再次启动无需重复安装；进入项目目录，按需配置模型后执行上述启动命令。
 
-四、以后再次启动
-----------------
+8000 的网页由后端提供，但必须已经完成第二节的前端构建。
+modelConfigured: true 只表示密钥配置存在，不代表模型权限或输出能力已验证。
 
-1. 打开 PowerShell，进入项目目录：
+五、前端开发：两个终端
+----------------------
+终端一：按第四节保持后端在 8000 运行。
+终端二：从项目根目录执行：
 
-cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
+cd frontend
+npm.cmd ci
+npm.cmd run dev
 
-2. 如果要运行自己上传的材料，先按照“二、配置模型 API”设置 API。
+浏览器访问 http://127.0.0.1:5173，前端 API 默认代理至 8000。
+修改 frontend/src 后页面会自动更新；停止前端开发服务也使用 Ctrl+C。
 
-3. 启动系统：
+如果使用第四节的单端口模式，修改前端后需重新构建：
 
-.\run.ps1
-
-4. 浏览器访问：
-
-http://127.0.0.1:8000
-
-
-五、修改前端后的启动方式
-------------------------
-
-如果修改了 frontend\src\App.tsx 或 frontend\src\styles.css，必须重新构建：
-
-cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent\frontend
+cd frontend
 npm.cmd run build
 cd ..
-.\run.ps1
 
+构建完成后启动或重启后端，浏览器刷新 8000 页面。
+依赖未变化时，不需要每次重新执行 npm.cmd ci。
 
-六、只查看内置演示案例
-----------------------
+六、可选语义检索
+----------------
+在 Windows 项目根目录执行：
 
-只查看内置虚构案例时可以不配置 API，直接执行：
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -WithRetrieval
+.\.venv\Scripts\python.exe -m scripts.prepare_retrieval_model
 
-cd C:\Users\Jamie\Desktop\agent构建\fin-guarantee-agent
-.\run.ps1
+这会额外安装 CPU 检索依赖并下载 BGE 模型；完成后重启后端。
+未安装或未准备模型时使用 BM25；启动服务不会自动下载模型。
 
-然后访问：
-
-http://127.0.0.1:8000
-
-
-七、停止系统
+七、常见问题
 ------------
+1. .venv 不存在或缺少 uvicorn：先执行第二节安装，勿只给系统 Python 安装依赖。
+2. 网页 404：确认先构建 frontend/dist，再启动后端；开发模式请访问 5173。
+3. 8000 已被占用：先检查是否已有系统运行，勿重复启动；需要重启时在旧终端按 Ctrl+C。
+4. 模型配置不生效：检查是否在启动后端的同一终端设置，修改后是否重启。
+5. 模型调用 401/403：检查密钥有效性、权限和账户状态。
+6. 模型调用 404：检查服务商接口地址和精确模型 ID。
+7. 长章节超时：默认读取超时 300 秒；旧环境变量会覆盖默认值。
+8. 前端连不上备用端口：默认代理是 8000。备用 8001 的配置见 docs/API_SETUP.md。
+9. git diff 显示分页后无法输入命令：按 q 退出；后端日志窗口用 Ctrl+C 停止服务。
 
-在正在运行服务的 PowerShell 窗口中按：
-
-Ctrl+C
-
-不要直接关闭仍在执行 Agent 任务的终端窗口。
-
-
-八、常见问题
-------------
-
-1. 浏览器无法打开
-   检查 PowerShell 中是否仍显示 Uvicorn 正在运行。
-
-2. modelConfigured: false
-   API Key 没有配置到启动后端的同一个 PowerShell 窗口，或配置后没有重启服务。
-
-3. 页面仍是修改前的样式
-   重新执行 npm.cmd run build，然后重启后端。
-
-4. 端口被占用
-   在旧服务的 PowerShell 窗口按 Ctrl+C，再重新执行 .\run.ps1。
-
-5. API 返回 401 或 403
-   检查 API Key、模型权限和账户余额。
-
-6. API 返回 model_not_found 或 404
-   检查 LLM_BASE_URL 和 LLM_MODEL 是否与服务商实际配置一致。
-
+完整说明见 README.md 和 docs/API_SETUP.md。

@@ -1,3 +1,7 @@
+param(
+    [switch]$WithRetrieval
+)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $launcher = Get-Command py -ErrorAction SilentlyContinue
@@ -20,13 +24,19 @@ if ($useLauncher) {
     }
     & $python312 -m venv (Join-Path $root '.venv')
 }
+if ($LASTEXITCODE -ne 0) { throw 'Project virtual environment creation failed.' }
 
 $venvPython = Join-Path $root '.venv\Scripts\python.exe'
 & $venvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
 & $venvPython -m pip install -r (Join-Path $root 'requirements.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Project dependency installation failed.' }
-& $venvPython -m pip install -r (Join-Path $root 'requirements-retrieval.txt')
-if ($LASTEXITCODE -ne 0) { throw 'Local retrieval dependency installation failed.' }
+if ($WithRetrieval) {
+    & $venvPython -m pip install -r (Join-Path $root 'requirements-retrieval.txt')
+    if ($LASTEXITCODE -ne 0) { throw 'Local retrieval dependency installation failed.' }
+    Write-Host 'Prepare the local embedding model from the project root with:'
+    Write-Host '.\.venv\Scripts\python.exe -m scripts.prepare_retrieval_model'
+} else {
+    Write-Host 'BM25 retrieval is available. Optional semantic retrieval: rerun setup.ps1 -WithRetrieval.'
+}
 Write-Host 'Project Python 3.12 environment is ready.'
-Write-Host 'Prepare the local embedding model with: .\.venv\Scripts\python.exe scripts\prepare_retrieval_model.py'

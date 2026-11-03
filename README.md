@@ -34,26 +34,52 @@
 
 ### Windows PowerShell
 
-在仓库根目录安装 Python 环境：
+首次使用先克隆仓库；已有本地项目时直接在现有项目根目录操作：
+
+```powershell
+git clone https://github.com/1925885369-sys/fin-guarantee-agent.git
+cd fin-guarantee-agent
+```
+
+安装 Python 环境和基础依赖，再构建网页：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
+cd frontend
+npm.cmd ci
+npm.cmd run build
+cd ..
 ```
 
-`setup.ps1` 会安装基础依赖和可选的 CPU 语义检索依赖。只体验 BM25 时，可手动安装基础依赖：
+`setup.ps1` 默认只安装基础依赖，BM25 检索可直接使用。也可用以下命令手动创建相同的 Python 环境，然后执行上面的前端安装与构建命令：
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-启动后端：
+如果要调用模型运行 Agent，在**启动后端前、同一个 PowerShell 窗口**完成配置；只查看已有案例可跳过：
+
+```powershell
+$secureKey = Read-Host "模型 API Key" -AsSecureString
+$env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
+$env:LLM_BASE_URL = Read-Host "服务商 OpenAI 兼容接口地址（例如 https://api.deepseek.com）"
+$env:LLM_MODEL = Read-Host "服务商支持的精确模型 ID"
+```
+
+这些环境变量只在当前窗口及其子进程中有效。接口地址、模型 ID 和密钥须来自同一服务商的可用配置。
+
+启动完整系统：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-另开终端启动前端：
+看到 `Uvicorn running on http://127.0.0.1:8000` 后打开 **http://127.0.0.1:8000**，健康接口为 **http://127.0.0.1:8000/api/health**。首次启动会生成虚构 PDF，请等待启动完成。构建后的网页由后端提供，无需另外启动前端服务。
+
+终端持续显示服务日志是正常现象；其他命令请另开终端。停止服务按 `Ctrl+C`。修改模型配置或后端代码后须重启；修改前端后须重新构建，并在构建完成后启动或重启后端。
+
+**前端开发模式**：保留后端在 `8000` 运行，在项目根目录另开终端执行：
 
 ```powershell
 cd frontend
@@ -61,36 +87,54 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-打开 **http://127.0.0.1:5173**；后端健康接口为 **http://127.0.0.1:8000/api/health**。首次启动会生成虚构 PDF，耗时较长。
-
-若只使用一个端口，在 `frontend` 运行 `npm.cmd run build`，启动后端后访问 **http://127.0.0.1:8000**。构建产物不提交 Git。
+此模式访问 **http://127.0.0.1:5173**，`/api` 默认代理至 `8000`，前端修改会自动更新。不要在已有服务占用 `8000` 时重复启动后端。构建产物不提交 Git。
 
 ### macOS / Linux
 
+首次使用执行以下命令：
+
 ```bash
+git clone https://github.com/1925885369-sys/fin-guarantee-agent.git
+cd fin-guarantee-agent
 python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
 ```
 
-另开终端，在 `frontend` 运行 `npm ci` 和 `npm run dev`。
+已有克隆时跳过 `git clone` 和紧随其后的 `cd`。需要调用模型时，在同一个终端先配置。以下输入命令使用 Bash；使用 zsh 等其他 shell 时请先运行 `bash`：
+
+```bash
+read -r -s -p "模型 API Key: " LLM_API_KEY; printf '\n'
+export LLM_API_KEY
+read -r -p "服务商 OpenAI 兼容接口地址: " LLM_BASE_URL
+export LLM_BASE_URL
+read -r -p "服务商支持的精确模型 ID: " LLM_MODEL
+export LLM_MODEL
+```
+
+随后启动后端：
+
+```bash
+.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+访问 **http://127.0.0.1:8000**。开发前端时，另开终端进入项目的 `frontend` 目录，执行 `npm run dev` 并访问 `5173`。
 
 ### 模型与语义检索
 
-在启动后端的 PowerShell 终端配置：
+模型配置须在启动前完成。健康接口的 `modelConfigured` 只表示配置存在；权限和输出能力需实际分析验证。模型调用会产生费用，预算见 [.env.example](.env.example)，完整说明见 [模型配置指南](docs/API_SETUP.md)。
+
+可选的本地语义检索在 Windows 项目根目录执行：
 
 ```powershell
-$secureKey = Read-Host "模型 API Key" -AsSecureString
-$env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
-$env:LLM_BASE_URL = "https://api.deepseek.com"
-$env:LLM_MODEL = "deepseek-v4-flash"
-powershell -ExecutionPolicy Bypass -File .\run.ps1
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -WithRetrieval
+.\.venv\Scripts\python.exe -m scripts.prepare_retrieval_model
 ```
 
-使用服务商实际支持的模型 ID。健康接口的 `modelConfigured` 只表示配置存在；权限和输出能力需实际分析验证。模型调用会产生费用，预算见 [.env.example](.env.example)，完整说明见 [模型配置指南](docs/API_SETUP.md)。
-
-语义检索需要安装 `requirements-retrieval.txt`，并单独运行 `python -m scripts.prepare_retrieval_model` 准备模型；服务启动不会自动下载。Docker 开发见 [Docker 指南](docs/DOCKER_DEVELOPMENT.md)。
+该步骤会额外安装 CPU 检索依赖并下载 BGE 模型；准备完成后重启后端。`requirements-retrieval.txt` 中的 CPU PyTorch wheel 依赖平台支持，macOS 不应直接照搬 Windows 安装命令，可先使用基础 BM25。服务启动不会自动下载模型。Docker 的 `.env` 加载方式与本地脚本不同，见 [Docker 指南](docs/DOCKER_DEVELOPMENT.md)。
 
 ## 技术与结构
 
@@ -119,7 +163,7 @@ npm.cmd run typecheck
 npm.cmd run build
 ```
 
-完整回归使用 `python -m pytest -q`；E2E 使用 `npm.cmd run test:e2e`，需安装 Playwright 的 Edge 通道。涉及北投、中邮的用例需要本机另备公开参考材料，新克隆不会自带这些文件。隔离目录和门禁见 [发布验收清单](docs/RELEASE_CHECKLIST.md)。
+完整回归在项目根目录使用 `.\.venv\Scripts\python.exe -m pytest -q`（Windows）或 `.venv/bin/python -m pytest -q`（macOS / Linux）；E2E 在 `frontend` 目录使用 `npm.cmd run test:e2e`（Windows）或 `npm run test:e2e`（macOS / Linux），需安装 Playwright 的 Edge 通道。涉及北投、中邮的用例需要本机另备公开参考材料，新克隆不会自带这些文件。隔离目录和门禁见 [发布验收清单](docs/RELEASE_CHECKLIST.md)。
 
 六套虚构金标案例的确定性 / Agent / 一次性 Baseline 历史结果均已保留。历史 18 次模型评测只适用于对应代码、Prompt 和材料版本，不能直接代表当前版本或真实客户效果；表格渲染与解析闭环的准确率也不代表第三方文档泛化能力。
 
