@@ -113,7 +113,22 @@ FACT_REGISTRY: dict[str, FactDefinition] = {
     ),
     "bond_rating": FactDefinition("债项评级", "评级", ("债项信用等级", "本期债券信用等级", "债项评级"), "text"),
     "rating_outlook": FactDefinition("评级展望", "评级", ("评级展望", "展望"), "text"),
-    "rating_downgrade_trigger": FactDefinition("评级下调触发因素", "评级", ("下调因素", "评级下调因素", "调级因素"), "text"),
+    "rating_downgrade_trigger": FactDefinition(
+        "评级下调触发因素", "评级",
+        ("下调因素", "评级下调因素", "调级因素", "可能引致评级下调的敏感性因素", "可能引致评级下调"),
+        "text",
+    ),
+    # 评级报告的「关注 / 评级关注」段：联合资信把它写成项目符号段落（中邮 p5 三条），
+    # 中诚信写成「调级因素」表里的「关 注」板块（北投 p3）。两种版式都要抽成结构化文本，
+    # 否则评级章只能写"材料不足"或由模型自由发挥（实测两项目长期为空）。
+    "rating_concerns": FactDefinition(
+        "评级关注事项", "评级", ("评级关注事项", "关注事项", "评级关注"), "text",
+    ),
+    "rating_sensitivity_up": FactDefinition(
+        "评级上调敏感性因素", "评级",
+        ("可能引致评级上调的敏感性因素", "可能引致评级上调", "评级上调敏感性因素", "上调因素"),
+        "text",
+    ),
     "rating_agency": FactDefinition("评级机构", "评级", ("评级机构", "联合资信", "中诚信", "新世纪"), "text"),
     # 评级日期只认"评级时间/评级日期/跟踪评级…"这类明确标签：不得用发行日、报表日或
     # 文件中任意日期替代（修订稿 §2.4）。别名收紧就是为了这一点。
@@ -122,14 +137,34 @@ FACT_REGISTRY: dict[str, FactDefinition] = {
     # （成品统一写作「外部信用评价文件」）。实测该标签出现在核对表里，直接触发
     # 成品用词违规——一旦那张表接进出口，整份报告会被阻断交付。
     # 别名保留原写法，材料里仍是这么写的，检索不受影响。
-    "rating_revenue": FactDefinition("评级口径营业收入", "评级", ("评级报告营业收入", "评级口径营业收入")),
+    # 评级口径财务键的别名必须包含**材料原文写法**（营业总收入/总债务/资产总额…）：
+    # 早先只收「评级口径营业收入」这类内部命名，材料里从不这么写，于是六个键长期
+    # 抽不到任何值（北投 p4「财务概况」、中邮「八、财务分析」实测全空），评级口径与
+    # 主体档案口径对照表因此从未生成。作用域是安全的：这些键只出现在评级报告节的
+    # `allowed_fact_keys` 里，`deterministic_extract` 按节过滤 registry，不会污染主财务节。
+    "rating_revenue": FactDefinition(
+        "评级口径营业收入", "评级",
+        ("评级报告营业收入", "评级口径营业收入", "营业总收入", "营业收入"),
+    ),
     # The legacy key remains stable for existing evaluations; its value is an
     # interest-bearing-debt adjustment, not an issuer-wide total-debt figure.
-    "rating_total_debt": FactDefinition("评级口径有息负债", "评级", ("评级口径有息负债", "评级报告有息负债")),
-    "rating_total_assets": FactDefinition("评级口径资产总额", "评级", ("评级口径资产总额",)),
-    "rating_total_liabilities": FactDefinition("评级口径负债总额", "评级", ("评级口径负债总额",)),
-    "rating_net_profit": FactDefinition("评级口径净利润", "评级", ("评级口径净利润",)),
-    "rating_operating_cash_flow": FactDefinition("评级口径经营活动现金流", "评级", ("评级口径经营活动现金流",)),
+    "rating_total_debt": FactDefinition(
+        "评级口径有息负债", "评级",
+        ("评级口径有息负债", "评级报告有息负债", "总债务", "有息债务", "有息负债"),
+    ),
+    "rating_total_assets": FactDefinition(
+        "评级口径资产总额", "评级", ("评级口径资产总额", "资产总额", "总资产"),
+    ),
+    "rating_total_liabilities": FactDefinition(
+        "评级口径负债总额", "评级", ("评级口径负债总额", "负债总额", "总负债"),
+    ),
+    "rating_net_profit": FactDefinition(
+        "评级口径净利润", "评级", ("评级口径净利润", "净利润"),
+    ),
+    "rating_operating_cash_flow": FactDefinition(
+        "评级口径经营活动现金流", "评级",
+        ("评级口径经营活动现金流", "经营活动产生的现金流量净额", "经营活动现金流量净额"),
+    ),
     "rating_issue_amount": FactDefinition("评级口径发行规模", "评级", ("评级口径发行规模",)),
     "underwriter": FactDefinition("主承销商", "发行结构", ("主承销商", "牵头主承销商"), "text"),
     "trustee": FactDefinition("债券受托管理人", "发行结构", ("受托管理人", "债券受托管理人"), "text"),
@@ -930,6 +965,113 @@ def _text_fact_is_plausible(fact_key: str, token: str, source_text: str, section
             return False
         return len(value) <= 12 and not any(term in value for term in ("\u8425\u4e1a\u6267\u7167", "\u7ecf\u8425\u8303\u56f4", "\u5730\u5740"))
     return True
+
+
+# ---------------------------------------------------------------- 评级关注事项
+
+_CONCERN_HEADING_RE = re.compile(r"^(?:[关關]\s*注|评级关注|关注事项)$")
+_CONCERN_STOP_PREFIXES = (
+    "评级展望", "可能引致评级", "评级模型", "评级方法", "附件", "附录",
+    "特此公告", "评级结论", "正面", "优势", "基本情况",
+)
+
+
+def rating_concerns_from_text(text: str) -> list[str]:
+    """从评级报告的「关注」段抽条目（联合资信式：标题行 + 项目符号段落）。
+
+    要求「关注」独占一行作为起点；正文里"需对…保持关注"之类的句子不会开启段落
+    （它们出现在条目内部，不在标题位）。到「评级展望/可能引致评级/附件」等标题为止。
+
+    条目边界用**行首项目符号**（``\\uf06e``/●/•/■，PDF 里 Wingdings 符号会保留）：
+    中邮 p5 每条的末行都折到下一行（"…需对公" / "司流动性管理保持关注。"），按行拆会
+    把一条关注劈成两条；没有符号的极端版式才退化为逐行。
+    """
+    lines: list[str] = []
+    active = False
+    for line in _heading_lines_for_fact_support(text):
+        compact = re.sub(r"\s+", "", line)
+        if not compact:
+            continue
+        if _CONCERN_HEADING_RE.match(compact):
+            active = True
+            continue
+        if not active:
+            continue
+        if any(compact.startswith(prefix) for prefix in _CONCERN_STOP_PREFIXES):
+            break
+        if re.fullmatch(r"[第\d\s|｜页/]+", compact):
+            continue
+        lines.append(compact)
+    bullets = ("\uf06e", "●", "•", "·", "■")
+    if any(line.startswith(bullets) for line in lines):
+        items: list[str] = []
+        for line in lines:
+            if line.startswith(bullets):
+                items.append(line.lstrip("\uf06e●•·■ "))
+            elif items:
+                items[-1] += line          # 折行续接上一条（短行"响。"也必须接上）
+            elif len(line) >= 8:
+                items.append(line)
+        return items
+    return [line for line in lines if len(line) >= 8]
+
+
+def rating_concerns_from_tables(project_id: str) -> list[tuple[str, int]]:
+    """从「调级因素」表的「关 注」板块抽条目（中诚信式），返回 (事项, 页码)。
+
+    表格把一条关注拆成多行（实测北投：条目首行带 ``\\uf06e`` 项目符号、续行不带），
+    因此以项目符号作条目边界、无符号行续接到上一条。
+    """
+    from .database import rows
+    from .table_store import load_tables
+
+    rating_documents = {
+        str(item["id"]) for item in rows(
+            "SELECT id FROM documents WHERE project_id=? AND document_role='rating_report'",
+            (project_id,),
+        )
+    }
+    if not rating_documents:
+        return []
+    for table in load_tables(project_id):
+        if table.document_id not in rating_documents:
+            continue
+        if not re.search(r"调级|调整因素|评级关注", table.caption or ""):
+            continue
+        items: list[str] = []
+        active = False
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row if cell.text.strip()]
+            if not cells:
+                continue
+            joined = re.sub(r"\s+", "", " ".join(cells))
+            if joined in {"关注", "关注事项"}:
+                active = True
+                continue
+            if joined in {"正面", "优势"}:
+                active = False
+                continue
+            if not active:
+                continue
+            text = cells[-1]
+            if text.startswith(("\uf06e", "●", "•", "·", "■")):
+                items.append(text.lstrip("\uf06e●•·■ "))
+            elif items:
+                items[-1] += text
+            else:
+                items.append(text)
+        if items:
+            return [(item, table.page) for item in items]
+    return []
+
+
+def rating_concerns_fact(items: list[str], source_id: str) -> dict | None:
+    """把条目合并成一条 ``rating_concerns`` 事实（同键多值会进冲突组，故不逐条建）。"""
+    cleaned = [item.strip() for item in items if item and item.strip()]
+    if not cleaned:
+        return None
+    merged = "；".join(item[:120] for item in cleaned[:6])
+    return _fact_dict("rating_concerns", "", None, "", merged, merged, source_id, 0.8)
 
 
 def deterministic_extract(source_rows: list[dict], allowed_fact_keys: set[str] | None = None) -> list[dict]:

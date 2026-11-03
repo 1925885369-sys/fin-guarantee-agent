@@ -200,6 +200,12 @@ def test_project_report_prompt_overrides_are_persisted_and_reset():
             )
             assert preview.status_code == 200
             assert structured["goal"] in preview.json()["prompt"]
+            # 预览与生成同源：三级小节存在时，内容区块与行文顺序两句话已被小节契约替换，
+            # 否则用户会在「完整 Prompt」里看到生成时并不存在的重复内容。
+            preview_prompt = preview.json()["prompt"]
+            assert "必须保留以下内容区块" not in preview_prompt
+            assert "行文顺序" not in preview_prompt
+            assert "subsection_id" in preview_prompt
             structured_saved = client.patch(
                 f"/api/projects/{project_id}/report-prompts/financial",
                 headers=headers,

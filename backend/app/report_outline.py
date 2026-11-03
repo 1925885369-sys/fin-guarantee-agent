@@ -68,6 +68,23 @@ def _split_markdown_blocks(content: str) -> list[list[str]]:
     return blocks
 
 
+# 管道表的表头分隔行：``| --- | ---: |`` / ``|---|---|`` / ``| - | - |``。
+_PIPE_TABLE_DELIM_RE = re.compile(r"^\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?$")
+
+
+def _is_pipe_table(lines: list[str]) -> bool:
+    """是不是一个 Markdown 管道表（GFM）。
+
+    **不要求行尾也有 ``|``**：GFM 允许省略，模型也经常省略（``| 2025 | 81.34 | 43.36%``）。
+    旧判定要求首尾都有竖线，把这类合法表格降级成 paragraph —— 正文里只剩一堆竖线文本，
+    用户看到的就是"模型写了表但报告里没有表"（2026-10-27 排查）。
+    """
+    cells = [line.strip() for line in lines]
+    if len(cells) < 2 or not all(cell.startswith("|") for cell in cells):
+        return False
+    return bool(_PIPE_TABLE_DELIM_RE.match(cells[1]))
+
+
 def content_blocks(content: str) -> list[dict]:
     """把章内正文解析为带层级与编号的展示分块。
 
@@ -105,7 +122,7 @@ def content_blocks(content: str) -> list[dict]:
             blocks.append({"kind": "list", "ordered": True, "items": [_ORDERED_RE.sub("", line.lstrip()) for line in body]})
         elif all(line.lstrip().startswith(">") for line in body):
             blocks.append({"kind": "quote", "text": " ".join(line.lstrip()[1:].strip() for line in body)})
-        elif all(line.strip().startswith("|") and line.strip().endswith("|") for line in body):
+        elif _is_pipe_table(body):
             blocks.append({"kind": "table", "rows": [line.strip() for line in body]})
         else:
             blocks.append({"kind": "paragraph", "text": " ".join(line.strip() for line in body)})

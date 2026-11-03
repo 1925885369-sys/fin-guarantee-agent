@@ -1001,6 +1001,12 @@ function PromptConstraintGroup({ title, values }: { title: string; values: strin
   return <div className="prompt-constraint-group"><strong>{title}</strong><div>{values.map((value) => <span key={value}>{value}</span>)}</div></div>;
 }
 
+// 只读风控约束的空兜底：章节缺 constraints 时三层仍渲染标题而不崩。
+const EMPTY_PROMPT_CONSTRAINTS: PromptConstraints = { required_inputs: [], input_contract: {}, preserve_blocks: [], forbidden: [], output_contract: {}, global_rules: {} };
+// 移动端章节下拉里「全局指令」的哨兵值。**必须排在所有 optgroup 之后**：
+// e2e 用 selectOption({ index }) 按位置取章节，新增项只能追加在末尾。
+const DIRECTIVE_OPTION_VALUE = "__directive__";
+
 function PromptWorkspace({ project, token }: { project: Project; token?: string }) {
   const [prompts, setPrompts] = useState<ReportPrompt[]>([]);
   // 草稿按「范围:章节」双键缓存：切换范围或章节再切回来，未保存的编辑都在
@@ -1019,6 +1025,10 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [constraintModalOpen, setConstraintModalOpen] = useState(false);
+  // 只读风控约束弹窗按章节切换查看（必须保留/禁止事项/证据契约逐章不同）。
+  const [constraintChapterKey, setConstraintChapterKey] = useState("");
+  // 三级小节：默认收起成一行，展开才编辑。切章保持用户选择，不抢回。
+  const [outlineOpen, setOutlineOpen] = useState(false);
   // 业务生成设置要能"按具体文件缩小范围"，需要本项目的已解析材料清单。
   // 载入失败**不阻断** Prompt 编辑：文件选择器降级为空列表并给一句说明即可，
   // 不能因为材料接口抖一下就让整页不能保存配置。
@@ -1038,6 +1048,19 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const [directiveLoading, setDirectiveLoading] = useState(true);
   const [directiveSaving, setDirectiveSaving] = useState(false);
 
+  // 桌面端右侧内容区是独立滚动容器：切章后用容器 scrollTop 回顶。
+  // 不用 scrollIntoView —— html{scroll-behavior:smooth} 会连带卷动整页，且动画不可测。
+  const detailRef = useRef<HTMLElement | null>(null);
+  const resetDetailScroll = useCallback(() => {
+    const node = detailRef.current;
+    if (!node) return;
+    node.scrollTop = 0;
+    if (node.scrollHeight > node.clientHeight + 1) return;
+    // ≤780：右栏不独立滚动，改为把详情区顶到 topbar(56) 下方（直接赋值避免 smooth）。
+    const top = Math.max(0, node.getBoundingClientRect().top + window.scrollY - 64);
+    (document.scrollingElement || document.documentElement).scrollTop = top;
+  }, []);
+
   // 当前范围的目录基准与草稿（均按范围缓存，切换范围互不影响）。
   const outlineDraft = outlineDrafts[outlineScope];
   const outlineState = outlineStates[outlineScope];
@@ -1048,6 +1071,8 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const load = useCallback(async () => {
     setLoading(true); setOutlineLoading(true);
     setLoadError(""); setOutlineError("");
+    // 切项目 / 切目录范围会重跑 load：弹窗关闭并清空章节键，避免残留上一项目的约束内容。
+    setConstraintModalOpen(false); setConstraintChapterKey("");
     // 目录加载失败只影响目录区、不崩整页：两块并行拉取，各自落到自己的错误位。
     const [promptResult, outlineResult] = await Promise.allSettled([
       api.reportPrompts(project.id, token),
@@ -1301,7 +1326,7 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
     finally { setDirectiveSaving(false); }
   };
 
-  const constraints: PromptConstraints = active?.constraints || { required_inputs: [], input_contract: {}, preserve_blocks: [], forbidden: [], output_contract: {}, global_rules: {} };
+  const constraints: PromptConstraints = active?.constraints || EMPTY_PROMPT_CONSTRAINTS;
   useEffect(() => {
     let cancelled = false;
     api.inventory(project.id, token)
@@ -1317,6 +1342,19 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
   const draftCalculationMode = activeDraft?.calculation_mode || "system_only";
   const draftRecommendationMode = activeDraft?.recommendation_mode || "off";
   const chapterSourceKinds = constraints.input_contract.source_kinds || [];
+  // 只读风控约束弹窗（入口在「全局指令」页）：按 chapter_key 从 prompts 取约束与草稿。
+  // 约束逐章不同（preserve_blocks/forbidden/证据契约），所以弹窗内提供章节切换，不合并、不隐藏。
+  const modalPrompt = prompts.find((item) => item.chapter_key === constraintChapterKey) || null;
+  const modalConstraints: PromptConstraints = modalPrompt?.constraints || EMPTY_PROMPT_CONSTRAINTS;
+  const modalDraft: PromptEditableConfig | null = modalPrompt ? (drafts[draftKey(modalPrompt.chapter_key)] || modalPrompt.editable_config) : null;
+  const modalScope = modalDraft?.material_scope || emptyScope;
+  const modalPeriod = modalDraft?.analysis_period || { periods: [] as string[], mode: "materials" as "materials" | "configured" };
+  const modalCalculationMode = modalDraft?.calculation_mode || "system_only";
+  const modalRecommendationMode = modalDraft?.recommendation_mode || "off";
+  const openConstraintModal = () => {
+    setConstraintChapterKey(active?.chapter_key || prompts[0]?.chapter_key || "");
+    setConstraintModalOpen(true);
+  };
   const toggleScopeValue = (field: "source_kinds" | "material_roles" | "document_ids", value: string) => {
     if (!active) return;
     const current = draftScope[field] || [];
@@ -1418,6 +1456,8 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
           <textarea className="prompt-directive-input" rows={14} value={directiveDraft} disabled={!directiveEditable || directiveSaving} onChange={(event) => setDirectiveDraft(event.target.value)} placeholder="例如：正文不得出现「资料01」这类系统编号；统一用「发行文件」「外部信用评价文件」指代材料。" />
         </div>
       </section>
+      {/* 只读风控约束：入口只有这一处（部署级），章节视图不再重复展示。 */}
+      <section className="prompt-constraints-summary"><div><ShieldCheck size={16} /><div><strong>只读风控约束</strong><span>全章生效：固定事实底线与全局规则由系统强制校验；逐章差异（必须保留、禁止事项、证据契约）可在「查看详情」中切换章节查看。</span></div></div><button className="secondary-button small" type="button" disabled={!prompts.length} onClick={openConstraintModal}>查看详情</button></section>
       <footer className="prompt-action-bar"><span>{directiveDirty ? "存在未保存的修改" : directive?.content ? "已保存" : "尚未设置全局指令"}</span><div>
         {directive?.content && <button className="text-button" type="button" disabled={!directiveEditable || directiveSaving} onClick={resetDirective}>清空</button>}
         <button className="primary-button" type="button" disabled={!directiveEditable || !directiveDirty || directiveSaving} onClick={saveDirective}>{directiveSaving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存全局指令</button>
@@ -1455,15 +1495,42 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
       <button className="primary-button" type="button" disabled={!outlineDirty || outlineReadOnly || savingOutline} onClick={saveOutline}>{savingOutline ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存目录</button>
     </div>
   </footer> : null;
+  // 三级小节 + 目录保存条：属于章节内容区，紧随章节标题、位于配置 Tab 之上。
+  // 全局指令不属于任何章，指令视图不渲染本块（同时修掉旧版"幽灵小节区"）。
+  const hasOutlineTop = Boolean(activeOutlineChapter || outlineDraft || outlineLoading);
+  const outlineTopBlock = hasOutlineTop ? <div className="prompt-outline-top">
+    {outlineLoading && !outlineDraft
+      ? <div className="outline-loading"><LoaderCircle className="spin" size={16} />正在载入报告目录</div>
+      : <>
+        {/* 三级小节默认收起：只占一行，把首屏让给配置卡片与完整 Prompt；
+            展开状态是用户主动选择，切章不重置。 */}
+        <div className="prompt-outline-summary">
+          <button className="prompt-outline-toggle" type="button" aria-expanded={outlineOpen} aria-controls="prompt-outline-body" onClick={() => setOutlineOpen((value) => !value)}>
+            <ChevronDown size={15} />
+            <strong>三级小节</strong>
+            <span className="prompt-outline-summary-count">{activeOutlineChapter?.subsections.length ?? 0} 个</span>
+            {outlineDirty && <span className="prompt-outline-summary-dirty">目录存在未保存的修改</span>}
+          </button>
+          <div className="prompt-outline-summary-actions">
+            {outlineDirty && <button className="primary-button small" type="button" disabled={outlineReadOnly || savingOutline} onClick={saveOutline}>{savingOutline ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存目录</button>}
+          </div>
+        </div>
+        {outlineOpen && <div className="prompt-outline-body" id="prompt-outline-body">
+          {subsectionEditor}
+          {outlineActionBar}
+        </div>}
+      </>}
+  </div> : null;
   return <div className="view-content prompt-workspace"><div className="page-heading"><div><span className="eyebrow">报告交付配置</span><div className="page-title-row"><h1>报告 Prompt</h1><HelpTip label="报告 Prompt 页面说明">业务写作要求可编辑；证据范围、引用约束和禁止事项固定由系统执行，不随章节配置改变。</HelpTip></div></div><div className="prompt-summary"><FileCog size={16} /><span>{prompts.filter((item) => item.overridden).length} 个项目自定义</span></div></div>
     {message && <div className="inline-success prompt-feedback"><Check size={15} />{message}</div>}
     {loadError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{loadError}<button className="icon-button" onClick={() => setLoadError("")} title="关闭"><X size={14} /></button></div>}
     {outlineError && <div className="inline-error prompt-feedback"><AlertTriangle size={15} />{outlineError}<button className="icon-button" onClick={() => setOutlineError("")} title="关闭"><X size={14} /></button></div>}
     {loading || !navChapters.length ? <div className="loading-page prompt-loading"><LoaderCircle className="spin" size={24} />正在载入章节 Prompt</div> : <section className="prompt-workbench">
-      <aside className="prompt-chapter-nav" aria-label="报告章节"><div className="prompt-chapter-nav-head"><strong>报告章节</strong><span>{navChapters.length}</span></div><button className={`prompt-chapter-option prompt-directive-entry ${showDirective ? "active" : ""}`} aria-current={showDirective ? "page" : undefined} onClick={() => { setShowDirective(true); setTab("structured"); }}><span><strong>全局指令</strong></span></button>{navParts.map((part) => <div className="prompt-part-group" key={part.partId}><div className="prompt-part-label">{part.partTitle}</div>{part.chapters.map((chapter) => { const promptItem = prompts.find((item) => item.chapter_key === (chapter.templateKey || chapter.chapterId)); const dirty = chapter.outlineDirty || (promptItem ? JSON.stringify(drafts[promptItem.chapter_key] || promptItem.editable_config) !== JSON.stringify(promptItem.editable_config) : false); const canEditChapter = Boolean(outlineDraft && !outlineReadOnly); return <div className="outline-nav-row" key={chapter.chapterId}>{renameChapterId === chapter.chapterId ? <div className="outline-nav-rename"><input value={renameValue} autoFocus maxLength={60} aria-label="章节名称" onChange={(event) => setRenameValue(event.target.value.replace(/[\r\n]+/g, " "))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitRename(); } else if (event.key === "Escape") { setRenameChapterId(""); } }} /><button className="icon-button compact" type="button" aria-label="确认改名" title="确认" onClick={commitRename}><Check size={14} /></button><button className="icon-button compact" type="button" aria-label="取消改名" title="取消" onClick={() => setRenameChapterId("")}><X size={14} /></button></div> : <><button className={`prompt-chapter-option ${chapter.chapterId === activeChapterId ? "active" : ""}`} aria-current={chapter.chapterId === activeChapterId ? "page" : undefined} onClick={() => { setShowDirective(false); setActiveChapterId(chapter.chapterId); setTab("structured"); }}><span className="prompt-index">{chapter.index}、</span><span><strong>{chapter.title}</strong></span>{dirty && <i title="存在未保存修改" />}</button>{canEditChapter && <div className="outline-nav-actions"><button className="icon-button compact" type="button" aria-label="重命名章节" title="重命名" onClick={() => beginRename(chapter)}><Pencil size={13} /></button><button className="icon-button compact" type="button" aria-label="上移章节" title="上移" disabled={chapter.index <= 1} onClick={() => moveChapter(part.partId, chapter.chapterId, -1)}><ArrowUp size={13} /></button><button className="icon-button compact" type="button" aria-label="下移章节" title="下移" disabled={chapter.index >= part.chapters.length} onClick={() => moveChapter(part.partId, chapter.chapterId, 1)}><ArrowDown size={13} /></button><button className="icon-button compact danger" type="button" aria-label="删除章节" title="删除" onClick={() => confirmRemoveChapter(chapter)}><Trash2 size={13} /></button></div>}</>}</div>; })}{outlineDraft && !outlineReadOnly && <button className="outline-add-chapter" type="button" disabled={totalChapters >= 60} onClick={() => addChapter(part.partId)}><FolderPlus size={14} />新增章节</button>}</div>)}</aside>
-      <main className="prompt-detail"><div className="prompt-mobile-picker"><label htmlFor="prompt-chapter-picker">报告章节</label><select id="prompt-chapter-picker" value={activeChapterId} onChange={(event) => { setActiveChapterId(event.target.value); setTab("structured"); }}>{navParts.map((part) => <optgroup label={part.partTitle} key={part.partId}>{part.chapters.map((chapter) => <option value={chapter.chapterId} key={chapter.chapterId}>{chapter.index}、{chapter.title}</option>)}</optgroup>)}</select></div>
+      <aside className="prompt-chapter-nav" aria-label="报告章节"><div className="prompt-chapter-nav-head"><strong>报告章节</strong><span>{navChapters.length}</span></div><button className={`prompt-chapter-option prompt-directive-entry ${showDirective ? "active" : ""}`} aria-current={showDirective ? "page" : undefined} onClick={() => { setShowDirective(true); setTab("structured"); resetDetailScroll(); }}><span><strong>全局指令</strong></span></button>{navParts.map((part) => <div className="prompt-part-group" key={part.partId}><div className="prompt-part-label">{part.partTitle}</div>{part.chapters.map((chapter) => { const promptItem = prompts.find((item) => item.chapter_key === (chapter.templateKey || chapter.chapterId)); const dirty = chapter.outlineDirty || (promptItem ? JSON.stringify(drafts[promptItem.chapter_key] || promptItem.editable_config) !== JSON.stringify(promptItem.editable_config) : false); const canEditChapter = Boolean(outlineDraft && !outlineReadOnly); return <div className="outline-nav-row" key={chapter.chapterId}>{renameChapterId === chapter.chapterId ? <div className="outline-nav-rename"><input value={renameValue} autoFocus maxLength={60} aria-label="章节名称" onChange={(event) => setRenameValue(event.target.value.replace(/[\r\n]+/g, " "))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitRename(); } else if (event.key === "Escape") { setRenameChapterId(""); } }} /><button className="icon-button compact" type="button" aria-label="确认改名" title="确认" onClick={commitRename}><Check size={14} /></button><button className="icon-button compact" type="button" aria-label="取消改名" title="取消" onClick={() => setRenameChapterId("")}><X size={14} /></button></div> : <><button className={`prompt-chapter-option ${!showDirective && chapter.chapterId === activeChapterId ? "active" : ""}`} aria-current={!showDirective && chapter.chapterId === activeChapterId ? "page" : undefined} onClick={() => { setShowDirective(false); setActiveChapterId(chapter.chapterId); setTab("structured"); resetDetailScroll(); }}><span className="prompt-index">{chapter.index}、</span><span><strong>{chapter.title}</strong></span>{dirty && <i title="存在未保存修改" />}</button>{canEditChapter && <div className="outline-nav-actions"><button className="icon-button compact" type="button" aria-label="重命名章节" title="重命名" onClick={() => beginRename(chapter)}><Pencil size={13} /></button><button className="icon-button compact" type="button" aria-label="上移章节" title="上移" disabled={chapter.index <= 1} onClick={() => moveChapter(part.partId, chapter.chapterId, -1)}><ArrowUp size={13} /></button><button className="icon-button compact" type="button" aria-label="下移章节" title="下移" disabled={chapter.index >= part.chapters.length} onClick={() => moveChapter(part.partId, chapter.chapterId, 1)}><ArrowDown size={13} /></button><button className="icon-button compact danger" type="button" aria-label="删除章节" title="删除" onClick={() => confirmRemoveChapter(chapter)}><Trash2 size={13} /></button></div>}</>}</div>; })}{outlineDraft && !outlineReadOnly && <button className="outline-add-chapter" type="button" disabled={totalChapters >= 60} onClick={() => addChapter(part.partId)}><FolderPlus size={14} />新增章节</button>}</div>)}</aside>
+      <main className="prompt-detail" ref={detailRef}><div className="prompt-mobile-picker"><label htmlFor="prompt-chapter-picker">报告章节</label><select id="prompt-chapter-picker" value={showDirective ? DIRECTIVE_OPTION_VALUE : activeChapterId} onChange={(event) => { const next = event.target.value; if (next === DIRECTIVE_OPTION_VALUE) { setShowDirective(true); setTab("structured"); resetDetailScroll(); return; } setShowDirective(false); setActiveChapterId(next); setTab("structured"); resetDetailScroll(); }}>{navParts.map((part) => <optgroup label={part.partTitle} key={part.partId}>{part.chapters.map((chapter) => <option value={chapter.chapterId} key={chapter.chapterId}>{chapter.index}、{chapter.title}</option>)}</optgroup>)}<option value={DIRECTIVE_OPTION_VALUE}>全局指令（全章生效）</option></select></div>
         {showDirective ? directivePanel : active && activeDraft ? <>
-        <header className="prompt-detail-head"><div><span>{active.part || "报告章节"} · 第 {activeChapterNumber + 1} 章</span><h2>{active.title}</h2></div><div className="prompt-detail-badges"><span className={active.llm ? "llm" : "deterministic"}>{active.llm ? "模型生成" : "确定性生成"}</span><PromptGenerationHelp llm={active.llm} />{!activeNavChapter?.templateKey && <span className="custom">自定义章节</span>}<span className={active.source === "system" ? "default" : "custom"}>{sourceText(active)}</span>{active.migration_mode !== "structured" && <span className="legacy">历史配置已迁移</span>}</div></header>
+        <header className="prompt-detail-head"><div><span>{active.part || "报告章节"} · 第 {activeChapterNumber + 1} 章</span><h2>{active.title}</h2></div><div className="prompt-detail-badges"><span className={active.llm ? "llm" : "deterministic"}>{active.llm ? "模型生成" : "确定性生成"}</span><PromptGenerationHelp llm={active.llm} />{!activeNavChapter?.templateKey && <span className="custom">自定义章节</span>}<span className={active.source === "system" ? "default" : "custom"}>{sourceText(active)}</span>{active.migration_mode !== "structured" && <span className="legacy">历史配置已迁移</span>}</div>        </header>
+        {outlineTopBlock}
         <div className="prompt-tabs" role="tablist"><button className={tab === "structured" ? "active" : ""} role="tab" aria-selected={tab === "structured"} onClick={() => setTab("structured")}><SlidersHorizontal size={16} />结构化配置</button><button className={tab === "preview" ? "active" : ""} role="tab" aria-selected={tab === "preview"} onClick={() => setTab("preview")}><Eye size={16} />完整 Prompt</button></div>
         {tab === "structured" ? <div className="prompt-structured"><fieldset disabled={!canEdit}>
           <section className="prompt-card"><div className="prompt-card-head"><strong>写作视角</strong></div><div className="prompt-field-grid"><section className="prompt-field"><label htmlFor="prompt-role">角色</label><small>定义本章的业务写作视角</small><input id="prompt-role" value={activeDraft.role} onChange={(event) => updateDraft(active.chapter_key, { role: event.target.value })} /></section><section className="prompt-field"><label htmlFor="prompt-tone">行文语气</label><small>在正式尽调语言范围内调整表达</small><input id="prompt-tone" value={activeDraft.narrative_contract.tone} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { tone: event.target.value } })} /></section></div></section>
@@ -1477,8 +1544,8 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
             <section className="prompt-field"><div className="prompt-field-head"><div><label>分析期间</label><small>跟随材料实际期间，或只分析指定年度</small></div></div><div className="prompt-narrative-grid"><label>期间来源<select value={draftPeriod.mode} onChange={(event) => updateDraft(active.chapter_key, { analysis_period: { ...draftPeriod, mode: event.target.value as "materials" | "configured" } })}><option value="materials">跟随材料实际期间</option><option value="configured">只分析指定年度</option></select></label><label>指定年度<input value={(draftPeriod.periods || []).join("、")} placeholder="例如：2023、2024、2025" onChange={(event) => updateDraft(active.chapter_key, { analysis_period: { ...draftPeriod, periods: event.target.value.split(/[、,，\s]+/).map((item) => item.trim()).filter(Boolean).slice(0, 8) } })} /></label></div></section>
           </div></section>
           <section className="prompt-card"><div className="prompt-card-head"><label htmlFor="prompt-goal">章节目标</label><small>说明本章需要回答的业务问题</small></div><textarea id="prompt-goal" rows={3} value={activeDraft.goal} onChange={(event) => updateDraft(active.chapter_key, { goal: event.target.value })} /></section>
-          <details className="prompt-card prompt-collapsible"><summary><div><strong>内容要求</strong></div><span className="prompt-card-brief">必需 {activeDraft.required_sections.length} 项 · 规则 {activeDraft.rules.length} 项</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><PromptStringListEditor label="必需报告内容" hint="生成内容必须覆盖这些业务区块" items={activeDraft.required_sections} disabled={!canEdit} placeholder="例如：偿债来源" onChange={(required_sections) => updateDraft(active.chapter_key, { required_sections })} /><PromptStringListEditor label="写作规则" hint="约束本章的表述方式和分析重点" items={activeDraft.rules} disabled={!canEdit} placeholder="例如：明确披露口径与待核验事项" onChange={(rules) => updateDraft(active.chapter_key, { rules })} /></div></details>
-          <details className="prompt-card prompt-collapsible"><summary><div><strong>行文组织</strong></div><span className="prompt-card-brief">顺序 {activeDraft.narrative_contract.paragraph_order.length} 项</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><PromptStringListEditor label="行文顺序" hint="按顺序组织自然段" items={activeDraft.narrative_contract.paragraph_order} disabled={!canEdit} placeholder="例如：财务概览" onChange={(paragraph_order) => updateDraft(active.chapter_key, { narrative_contract: { paragraph_order } })} /><section className="prompt-field"><div className="prompt-field-head"><div><label>篇幅</label><small>控制分析正文长度，不改变证据、引用与结论边界</small></div></div><div className="prompt-narrative-grid"><label>目标最小字符<input type="number" min="0" value={activeDraft.narrative_contract.preferred_min_chars} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { preferred_min_chars: Number(event.target.value) } })} /></label><label>目标最大字符<input type="number" min="200" value={activeDraft.narrative_contract.preferred_max_chars} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { preferred_max_chars: Number(event.target.value) } })} /></label><label>列表使用<select value={activeDraft.narrative_contract.list_mode} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { list_mode: event.target.value } })}><option value="allowed">允许</option><option value="limited">仅限必要事项</option><option value="prohibited">不使用列表</option></select></label></div></section>
+          <details className="prompt-card prompt-collapsible"><summary><div><strong>写作规则</strong></div><span className="prompt-card-brief">规则 {activeDraft.rules.length} 项</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><p className="prompt-derived-hint"><Info size={15} /><span>报告内容区块与顺序由「三级小节」统一维护（{activeOutlineChapter?.subsections.length ?? 0} 个），此处不再重复编辑。</span><button className="text-button" type="button" onClick={() => { setOutlineOpen(true); resetDetailScroll(); }}>打开三级小节</button></p><PromptStringListEditor label="写作规则" hint="约束本章的表述方式和分析重点" items={activeDraft.rules} disabled={!canEdit} placeholder="例如：明确披露口径与待核验事项" onChange={(rules) => updateDraft(active.chapter_key, { rules })} /></div></details>
+          <details className="prompt-card prompt-collapsible"><summary><div><strong>篇幅与排版</strong></div><span className="prompt-card-brief">{activeDraft.narrative_contract.preferred_min_chars}–{activeDraft.narrative_contract.preferred_max_chars} 字符</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><p className="prompt-derived-hint"><Info size={15} /><span>段落顺序与分段由「三级小节」维护；这里只控制篇幅与列表用法。</span></p><section className="prompt-field"><div className="prompt-field-head"><div><label>篇幅</label><small>控制分析正文长度，不改变证据、引用与结论边界</small></div></div><div className="prompt-narrative-grid"><label>目标最小字符<input type="number" min="0" value={activeDraft.narrative_contract.preferred_min_chars} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { preferred_min_chars: Number(event.target.value) } })} /></label><label>目标最大字符<input type="number" min="200" value={activeDraft.narrative_contract.preferred_max_chars} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { preferred_max_chars: Number(event.target.value) } })} /></label><label>列表使用<select value={activeDraft.narrative_contract.list_mode} onChange={(event) => updateDraft(active.chapter_key, { narrative_contract: { list_mode: event.target.value } })}><option value="allowed">允许</option><option value="limited">仅限必要事项</option><option value="prohibited">不使用列表</option></select></label></div></section>
           <div className="prompt-length-policy">
             <span>目标篇幅：{draftPreferredMin}～{draftPreferredMax} 字符</span>
             <span>只统计分析正文：系统表格、冲突披露与来源边界块不计入。</span>
@@ -1489,26 +1556,23 @@ function PromptWorkspace({ project, token }: { project: Project; token?: string 
           <details className="prompt-card prompt-collapsible prompt-extra"><summary><div><strong>补充业务要求</strong><HelpTip label="补充业务要求说明">用于保留历史整段 Prompt，或录入本章额外的写作要求。</HelpTip></div><span className="prompt-card-brief">{activeDraft.additional_requirements.trim() ? `已填写 ${activeDraft.additional_requirements.trim().length} 字` : "未填写"}</span><ChevronDown size={15} /></summary><div className="prompt-card-body"><textarea id="prompt-extra" aria-label="补充业务要求" rows={8} value={activeDraft.additional_requirements} onChange={(event) => updateDraft(active.chapter_key, { additional_requirements: event.target.value })} placeholder="输入补充要求；系统仍会执行下方只读风控约束。" /></div></details>
         </fieldset>
           {!active.llm && <div className="deterministic-prompt-note"><ShieldCheck size={17} /><div><strong>本章配置只读</strong><p>可查看章节配置全文，不能修改业务写作要求。</p></div></div>}{readOnly && active.llm && <p className="prompt-readonly">{scopeEditReason || "当前环境不允许修改本项目 Prompt 配置。"}</p>}
-          <section className="prompt-constraints-summary"><div><ShieldCheck size={16} /><div><strong>只读风控约束</strong><HelpTip label="只读风控约束说明">固定事实底线（不得伪造来源与核验结果、不得把建议写成已确认事实）由系统强制校验；写作要求、结构与篇幅可在上方编辑，文风偏差只提示不退回。</HelpTip></div></div><button className="secondary-button small" type="button" onClick={() => setConstraintModalOpen(true)}>查看详情</button></section>
           {active.llm && !readOnly && <footer className="prompt-action-bar"><span>{isChanged ? "存在未保存的修改" : effectiveUpdatedAt ? `当前配置已保存 · 最近更新：${formatPromptUpdatedAt(effectiveUpdatedAt)}` : "当前使用系统默认配置"}</span><div>{active.overridden && <button className="text-button" disabled={saving === active.chapter_key} onClick={reset}>撤销项目覆盖</button>}<button className="primary-button" disabled={!isChanged || saving === active.chapter_key} onClick={save}>{saving === active.chapter_key ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}保存配置</button></div></footer>}
         </div> : <div className="prompt-preview"><div><strong>{active.llm ? "最终发送给模型的指令" : "章节配置全文"}</strong><span>{active.llm ? "由服务端使用当前草稿实时编译" : "由系统固定规则生成"}</span></div>{active.llm ? previewLoading ? <div className="prompt-preview-loading"><LoaderCircle className="spin" size={20} />正在编译完整 Prompt</div> : previewError ? <div className="inline-error"><AlertTriangle size={15} />{previewError}</div> : <textarea aria-label={`${active.title} 完整 Prompt`} value={previewPrompt || active.prompt} readOnly /> : <textarea aria-label={`${active.title} 章节配置全文`} value={active.prompt} readOnly />}</div>}
         </> : <>
-        <header className="prompt-detail-head"><div><span>{active?.part || "报告目录"}</span><h2>{activeNavChapter?.title || "报告目录"}</h2></div><div className="prompt-detail-badges"><span className="llm">模型生成</span><span className="custom">自定义章节</span></div></header>
+        <header className="prompt-detail-head"><div><span>{active?.part || "报告目录"}</span><h2>{activeNavChapter?.title || "报告目录"}</h2></div><div className="prompt-detail-badges"><span className="llm">模型生成</span><span className="custom">自定义章节</span></div>        </header>
+        {outlineTopBlock}
         {outlineScopeSwitch}
         <p className="prompt-readonly">该章节尚无可用 Prompt 配置；请先保存报告目录，或等待服务端同步后重试。</p>
         </>}
-        {outlineLoading && !outlineDraft && <div className="outline-loading"><LoaderCircle className="spin" size={16} />正在载入报告目录</div>}
-        {subsectionEditor}
-        {outlineActionBar}
       </main>
     </section>}
-    {constraintModalOpen && <div className="prompt-constraint-modal-backdrop" role="presentation" onClick={() => setConstraintModalOpen(false)}><section className="prompt-constraint-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-constraint-modal-title" onClick={(event) => event.stopPropagation()}><header className="prompt-constraint-modal-head"><div><strong id="prompt-constraint-modal-title">只读风控约束</strong><span>不可编辑 · 证据与禁止事项由系统校验</span></div><button className="icon-button" type="button" aria-label="关闭风控约束详情" title="关闭" onClick={() => setConstraintModalOpen(false)}><X size={16} /></button></header><div className="prompt-constraint-modal-body"><div className="prompt-constraints-body">
+    {constraintModalOpen && <div className="prompt-constraint-modal-backdrop" role="presentation" onClick={() => setConstraintModalOpen(false)}><section className="prompt-constraint-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-constraint-modal-title" onClick={(event) => event.stopPropagation()}><header className="prompt-constraint-modal-head"><div><strong id="prompt-constraint-modal-title">只读风控约束</strong><span>不可编辑 · 证据与禁止事项由系统校验</span></div><button className="icon-button" type="button" aria-label="关闭风控约束详情" title="关闭" onClick={() => setConstraintModalOpen(false)}><X size={16} /></button></header><div className="prompt-constraint-modal-picker"><label htmlFor="prompt-constraint-chapter">查看章节</label><select id="prompt-constraint-chapter" value={modalPrompt?.chapter_key || ""} onChange={(event) => setConstraintChapterKey(event.target.value)}>{prompts.map((item) => <option key={item.chapter_key} value={item.chapter_key}>{item.part ? `${item.part} · ${item.title}` : item.title}</option>)}</select></div><div className="prompt-constraint-modal-body"><div className="prompt-constraints-body">
             {/* 三层拆分（《风控约束分层》§四 line 57）：① 系统强制、② 可在业务生成设置卡片编辑、
                 ③ 证据与校验诊断。分组只改呈现，**不合并也不隐藏**任何一条约束——
                 隐藏约束等于让人在不知情的情况下踩线。 */}
-            <div className="prompt-layer prompt-layer-fixed"><h3>① 固定事实底线<span>系统强制校验，不可编辑</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="必须保留" values={constraints.preserve_blocks} /><PromptConstraintGroup title="禁止事项" values={constraints.forbidden} /></div><div className="prompt-constraint-group"><strong>承保建议</strong><p>允许输出承保、拒保、担保额度与担保费率的「建议」，但必须写明为待人工复核的提议、说明依据与前提条件；不得写成已核定、已批准或已生效的决定。投资建议仍不允许。</p></div><div className="prompt-constraint-group global-rules"><strong>全局规则</strong>{Object.entries(constraints.global_rules).map(([key, value]) => <p key={key}>{value}</p>)}</div></div>
-            <div className="prompt-layer prompt-layer-business"><h3>② 业务生成设置<span>在上方「业务生成设置」卡片中编辑</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="本章契约允许的材料类型" values={constraints.input_contract.source_kinds || []} /><div className="prompt-constraint-group"><strong>当前生效的业务规则</strong><p>材料范围：{draftScope.source_kinds.length ? `仅 ${draftScope.source_kinds.join("、")}` : "不限类型"}{draftScope.document_ids.length ? ` · 指定 ${draftScope.document_ids.length} 份文件` : ""}</p><p>计算模式：{draftCalculationMode === "model" ? "允许自主计算（结果由系统复算）" : draftCalculationMode === "off" ? "关闭（只引用系统预计算结果）" : "仅系统预计算"}</p><p>建议模式：{draftRecommendationMode === "structured" ? "结构化建议（需逐条人工确认）" : draftRecommendationMode === "qualitative" ? "仅定性建议" : "不输出建议"}</p><p>分析期间：{draftPeriod.mode === "configured" && draftPeriod.periods.length ? `仅 ${draftPeriod.periods.join("、")}` : "跟随材料实际期间"}</p></div></div></div>
-            <div className="prompt-layer prompt-layer-diagnostics"><h3>③ 证据与校验诊断<span>系统实际执行的输入、引用与错误口径</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="输入字段" values={[...(constraints.input_contract.fact_keys || []), ...(constraints.input_contract.metric_keys || []), ...(constraints.input_contract.rule_keys || [])]} /><PromptConstraintGroup title="建议用语（写作提示，不作为退回理由）" values={[...(constraints.output_contract.required_phrases || []), ...(constraints.output_contract.required_missing_markers || [])]} /><div className="prompt-constraint-group"><strong>引用规则</strong><p>{Number(constraints.output_contract.max_citations ?? 0) > 0 ? `最多 ${constraints.output_contract.max_citations} 条引用` : "不限条数：可引用本次实际提供的全部合法证据"} · 篇幅由本章 Prompt 的目标字符范围决定</p><p>来源、冲突与材料缺口边界由服务端按实际状态附加，正文只需在具体判断处说明，无需逐字复述固定声明。</p></div></div></div>
+            <div className="prompt-layer prompt-layer-fixed"><h3>① 固定事实底线<span>系统强制校验，不可编辑</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="必须保留" values={modalConstraints.preserve_blocks} /><PromptConstraintGroup title="禁止事项" values={modalConstraints.forbidden} /></div><div className="prompt-constraint-group"><strong>承保建议</strong><p>允许输出承保、拒保、担保额度与担保费率的「建议」，但必须写明为待人工复核的提议、说明依据与前提条件；不得写成已核定、已批准或已生效的决定。投资建议仍不允许。</p></div><div className="prompt-constraint-group global-rules"><strong>全局规则</strong>{Object.entries(modalConstraints.global_rules).map(([key, value]) => <p key={key}>{value}</p>)}</div></div>
+            <div className="prompt-layer prompt-layer-business"><h3>② 业务生成设置<span>在所属章节的「业务生成设置」卡片中编辑</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="本章契约允许的材料类型" values={modalConstraints.input_contract.source_kinds || []} /><div className="prompt-constraint-group"><strong>当前生效的业务规则</strong><p>材料范围：{modalScope.source_kinds.length ? `仅 ${modalScope.source_kinds.join("、")}` : "不限类型"}{modalScope.document_ids.length ? ` · 指定 ${modalScope.document_ids.length} 份文件` : ""}</p><p>计算模式：{modalCalculationMode === "model" ? "允许自主计算（结果由系统复算）" : modalCalculationMode === "off" ? "关闭（只引用系统预计算结果）" : "仅系统预计算"}</p><p>建议模式：{modalRecommendationMode === "structured" ? "结构化建议（需逐条人工确认）" : modalRecommendationMode === "qualitative" ? "仅定性建议" : "不输出建议"}</p><p>分析期间：{modalPeriod.mode === "configured" && modalPeriod.periods.length ? `仅 ${modalPeriod.periods.join("、")}` : "跟随材料实际期间"}</p></div></div></div>
+            <div className="prompt-layer prompt-layer-diagnostics"><h3>③ 证据与校验诊断<span>系统实际执行的输入、引用与错误口径</span></h3><div className="prompt-layer-grid"><PromptConstraintGroup title="输入字段" values={[...(modalConstraints.input_contract.fact_keys || []), ...(modalConstraints.input_contract.metric_keys || []), ...(modalConstraints.input_contract.rule_keys || [])]} /><PromptConstraintGroup title="建议用语（写作提示，不作为退回理由）" values={[...(modalConstraints.output_contract.required_phrases || []), ...(modalConstraints.output_contract.required_missing_markers || [])]} /><div className="prompt-constraint-group"><strong>引用规则</strong><p>{Number(modalConstraints.output_contract.max_citations ?? 0) > 0 ? `最多 ${modalConstraints.output_contract.max_citations} 条引用` : "不限条数：可引用本次实际提供的全部合法证据"} · 篇幅由本章 Prompt 的目标字符范围决定</p><p>来源、冲突与材料缺口边界由服务端按实际状态附加，正文只需在具体判断处说明，无需逐字复述固定声明。</p></div></div></div>
           </div></div></section></div>}
   </div>;
 }

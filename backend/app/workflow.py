@@ -18,11 +18,12 @@ from . import recommendations as recommendation_rules
 from .chapter_prompts import chapter_uses_llm, load_chapter_config
 from .chapter_guard import (
     assess_chapter_length, build_chapter_context, fallback_reason_code, validate_chapter_output,
-    validation_diagnostics,
+    validation_diagnostics, _model_tables_allowed,
 )
 from .facts import (
     FACT_REGISTRY, FINANCIAL_FACT_KEYS, deterministic_extract, financial_scope_by_source,
     material_inventory, merge_facts, normalize_numeric, normalize_period, replace_extracted_facts,
+    rating_concerns_fact, rating_concerns_from_tables, rating_concerns_from_text,
     source_supports_fact, source_supports_fact_value,
 )
 from .config import settings
@@ -651,7 +652,13 @@ def _deterministic_fact_is_issuer_safe(fact: dict, section: object, source_text:
 # 与原文对象绑定」）。评级报告常把「信用评级公告 / 评级结论」放在章节定位锚点之外的首尾页
 # ——实测中邮 p2 公告页与 p24 评级结论页均不被任何 rating_* 节覆盖，只按分节抽取时
 # issuer_rating / bond_rating / rating_date 永远抽不到（试跑实测）。
-RATING_FALLBACK_KEYS = ("issuer_rating", "bond_rating", "rating_outlook", "rating_agency", "rating_date")
+RATING_FALLBACK_KEYS = (
+    "issuer_rating", "bond_rating", "rating_outlook", "rating_agency", "rating_date",
+    # 评级章的「关注因素」一半来自敏感性因素句（中邮 p4「可能引致评级下调的敏感性因素：…」）。
+    # 这两键原先不在任何键集里，从未被抽取——rating_downgrade_trigger 长期为空，评级章
+    # 只能写"材料不足"。rating_concerns（整段关注事项）走单独的段落抽取，不在这里。
+    "rating_downgrade_trigger", "rating_sensitivity_up",
+)
 
 
 def _rating_document_fallback_facts(source_rows: list[dict], section_plans: list,
@@ -684,6 +691,32 @@ def _rating_document_fallback_facts(source_rows: list[dict], section_plans: list
             **item, "section_role": "rating_report_fallback",
             "origin_ref": "document:rating_report_fallback",
         })
+    # 评级关注事项：文本段落式（联合资信「关注」段）优先，表格「调级因素」板块兜底。
+    # 两种版式都要覆盖——中邮 p5 是三条项目符号，北投 p3 是调级因素表的「关 注」栏。
+    if rating_sources and not any(item["fact_key"] == "rating_concerns" for item in fallback):
+        concern_fact: dict | None = None
+        project_id = str(rating_sources[0].get("project_id") or "")
+        # 表格「调级因素 → 关 注」板块优先：表格结构能逐条切分，文本路径会把整块表格
+        # 当成一段，只能截到第一条（北投实测 120 字、条目未拆开）。
+        table_items = rating_concerns_from_tables(project_id) if project_id else []
+        if table_items:
+            page_to_source = {
+                int(item.get("page") or 0): str(item["id"]) for item in rating_sources
+            }
+            source_id = page_to_source.get(table_items[0][1], str(rating_sources[0]["id"]))
+            concern_fact = rating_concerns_fact([item for item, _ in table_items], source_id)
+        else:
+            for source in rating_sources:
+                items = rating_concerns_from_text(str(source.get("text") or ""))
+                if items:
+                    concern_fact = rating_concerns_fact(items, str(source["id"]))
+                    if concern_fact:
+                        break
+        if concern_fact:
+            fallback.append({
+                **concern_fact, "section_role": "rating_report_fallback",
+                "origin_ref": "document:rating_report_concerns",
+            })
     return fallback
 
 
@@ -1129,6 +1162,12 @@ _BOUNDARY_DECISION_MARKERS = (
 _BOUNDARY_RECOMMENDATION_MARKERS = ("建议", "提议", "拟同意")
 # 未来/待办标记：与 `chapter_guard.FUTURE_DECISION_MARKERS` 同值，两处判定必须同序。
 _BOUNDARY_FUTURE_MARKERS = ("再行", "另行", "届时", "之后再", "后续再")
+# 否定标记：命中词紧贴在否定词之后时，是在**划边界**而不是下结论。
+# 2026-10-28 rating 实测：「也不得作为核定担保额度、担保费率或承保决定的依据」被判
+# "包含禁止的承保或审批结论"——旧实现只判主语/引用/提议三类语境，没有否定，
+# 落到最后的"保守按决策处理"分支。只取命中位置**前 12 字**，避免把
+# "公司决定核定担保额度，不得不说明…"这类远距离否定误当豁免。
+_BOUNDARY_NEGATION_MARKERS = ("不得", "不构成", "不作为", "不应", "不能", "不予", "暂不")
 # 材料与条款语境记号：出现在这些词附近说明是在复述原文/描述条款，不是我们的结论。
 _BOUNDARY_QUOTE_MARKERS = (
     "担保函", "保证合同", "担保合同", "担保协议", "条款", "约定", "视为",
@@ -1147,6 +1186,9 @@ def _boundary_hit_is_decision(content: str, index: int, item: str) -> bool:
     end_candidates = [pos for pos in end_candidates if pos >= 0]
     end = min(end_candidates) if end_candidates else len(content)
     clause = content[start:end]
+    # 否定语境最优先：命中词被"不得/不构成/不作为"直接管着时，是在划边界而非下结论。
+    if any(marker in content[max(0, index - 12):index] for marker in _BOUNDARY_NEGATION_MARKERS):
+        return False
     # 引用/条款语境优先：材料里"视为同意担保函条款"不是我们的决策。
     if any(marker in clause for marker in _BOUNDARY_QUOTE_MARKERS):
         return False
@@ -1204,7 +1246,7 @@ def _preserve_chapter_boundaries(content: str, context: dict) -> str:
 
 # 模型自行绘制的 Markdown 表格（三项遗留修复方案 §二验收）：系统表格一律由服务端在
 # 正文后拼接；模型输出里去掉三类已知系统块后仍存在的"| … |"表格行（≥2 行）判自绘表格。
-_MARKDOWN_TABLE_LINE_RE = re.compile(r"^[ \t]*\|.*\|[ \t]*$", re.MULTILINE)
+_MARKDOWN_TABLE_LINE_RE = re.compile(r"^[ \t]*\|[^\n]*\|", re.MULTILINE)
 
 
 def _model_drawn_table(content: str, chapter_context: dict) -> bool:
@@ -1214,6 +1256,18 @@ def _model_drawn_table(content: str, chapter_context: dict) -> bool:
         if block:
             text = text.replace(block, "")
     return len(_MARKDOWN_TABLE_LINE_RE.findall(text)) >= 2
+
+
+def _model_table_blocked(content: str, chapter_context: dict) -> bool:
+    """本章是否**禁止**模型自出表格，且候选正文里确实出现了表格行。
+
+    两道闸门必须同源（2026-10-26 实测漏改一处就整章回退）：
+    ① `chapter_guard` 的“章节正文自行输出了表格”；
+    ② 本函数在 workflow 层追加的“章节包含模型自行绘制的表格”。
+    只放开了 ① 时，模型真出了表反而被 ② 判 rejected/回退——用户看到的就是“点了重生，
+    配置也开了，仍然没有表”。章节开关统一读 ``narrative_contract.table_mode``。
+    """
+    return _model_drawn_table(content, chapter_context) and not _model_tables_allowed(chapter_context)
 
 
 def _apply_dropped_evidence(chapter_context: dict, drop_report: dict | None) -> None:
@@ -1608,7 +1662,10 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
                 repair_attempted = True
                 repair_type = "json"
                 first_rejection = [
-                    f"首次输出结构不可解析（{str(getattr(exc, 'error_type', '') or '结构校验失败')}）"
+                    # 带上原始错误详情（JSONDecodeError 位置/长度/finish_reason）：
+                    # 只写"结构不可解析"无法区分"裸换行"与"被截断/输出成纯 Markdown"。
+                    f"首次输出结构不可解析（{str(getattr(exc, 'error_type', '') or '结构校验失败')}："
+                    f"{str(exc)[:200]}）"
                 ]
                 _add_usage(usage_total, getattr(exc, "usage", None) or LlmUsage())
                 # 首稿调用已丢弃的证据先收窄：JSON 修复复用同一份（收窄后的）输入。
@@ -1640,10 +1697,11 @@ def run_chapter_model_attempt(title: str, deterministic_content: str, evidence: 
             validation["reasons"].append("章节包含禁止的承保或审批结论")
             validation["status"] = "rejected"
             validation["length_only_failure"] = False
-        if _model_drawn_table(result.content, chapter_context):
+        if _model_table_blocked(result.content, chapter_context):
             # 系统表格由服务端拼接（三项遗留修复方案 §二）：模型自行绘制/回声走样的
             # Markdown 表格一律拒绝——去掉三类已知系统块后仍存在表格行不是"逐字保留"，
             # 而是把表格当正文反复输出（24k 级回声、重复表格的来源）。
+            # 例外与 `chapter_guard` 同源：章节 `table_mode` 显式放开时不拦（未放开仍按旧口径）。
             validation["reasons"].append("章节包含模型自行绘制的表格")
             validation["status"] = "rejected"
             validation["length_only_failure"] = False
@@ -2003,6 +2061,22 @@ def _candidate_passes_delivery(project_id: str, section: dict, content: str, cit
     )["passed"]
 
 
+def _has_list_items(value) -> bool:
+    """字段是否有内容——兼容 list 与 JSON 字符串两种来源。
+
+    `allowed_source_ids` 在生成期是 list（`_assess_candidate_support` 传
+    `chapter_context["evidence"]` 派生的 id 列表），在后置复核里是库里存的 JSON 字符串。
+    统一按 `json_load` 处理，list 会抛 `TypeError` 被 except 吞掉，`has_sources` 永远是 False，
+    "记录缺口"降级分支就永远进不去（2026-11-02 实测）。
+    """
+    if isinstance(value, str):
+        try:
+            return bool(json_load(value) or [])
+        except (TypeError, ValueError):
+            return False
+    return bool(value or [])
+
+
 def _delivery_assessment(project_id: str, section: dict, content: str, citation_ids: list[str],
                          citation_map: dict, source_texts: dict, valid_sources: set,
                          required_disclosures: list[str]) -> dict:
@@ -2037,26 +2111,52 @@ def _delivery_assessment(project_id: str, section: dict, content: str, citation_
     # 无支持主张的具体句与其中数字：修复提示要能点名"哪一句不成立"。
     # 位置 / 原因码 / 匹配记录随明细一起透传（收口方案 §三）：修复模型要知道是
     # "记录没建（missing_record）"还是"科目对不上（explicit_mismatch）"才能对症改。
-    unsupported_items = [
+    claim_items = [
         {"claim_index": item["claim_index"], "claim_text": item["claim_text"],
          "reason_code": str(item.get("reason_code") or ""),
          "matched_record_ids": list(item.get("matched_record_ids") or []),
          "unsupported_numbers": item.get("unsupported_numbers") or []}
         for item in (assessment.get("claims") or [])
         if item.get("support_status") == "unsupported"
-    ][:10]
+    ]
+    # 记录缺口 vs 明确冲突（2026-11-02）：`missing_record` 的语义是"记录没建/没进本章证据"，
+    # 不等于模型编造（`p0._backfill_disclosure_records` 的注释就是这么写的）。旧实现把两类
+    # 一起当硬失败 → 整章换成确定性模板，用户丢掉整篇模型稿（实测 cashflow 只因净利润
+    # 不在本章记录里就整章回退）。现在分档：
+    #   硬失败（explicit_mismatch 等"明确错配"）→ 仍回退；
+    #   记录缺口（missing_record）→ 保留正文，标 needs_review（仍阻断交付，人工必看）。
+    # ⚠️ "记录缺口"的前提是**该章有记录体系且模型确实拿到了来源**：整章一条记录都没有、
+    # 或模型压根没被给来源时，`missing_record` 其实是"无从核对"（含无来源就写事实），
+    # 必须按硬失败处理，不能借这个口子放过。
+    try:
+        has_records = _has_list_items(section.get("evidence_records_json"))
+        has_sources = _has_list_items(section.get("allowed_source_ids")) or bool(citation_ids)
+    except (TypeError, ValueError):
+        has_records = has_sources = False
+    record_gap_verifiable = has_records and has_sources
+    hard_items = [
+        item for item in claim_items
+        if item["reason_code"] != "missing_record" or not record_gap_verifiable
+    ]
+    soft_items = [
+        item for item in claim_items
+        if item["reason_code"] == "missing_record" and record_gap_verifiable
+    ]
     reasons: list[str] = []
-    if unsupported:
-        reasons.append(f"模型正文未通过前置证据支持检查（{unsupported} 条主张无证据支持）")
+    if hard_items:
+        reasons.append(f"模型正文与冻结记录明确冲突或未获支持（{len(hard_items)} 条）")
     if invalid:
         reasons.append(f"存在未授权引用：{invalid} 条")
     return {
         "passed": not reasons,
         "reasons": reasons,
         "unsupported_claims": unsupported,
-        "needs_review_claims": needs_review,
+        "hard_unsupported_claims": len(hard_items),
+        "soft_unsupported_claims": len(soft_items),
+        "needs_review_claims": needs_review + len(soft_items),
         "invalid_citations": invalid,
-        "unsupported_claim_items": unsupported_items,
+        "unsupported_claim_items": claim_items[:10],
+        "soft_claim_items": soft_items[:10],
     }
 
 
@@ -2122,6 +2222,24 @@ def _merge_support_assessment(validation: dict, support: dict) -> dict:
     分支消费那一次修复；修复后重跑两套检查。这不是放宽：修复后仍不过的候选照样回退。
     """
     if support.get("passed"):
+        soft = int(support.get("soft_unsupported_claims") or 0)
+        if soft and validation.get("status") == "passed":
+            # 记录缺口不阻断采用，但**必须留痕**：降为 needs_review（正文仍是模型稿、
+            # 交付需人工确认），并把这些主张写进未决项，复核面板能看到"哪句的记录没建"。
+            gaps = [
+                {"code": "evidence_record_gap",
+                 "excerpt": str(item.get("claim_text") or "")[:120],
+                 "position": int(item.get("claim_index") or 0),
+                 "detail": "该主张的数值在本章冻结记录中查无对应项（记录缺口，非明确错配），"
+                           "正文已保留待人工核对"}
+                for item in (support.get("soft_claim_items") or [])
+            ]
+            return {
+                **validation,
+                "status": "needs_review",
+                "needs_review_items": [*(validation.get("needs_review_items") or []), *gaps],
+                "support_record_gaps": soft,
+            }
         return validation
     reasons = list(validation.get("reasons") or [])
     for reason in support.get("reasons") or []:
@@ -2158,15 +2276,34 @@ def _fallback_unsupported_sections(project_id: str, templates: dict[str, Section
     if not quality["unsupported_claims"] and not quality["invalid_citations"]:
         return 0
     citation_map, source_texts, valid_sources = _support_context(project_id)
-    unsupported_sections = {
-        item["section_id"] for item in rows(
-            "SELECT DISTINCT section_id FROM report_claims WHERE project_id=? AND support_status='unsupported'",
-            (project_id,),
-        )
-    }
     sections = rows("SELECT * FROM report_sections WHERE project_id=? ORDER BY rowid", (project_id,))
     if section_keys is not None:
         sections = [item for item in sections if item["section_key"] in section_keys]
+    # 逐章重算支持结论，**只有明确错配才回退**（2026-11-02）：`report_claims` 没有
+    # reason_code 列，直接按 `support_status='unsupported'` 取会把"记录缺口"也一起回退，
+    # 把生成期刚保住的正文又换回模板。与 `_delivery_assessment` 同一口径：记录缺口
+    # （missing_record）保留正文待核验，明确错配（explicit_mismatch 等）才回退。
+    from .p0 import assess_section_claims
+
+    hard_sections: set[str] = set()
+    for section in sections:
+        assessment = assess_section_claims(
+            project_id, section, citation_map, source_texts, valid_sources)
+        # 与 `_delivery_assessment` 同口径：没有记录体系、或模型没拿到来源时，
+        # missing_record 等于"无从核对"，仍按硬失败回退。
+        has_records = _has_list_items(section.get("evidence_records_json"))
+        has_sources = (
+            _has_list_items(section.get("allowed_source_ids"))
+            or _has_list_items(section.get("citation_ids"))
+        )
+        verifiable = has_records and has_sources
+        if any(
+            str(item.get("reason_code") or "") != "missing_record" or not verifiable
+            for item in (assessment.get("claims") or [])
+            if item.get("support_status") == "unsupported"
+        ):
+            hard_sections.add(section["id"])
+    unsupported_sections = hard_sections
 
     fallback_count = 0
     for section in sections:

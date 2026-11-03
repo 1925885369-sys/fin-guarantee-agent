@@ -145,7 +145,7 @@ export type ReportOutline = { outline_version: string; parts: OutlinePart[] };
 export type ReportOutlineState = { scope: "project"|"global"; outline: ReportOutline; source: string; outline_version: string; config_sha256: string; effective_source: string; has_project_override: boolean; editable: boolean; edit_reason: string; global_editable: boolean; global_edit_reason: string };
 ```
 
-- UI（`PLAN_new.md` §四）：左侧二级章节目录（改名/删除/上移下移/分部内新增）；右侧显示该章三级小节编辑列表（标题、Prompt、排序、启用）＋原有章级 Prompt 编辑区保留；两种范围分别缓存草稿；删除前确认；409 复用 `concurrencyHint()`；确定性章节小节区显示“暂不参与模型生成”。
+- UI（`PLAN_new.md` §四）：左侧二级章节目录（改名/删除/上移下移/分部内新增）；右侧显示该章三级小节编辑列表（标题、Prompt、排序、启用）＋原有章级 Prompt 编辑区保留；**三级小节是章节内容区块与顺序的唯一编辑入口**（`required_sections` / `paragraph_order` 仅用于初始化出厂目录；有小节时生成阶段由小节契约替换这两句，配置面板不再重复提供编辑区）；小节编辑区固定在**该章内容区最上方**（章节标题之下、配置 Tab 之上），但**默认收起成一行**（小节数量 + 目录脏状态 + 「保存目录」；展开后显示编辑列表与「保存目录 / 恢复默认目录」条），桌面端左侧目录与右侧内容区各自独立滚动；全局指令视图不显示小节区（全局指令优先于各章细分 Prompt）；只读风控约束入口只在全局指令页提供（详情弹窗内按章节切换）；两种范围分别缓存草稿；删除前确认；409 复用 `concurrencyHint()`；确定性章节小节区显示“暂不参与模型生成”。
 
 ## 七、生成集成（P1-4 自定义章节）
 

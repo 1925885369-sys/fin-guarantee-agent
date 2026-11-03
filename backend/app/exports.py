@@ -580,8 +580,14 @@ def _add_table_block(document: Document, block: dict, *, index: int) -> None:
     for note in source.notes:
         _add_source_note(document, note)
     if source.validation_status != "passed":
+        from .table_block import validation_status_label
+
         warning = document.add_paragraph(style="Quote")
-        _add_inline_markdown(warning, f"本表校验状态：{source.validation_status}，需人工确认后方可作为数据使用。")
+        _add_inline_markdown(
+            warning,
+            f"本表校验状态：{validation_status_label(source.validation_status)}，"
+            "需人工确认后方可作为数据使用。",
+        )
 
 
 def _add_section_blocks(document: Document, blocks: list[dict]) -> None:

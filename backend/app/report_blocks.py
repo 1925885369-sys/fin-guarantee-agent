@@ -99,39 +99,78 @@ def section_blocks(project_id: str, section: dict, *, subject: str) -> list[dict
     rendered = {block.table_id: _markdown_rows(block) for block in blocks}
     present = {block.table_id: _present_in_content(block, content) for block in blocks}
 
+    parsed = content_blocks(content)
+    # 表格按**正文锚点**归位（`report_tables.TABLE_SECTION_ANCHORS`）：正文讲资产端，
+    # 资产负债表就插在那一段之后；讲应收，应收明细就跟在后面。认不出的表仍走章末。
+    from .report_tables import place_blocks_by_anchor
+
+    placed, loose = place_blocks_by_anchor(
+        str(section.get("section_key") or ""), blocks, parsed)
+
     output: list[dict] = []
     emitted = False
     in_system_table = False
     in_conflict = False
-    for block in content_blocks(content):
+    for index, block in enumerate(parsed):
         kind = str(block.get("kind") or "")
         text = str(block.get("text") or "")
         if kind == "heading":
             if text.startswith(SYSTEM_TABLE_MARK):
                 if not emitted:
-                    output.extend(_payloads(blocks, rendered, present))
+                    output.extend(_payloads(loose, rendered, present))
                     emitted = True
                 in_system_table, in_conflict = True, False
-                continue
-            if text.startswith(CONFLICT_MARK):
+            elif text.startswith(CONFLICT_MARK):
                 in_system_table, in_conflict = False, True
-                continue
-            in_system_table = in_conflict = False
-            output.append(block)
-            continue
-        if in_system_table and _system_table_member(kind, block, notes, captions):
-            continue
-        in_system_table = False
-        if in_conflict and _conflict_member(kind, block):
-            continue
-        in_conflict = False
-        output.append(block)
+            else:
+                in_system_table = in_conflict = False
+                output.append(block)
+        elif in_system_table and _system_table_member(kind, block, notes, captions):
+            pass  # 系统表格区域内的表名/表体/表注/校验行：由快照重新渲染，不回声正文
+        else:
+            in_system_table = False
+            if in_conflict and _conflict_member(kind, block):
+                pass
+            else:
+                in_conflict = False
+                if kind == "table":
+                    # 模型在正文里自行输出的管道表：三端渲染走既有"非系统表格"分支
+                    # （网页 HTML 表、Markdown 原样、Word 原生表），但它不是系统核验表。
+                    # 这里只加内部标记供统计/排查，**不在成品加任何痕迹**。
+                    output.append({**block, "model_generated": True, "validation_status": "needs_review"})
+                else:
+                    output.append(block)
+        if index in placed and not in_system_table and not in_conflict:
+            output.extend(_payloads(placed[index], rendered, present))
 
-    if not emitted and blocks:
+    if not emitted and loose:
         # 正文里没有表格区块（历史数据、或正文本就缺表）：表格仍然返回，
         # 只是标成 ``present_in_content: false``，由消费方决定如何提示。
-        output.extend(_payloads(blocks, rendered, present))
-    return output
+        output.extend(_payloads(loose, rendered, present))
+    from .delivery_wording import strip_citation_aliases
+
+    # 引用别名（E01/E05）只在**展示层**剔除：写入侧已规范化新正文，但历史正文里仍存着
+    # 别名。三端（网页/Markdown/Word）都从本函数的 blocks 渲染，在这里兜住最省事。
+    return [_strip_block_aliases(block, strip_citation_aliases) for block in output]
+
+
+def _strip_block_aliases(block: dict, strip) -> dict:
+    """把一个分块里的引用别名剔掉（结构不变，只清文本）。"""
+    kind = str(block.get("kind") or "")
+    if kind in {"paragraph", "quote"}:
+        return {**block, "text": strip(str(block.get("text") or ""))}
+    if kind == "heading":
+        return {
+            **block,
+            "text": strip(str(block.get("text") or "")),
+            "label": strip(str(block.get("label") or "")),
+        }
+    if kind == "list":
+        return {**block, "items": [strip(str(item)) for item in block.get("items") or []]}
+    if kind == "table" and "table" not in block:
+        # 模型自出的管道表；系统表格块的 rows 来自冻结快照，保持原样（走 normalize_table_block）。
+        return {**block, "rows": [strip(str(row)) for row in block.get("rows") or []]}
+    return block
 
 
 def _payloads(blocks: list[TableBlock], rendered: dict[str, list[str]], present: dict[str, bool]) -> list[dict]:
@@ -226,10 +265,15 @@ def _present_in_content(block: TableBlock, content: str) -> bool:
 
 
 def _table_body(block: TableBlock) -> str:
+    """表体（只含 ``|`` 行）。表注与校验行**不参与**"是否已在正文"的比对。
+
+    表注/校验文案是动态的（校验状态会从 ``needs_review`` 改成中文标签、口径说明也在
+    演进），把它们算进比对体，会让同一张表在文案更新后突然被判成"不在正文里"，
+    进而影响 ``present_in_content`` 标记。表体才是数据本体。
+    """
     rendered = render_table_block(block, index=1, total=1)
-    for part in rendered.split("\n\n", 1)[1:]:
-        return part.strip()
-    return ""
+    rows = [line for line in rendered.splitlines() if line.startswith("|")]
+    return "\n".join(rows)
 
 
 def _system_table_member(kind: str, block: dict, notes: set[str], captions: set[str]) -> bool:

@@ -113,6 +113,48 @@ def test_agreed_sources_are_adopted_with_basis() -> None:
     assert block.validation_status == "passed"
 
 
+def test_reconciliation_precision_tolerance_only_absorbs_rounding() -> None:
+    """评级口径披露到「亿元」两位小数，与审计万元精确值只差舍入：不能判冲突。
+
+    实测北投 187.60 亿元 = 1,876,000 万元 vs 审计 1,875,971.19 万元，差 28.81 万元。
+    严格相等会把每一行评级对照都判成 conflict，读者只看得到噪音。
+    """
+    block = reconciliation_block(
+        table_id="t", title="t", subject="s", scope="c", period="2025 年度",
+        profile_cells={"营业收入": cell_from_text("1,875,971.19", source_ids=["p1"])},
+        uploaded_cells={"营业收入": cell_from_text("1,876,000", source_ids=["u1"])},
+        tolerance_ratio=0.005,
+    )
+    row = block.rows[0]
+    assert row.cell(3).raw == "1,875,971.19", "采用值取档案侧的精确值"
+    assert row.cell(4).raw == "一致（精度差异）"
+
+
+def test_reconciliation_without_tolerance_still_flags_conflict() -> None:
+    """默认 ratio=0：既有核对表（档案值 vs 上传值）行为逐字不变。"""
+    block = reconciliation_block(
+        table_id="t", title="t", subject="s", scope="c", period="2025 年度",
+        profile_cells={"营业收入": cell_from_text("1,875,971.19", source_ids=["p1"])},
+        uploaded_cells={"营业收入": cell_from_text("1,876,000", source_ids=["u1"])},
+    )
+    row = block.rows[0]
+    assert row.cell(4).raw == "conflict"
+    assert row.cell(3).raw == ""
+
+
+def test_reconciliation_tolerance_does_not_hide_material_gap() -> None:
+    """容忍只吸收披露精度：10% 的口径差异仍必须判冲突。"""
+    block = reconciliation_block(
+        table_id="t", title="t", subject="s", scope="c", period="2025 年度",
+        profile_cells={"营业收入": cell_from_text("1,000,000", source_ids=["p1"])},
+        uploaded_cells={"营业收入": cell_from_text("1,100,000", source_ids=["u1"])},
+        tolerance_ratio=0.005,
+    )
+    row = block.rows[0]
+    assert row.cell(4).raw == "conflict"
+    assert row.cell(3).raw == ""
+
+
 def test_disagreeing_sources_must_not_be_auto_adopted() -> None:
     """核心安全不变量：两来源取值不同时，采用值必须为空，不得自动择一。"""
     block = reconciliation_block(

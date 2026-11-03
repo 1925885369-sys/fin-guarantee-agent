@@ -120,7 +120,7 @@ documents:
         # replaces the prospectus assertion; canonical conflict handling keeps
         # both values when they differ.  `rating_issue_amount` remains for
         # backward-compatible rule diagnostics.
-        allowed_fact_keys: [issuer_rating, bond_rating, rating_outlook, rating_agency, rating_date, bond_issue_amount, rating_issue_amount]
+        allowed_fact_keys: [issuer_rating, bond_rating, rating_outlook, rating_agency, rating_date, bond_issue_amount, rating_issue_amount, rating_downgrade_trigger, rating_sensitivity_up]
         required: true
         max_pages: 4
       rating_financial_summary:
@@ -132,27 +132,32 @@ documents:
         required: false
         max_pages: 4
       rating_methodology:
-        title_anchors: [评级模型, 评级方法]
-        end_anchors: [发行人概况]
+        # 联合资信的节标题是「本次评级使用的评级方法、模型及结果」——锚点必须带上前缀
+        # 短语才能命中（单写「评级方法」只在行中出现，会被正文判定拒绝）。
+        title_anchors: [评级模型, 评级方法, 本次评级使用的评级方法, 评级方法与模型]
+        end_anchors: [发行人概况, 主体概况]
         allowed_fact_keys: []
         required: false
         max_pages: 4
       rating_issuer_profile:
-        title_anchors: [发行人概况, 公司概况]
-        end_anchors: [运营实力, 主营业务]
+        # 中诚信写「发行人概况/公司概况」，联合资信写「一、主体概况」，还把股东与治理
+        # 拆成「五、基础素质分析」「六、管理分析」——同一语义的三种标题都要认。
+        title_anchors: [发行人概况, 公司概况, 主体概况, 基础素质分析, 管理分析]
+        end_anchors: [运营实力, 主营业务, 经营分析]
         subject_policy: issuer
         scope_policy: [entity]
         allowed_fact_keys: [registered_capital, controller, related_parties]
         required: false
         max_pages: 5
       external_environment:
-        title_anchors: [宏观经济与行业政策, 宏观经济与行业环境]
+        # 「与」/「和」两种连词、以及独立的「行业分析」都要覆盖（中邮 p8/p9 实测）。
+        title_anchors: [宏观经济与行业政策, 宏观经济与行业环境, 宏观经济和政策环境分析, 宏观经济与政策环境, 行业分析, 行业环境分析]
         allowed_fact_keys: []
         required: false
         max_pages: 8
       rating_operations:
-        title_anchors: [运营实力, 主营业务及项目情况, 主营业务]
-        end_anchors: [资本实力与结构]
+        title_anchors: [运营实力, 主营业务及项目情况, 主营业务, 经营分析, 业务经营分析, 运营情况分析]
+        end_anchors: [资本实力与结构, 财务分析]
         subject_policy: issuer
         scope_policy: [entity]
         allowed_fact_keys: [main_business, top_customer_share, top5_customer_share, top_supplier_share, top5_supplier_share]
@@ -173,8 +178,9 @@ documents:
         required: false
         max_pages: 3
       ownership_appendix:
-        title_anchors: [附一：, 股权和组织结构]
-        end_anchors: [附二：]
+        # 联合资信写成「附件1-1 公司股权结构图」「附件1-2 公司组织架构图」。
+        title_anchors: [附一：, 股权和组织结构, 股权结构图, 组织架构图, 股权与组织结构]
+        end_anchors: [附二：, 附件2]
         subject_policy: issuer
         scope_policy: [entity]
         allowed_fact_keys: [controller]
@@ -189,13 +195,14 @@ documents:
         required: false
         max_pages: 3
       excluded_formula:
-        title_anchors: [附三：, 指标公式]
-        end_anchors: [附四：]
+        # 「附件2 公司主要财务指标的计算公式」（联合资信）与「附三：指标公式」同义。
+        title_anchors: [附三：, 指标公式, 主要财务指标的计算公式, 财务指标计算公式, 指标计算公式]
+        end_anchors: [附四：, 附件3]
         allowed_fact_keys: []
         required: false
         max_pages: 2
       excluded_rating_symbols:
-        title_anchors: [附四：, 信用等级的符号及定义, 评级符号定义]
+        title_anchors: [附四：, 信用等级的符号及定义, 评级符号定义, 信用等级设置及含义, 主体长期信用等级设置]
         allowed_fact_keys: []
         required: false
         max_pages: 2

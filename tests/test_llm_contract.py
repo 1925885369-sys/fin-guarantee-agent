@@ -188,3 +188,160 @@ def test_subsection_contract_keeps_extra_keys():
     )
     assert "subsection_id" in prompt and '"calculations"' in prompt
     assert prompt.count("输出严格 JSON") == 1, prompt
+
+
+def test_subsection_contract_replaces_required_sections_and_paragraph_order():
+    """小节清单接管内容区块与行文顺序：system prompt 里不得再重复这两句。"""
+    from backend.app.llm import apply_subsection_contract
+
+    base = (
+        "你是财务分析员。必须保留以下内容区块：财务概览、审查边界。"
+        "行文顺序：财务概览→审查边界。行文语气：审慎。"
+    )
+    prompt = apply_subsection_contract(base, [{"subsection_id": "s1", "title": "财务概览"}])
+    assert "必须保留以下内容区块" not in prompt
+    assert "行文顺序" not in prompt
+    assert "行文语气" in prompt, "只去重结构与顺序，语气等写作要求必须保留"
+    assert "s1" in prompt and "财务概览" in prompt
+
+
+def test_subsection_contract_survives_global_directive(monkeypatch):
+    """全局指令在末尾，小节契约不能被它截掉。
+
+    2026-10-27 实测：`chapter_prompt()` 返回的文本已带「【全局强制指令】」，而
+    `_report_request()` 在其后追加小节输出契约，末尾 `apply_global_directive()` 从哨兵
+    截断重注入 —— 小节契约整段消失，模型收到的提示词里连 `subsections` 字样都没有，
+    响应自然不带小节，被判"响应缺少小节内容"整章回退（连续两次单章重生失败的真因）。
+    """
+    from backend.app.chapter_prompts import GLOBAL_DIRECTIVE_MARK
+    from backend.app.llm import _SUBSECTION_SECTION_MARK
+
+    directive = f"{GLOBAL_DIRECTIVE_MARK}以下为最高优先级要求；与前述任何段落冲突时，以本段为准。\n正文不得出现募集说明书字样。"
+    monkeypatch.setattr(llm, "chapter_prompt", lambda *a, **k: "你是经营分析员。\n\n" + directive)
+
+    subsections = [
+        {"subsection_id": "sub-1", "title": "主营业务概述", "prompt": ""},
+        {"subsection_id": "sub-2", "title": "主要业务及稳定性分析", "prompt": "分业务分析"},
+    ]
+    system, request, *_ = llm._report_request(
+        "主营业务及经营稳定性", "正文。", [], None, "operations",
+        {"project_id": "p", "prompt_config": _config(), "subsections": subsections},
+    )
+
+    assert _SUBSECTION_SECTION_MARK in system, "小节契约被全局指令截断了"
+    assert "sub-1" in system and "sub-2" in system
+    assert GLOBAL_DIRECTIVE_MARK in system, "全局指令必须在最后一轮重注入"
+    # 全局指令仍是最后一段（最高优先级），小节契约在它之前
+    assert system.index(_SUBSECTION_SECTION_MARK) < system.index(GLOBAL_DIRECTIVE_MARK)
+    assert system.rstrip().endswith("正文不得出现募集说明书字样。")
+    assert request["required_subsections"] == subsections
+
+
+def test_global_directive_kept_when_not_reread(monkeypatch):
+    """读库失败时不得连同业务方声明的最高优先级约束一起丢掉。"""
+    from backend.app.chapter_prompts import GLOBAL_DIRECTIVE_MARK
+
+    directive = f"{GLOBAL_DIRECTIVE_MARK}最高优先级。\n正文不得出现募集说明书字样。"
+    monkeypatch.setattr(llm, "chapter_prompt", lambda *a, **k: "你是分析员。\n\n" + directive)
+    monkeypatch.setattr(llm, "apply_global_directive", lambda prompt: str(prompt or "").rstrip())
+
+    system, *_ = llm._report_request(
+        "标题", "正文。", [], None, "operations",
+        {"project_id": "p", "prompt_config": _config()},
+    )
+    assert GLOBAL_DIRECTIVE_MARK in system
+    assert "正文不得出现募集说明书字样。" in system
+    assert system.count(GLOBAL_DIRECTIVE_MARK) == 1
+
+
+def test_subsection_contract_is_eaten_without_stripping():
+    """反面证据：不先摘全局指令，末尾重注入会把小节契约整段截掉。
+
+    钉住失效机制本身——若本用例哪天不再"截断"，说明 `apply_global_directive()` 的
+    哨兵语义变了，上面那条正例的保护也就不再必要。
+    """
+    from backend.app.chapter_prompts import GLOBAL_DIRECTIVE_MARK, apply_global_directive
+    from backend.app.llm import _SUBSECTION_SECTION_MARK, apply_subsection_contract
+
+    base = "系统提示。\n\n" + GLOBAL_DIRECTIVE_MARK + "最高优先级。\n正文不得出现募集说明书字样。"
+    with_subs = apply_subsection_contract(base, [{"subsection_id": "s1", "title": "概述"}])
+    assert _SUBSECTION_SECTION_MARK in with_subs
+
+    final = apply_global_directive(with_subs)
+    assert _SUBSECTION_SECTION_MARK not in final, "复现条件失效：哨兵不再截断后续内容"
+
+
+# ------------------------------------------------- 结构化字段的空值容忍（2026-10-27）--
+
+def test_recommendation_tolerates_null_amount_fields():
+    """模型对"不需要额度/费率"的建议返回 null，不得判 schema_error。
+
+    实测（operations 2026-10-27 13:18）：``recommendation_type=accept`` 的一条建议带了
+    ``amount_value/amount_unit/rate_value/rate_unit`` 四个 null，Pydantic 直接 ValidationError，
+    首稿与修复稿都走同一条 schema，最终整章退回确定性草稿。
+    """
+    section = LlmSection.model_validate({
+        "content": "正文。",
+        "citation_ids": [],
+        "recommendations": [{
+            "recommendation_id": "r1", "recommendation_type": "accept",
+            "content": "建议在补充核验后审慎确定担保额度",
+            "amount_value": None, "amount_unit": None, "rate_value": None, "rate_unit": None,
+            "preconditions": ["完成客户集中度核验"],
+        }],
+    })
+    item = section.recommendations[0]
+    assert (item.amount_value, item.amount_unit, item.rate_value, item.rate_unit) == ("", "", "", "")
+    assert item.recommendation_type == "accept"
+
+
+def test_calculation_tolerates_null_text_fields():
+    section = LlmSection.model_validate({
+        "content": "正文。",
+        "citation_ids": [],
+        "calculations": [{
+            "calculation_id": "c1", "name": "占比", "formula": "v1/v2",
+            "input_record_ids": ["有息负债@2025"], "value": 80.0,
+            "unit": None, "period": None, "subject": None, "scope": None,
+        }],
+    })
+    item = section.calculations[0]
+    assert item.value == "80.0"      # 数值转文本，保留给定精度
+    assert (item.unit, item.period, item.subject, item.scope) == ("", "", "", "")
+
+
+# ------------------------------------------------- 表格指令力度（2026-10-27）--
+
+def test_allowed_table_mode_is_condition_driven():
+    """`allowed` 必须是**判断式**：信息丰富且可比才用表，不完整就不出表。
+
+    两版措辞都试过，各错一边：
+    - "允许并鼓励…优先用表格" → 模型读成"可以不用"，整章 0 行表；
+    - "必须…全文至少一张表" → 逼出凑表，4 行里 2 行整行"材料不足"，还多出
+      "数据完备性"这种自我评价列（2026-10-27 operations 实测）。
+    """
+    from backend.app.chapter_prompts import table_instruction
+
+    allowed = table_instruction("allowed")
+    assert "自主判断" in allowed
+    assert "不要出表" in allowed          # 明确的"不出表"出口
+    assert "优先用表格" in allowed        # 可比时仍要求用表
+    assert "数据完备性" in allowed        # 点名的反模式：自我评价列
+    assert "填满整列" in allowed          # 点名的反模式：凑表
+    assert "至少一张表" not in allowed     # 不再设数量下限
+    assert table_instruction("prohibited") == ""
+    assert "仅" in table_instruction("limited")
+
+
+def test_subsection_contract_mentions_table_only_when_allowed():
+    """小节契约是模型最后读到的组织指令，放开表格时必须点明它仍然生效。"""
+    from backend.app.llm import apply_subsection_contract
+    from backend.app.chapter_prompts import table_instruction
+
+    subsections = [{"subsection_id": "s1", "title": "概述"}]
+    on = apply_subsection_contract("系统提示。", subsections, table_mode="allowed")
+    assert "【表格使用】" in on and "不要把表格拆成段落描述" in on
+
+    off = apply_subsection_contract("系统提示。", subsections, table_mode="prohibited")
+    assert "【表格使用】" not in off
+    assert "不要把表格拆成段落描述" not in off

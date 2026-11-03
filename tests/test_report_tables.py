@@ -99,6 +99,113 @@ def test_missing_system_table_is_rejected(client) -> None:
     assert any("系统整理数据表未原样保留" in reason for reason in reasons), reasons
 
 
+def test_chapter_prompt_can_allow_model_tables(client) -> None:
+    """章节 Prompt 显式放开 ``table_mode`` 时，正文表格不再判越权。
+
+    默认仍禁止（financial 章 = prohibited），只有像 operations 这种"条目 × 期间"
+    天然适合表格的章节才放开；放开后数字仍受允许集约束，造数照样整章被拒。
+    """
+    context = _context(client, "demo-bond-huachen", "financial")
+    allowed = {
+        **context,
+        "prompt_config": {
+            **context["prompt_config"],
+            "narrative_contract": {**(context["prompt_config"].get("narrative_contract") or {}),
+                                   "table_mode": "allowed"},
+        },
+    }
+    content = (
+        f"资产负债结构变化显著。\n\n{context['system_table_block']}\n\n"
+        "| 科目 | 2025 |\n| --- | --- |\n| 资产总计 | 72,000 |"
+    )
+    reasons = validate_chapter_output(content, [], allowed)["reasons"]
+    assert not any("自行输出了表格" in reason for reason in reasons), reasons
+
+
+def test_model_tables_default_to_prohibited() -> None:
+    """缺省（没有 table_mode 字段）必须仍是禁止——既有章节行为不能悄悄变。"""
+    from backend.app.chapter_guard import _model_tables_allowed
+
+    assert _model_tables_allowed({}) is False
+    assert _model_tables_allowed({"prompt_config": {}}) is False
+    assert _model_tables_allowed({"prompt_config": {"narrative_contract": {"table_mode": "prohibited"}}}) is False
+    assert _model_tables_allowed({"prompt_config": {"narrative_contract": {"table_mode": "allowed"}}}) is True
+    assert _model_tables_allowed({"prompt_config": {"narrative_contract": {"table_mode": "limited"}}}) is True
+
+
+def test_table_instruction_reaches_frozen_project_prompt(monkeypatch) -> None:
+    """项目覆盖文本在先、开关在后时，开关仍必须到达模型。
+
+    这是 2026-10-26 的真实故障：YAML 已 `table_mode: allowed`，但项目 14:29 保存过覆盖，
+    ``chapter_prompt()`` 直接返回覆盖里编译好的旧字符串（还写着“不要输出…系统表格”），
+    模型完全没出表。开关属于行为配置，必须在读取时注入，不能依赖覆盖文本被重编。
+    """
+    from backend.app import chapter_prompts, database
+
+    stored = "旧编译提示词。不要输出、复制或重写系统表格，正文不重复逐行列示。"
+    monkeypatch.setattr(database, "row", lambda *args, **kwargs: {"prompt": stored})
+    monkeypatch.setattr(
+        chapter_prompts, "effective_chapter_config",
+        lambda *args, **kwargs: {"narrative_contract": {"table_mode": "allowed"}},
+    )
+    prompt = chapter_prompts.chapter_prompt("operations", "project-1")
+    assert "【表格使用】" in prompt and "优先用表格" in prompt
+    assert prompt.count("【表格使用】") == 1
+    # 幂等：预览、生成、导出反复调用不能叠加多份指令
+    assert chapter_prompts.chapter_prompt("operations", "project-1") == prompt
+
+
+def test_table_instruction_absent_when_prohibited(monkeypatch) -> None:
+    """prohibited 章节（其余 16 章）不得因此多出任何指令。"""
+    from backend.app import chapter_prompts, database
+
+    monkeypatch.setattr(database, "row", lambda *args, **kwargs: {"prompt": "旧编译提示词。"})
+    monkeypatch.setattr(
+        chapter_prompts, "effective_chapter_config",
+        lambda *args, **kwargs: {"narrative_contract": {"table_mode": "prohibited"}},
+    )
+    prompt = chapter_prompts.chapter_prompt("financial", "project-1")
+    assert "【表格使用】" not in prompt
+
+
+def test_legacy_table_prohibition_is_migrated() -> None:
+    """旧编译句里的“不要输出…系统表格”必须被迁移掉，否则与放开开关自相矛盾。"""
+    from backend.app.chapter_prompts import LEGACY_BOUNDARY_SENTENCES, claim_boundary_sentence
+
+    legacy = (
+        "系统表格、冲突披露块与来源边界块由服务端在正文后原样附加——只返回分析正文和引用ID，"
+        "不要输出、复制或重写系统表格，正文不重复逐行列示；"
+    )
+    assert legacy in LEGACY_BOUNDARY_SENTENCES
+    sentence = claim_boundary_sentence({"generation_mode": "generate"})
+    assert "不要输出、复制或重写系统表格" not in sentence
+    assert "不要复制或重写这些系统表" in sentence
+
+
+def test_workflow_table_gate_follows_chapter_switch() -> None:
+    """workflow 层还有一道“模型自绘表格”闸门，必须与 chapter_guard 同源。
+
+    2026-10-26 实测：只放开 `chapter_guard` 时，模型真出了表会被这里的
+    “章节包含模型自行绘制的表格”整章回退——表现仍是“看不见表”。
+    """
+    from backend.app.workflow import _model_table_blocked
+
+    system_table = "表 1：资产负债结构"
+    content = (
+        "结构变化如下。\n\n"
+        "| 科目 | 2025 | 2024 |\n| --- | --- | --- |\n| 资产总计 | 1 | 2 |\n\n"
+        + system_table
+    )
+    prohibited = {"system_table_block": system_table,
+                  "prompt_config": {"narrative_contract": {"table_mode": "prohibited"}}}
+    allowed = {"system_table_block": system_table,
+               "prompt_config": {"narrative_contract": {"table_mode": "allowed"}}}
+    assert _model_table_blocked(content, prohibited) is True
+    assert _model_table_blocked(content, allowed) is False
+    # 没有表格行时这段判断不能误报
+    assert _model_table_blocked("纯叙述正文。\n\n" + system_table, allowed) is False
+
+
 def test_conflict_chapter_emits_a_comparison_table(client) -> None:
     """有来源冲突时必须输出冲突对照表，且不设「采用值」列。"""
     block = system_table_markdown("demo-bond-conflict", "financial", subject="瀚川绿色装备有限公司")

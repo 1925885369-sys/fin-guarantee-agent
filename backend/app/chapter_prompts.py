@@ -146,6 +146,11 @@ class ChapterInputContract(BaseModel):
     source_kinds: list[str] = Field(default_factory=list)
     max_evidence_items: int = Field(default=12, ge=1, le=36)
     max_evidence_chars: int = Field(default=18000, ge=1000, le=30000)
+    # 章节专属检索词：**只进检索 query，不进 Prompt**。
+    # 写作指令（goal/rules）是要给人看的完整句子，塞进 BM25 会稀释关键词权重——
+    # 2026-10-27 实测：经营章要靠"客运量/在建线路/车辆段综合利用"才能命中评级报告
+    # p11-p14（在建项目表），写在 goal 里被 3 条长规则稀释后仍然进不来。
+    retrieval_terms: list[str] = Field(default_factory=list, max_length=24)
 
     @field_validator("fact_keys")
     @classmethod
@@ -211,6 +216,13 @@ class NarrativeContract(BaseModel):
     preferred_min_chars: int = Field(default=0, ge=0)
     preferred_max_chars: int = Field(default=2400, ge=200)
     list_mode: str = Field(default="limited", pattern=r"^(allowed|limited|prohibited)$")
+    # 正文表格形态：模型能否在正文里自行输出 Markdown 表格。
+    # ``prohibited``（默认）= 成品里只允许系统数据表，模型画表按越权处理；
+    # ``allowed`` = 由模型按内容自行决定是否出表（适合"3 项以上可并列比较"的章节）；
+    # ``limited`` = 仅限待核验事项/条款对照等必要场景。
+    # 三端渲染本来就支持正文表格（网页 HTML 表、Markdown 原样、Word 原生表），
+    # 这里控制的是**是否允许模型产出**，不是渲染能力。
+    table_mode: str = Field(default="prohibited", pattern=r"^(allowed|limited|prohibited)$")
     avoid_openings: list[str] = Field(default_factory=list)
     prohibited_terms: list[str] = Field(default_factory=list)
 
@@ -238,8 +250,8 @@ PROMPT_CONTRACT_VERSION = "5"
 GENERATE_BOUNDARY_SENTENCE = (
     "本章为**直接撰写**模式：请基于系统事实、指标、规则核验结果、证据原文与冲突披露自主组织并撰写完整分析正文；"
     "允许自由组织与表达，但只能陈述上述材料已支持的内容，不得引入材料中没有的数字、主体、年度或评级；"
-    "系统表格、冲突披露块与来源边界块由服务端在正文后"
-    "原样附加——只返回分析正文和引用ID，不要输出、复制或重写系统表格，正文不重复逐行列示；"
+    "系统整理数据表、冲突披露块与来源边界块由服务端在正文后"
+    "原样附加——只返回分析正文和引用ID，不要复制或重写这些系统表，正文不重复逐行列示；"
     "冲突事实必须并列，缺失信息必须写“材料不足”。"
 )
 # ⚠️ 计算与建议规则**不写在本句里**：它们由 `calculation_boundary_sentence` /
@@ -251,6 +263,11 @@ GENERATE_BOUNDARY_SENTENCE = (
 LEGACY_BOUNDARY_SENTENCES = (
     "系统数据表、冲突披露块与来源边界块必须逐字保留，表格一律由系统附入、不得自行绘制；",
     "系统数据表、冲突披露块与来源边界块必须逐字保留；",
+    # 2026-10-26：旧生成边界句里的“不要输出…系统表格”会被模型读成“一律不许出表”，
+    # 与 `table_mode: allowed` 直接冲突。它同样是系统编译句（不是用户业务要求），
+    # 按同一迁移机制剥掉，改由新的边界句 + `apply_table_instruction()` 接管。
+    "系统表格、冲突披露块与来源边界块由服务端在正文后原样附加——只返回分析正文和引用ID，"
+    "不要输出、复制或重写系统表格，正文不重复逐行列示；",
     # 上一版 rewrite 边界句（"**唯一**边界"）。它属于**边界句**，两种生成模式都要剥，
     # 不能放进 LEGACY_DECISION_SENTENCES（那里只在允许建议时才剥）。
     "确定性草稿是允许主张的唯一边界；只能改善表达，不得增加、删除或改变事实、数字、规则状态和风险状态。",
@@ -269,6 +286,74 @@ LEGACY_DECISION_SENTENCES = (
 )
 
 
+# 章节级"允许模型自出表格"的运行时指令。**必须自定界**：
+# `apply_table_instruction()` 靠首尾标记整段替换，才能对**已冻结的项目覆盖提示词**生效。
+# 2026-10-26 实测：YAML 里 operations 已是 `table_mode: allowed`，但该项目 14:29 保存过
+# 项目覆盖——`chapter_prompt()` 直接返回覆盖里编译好的整段字符串，新字段永远进不去，
+# 模型收到的仍是"不要输出…系统表格"。开关必须写在提示词**之外**、读取时注入。
+TABLE_INSTRUCTION_MARK = "【表格使用】"
+TABLE_INSTRUCTION_END = "【表格使用结束】"
+
+
+def table_instruction(table_mode: str) -> str:
+    """按章节开关生成自出表格指令；``prohibited`` 返回空串。
+
+    ⚠️ ``allowed`` 的措辞必须是**判断式**，不是数量下限：
+    - 写成"允许并鼓励…优先用表格"（2026-10-27 首版）→ 模型读成"可以不用"，整章 0 行表；
+    - 改成"必须…全文至少一张表"（同日第二版）→ 逼出**凑表**：4 行里 2 行整行"材料不足"，
+      还多出"数据完备性"这种自我评价列。
+    业务口径是"信息丰富且可比才用表，信息不完整就不出表"，所以判据要写"什么情况不要出表"，
+    并且必须点明两个反模式（自我评价列、拿"材料不足"填满整列）。
+    """
+    mode = str(table_mode or "prohibited")
+    if mode == "allowed":
+        body = (
+            "本章表格由你按材料情况自主判断，不设数量要求："
+            "先看这组信息值不值得成表——同一维度有两个以上可并列对象"
+            "（年度、业务板块、品种、主体、条款或金额区间），**且**每个对象在同一组关键列上都有"
+            "材料明确披露，才用 Markdown 表格；"
+            "若关键列大面积缺项（多数单元格只能写“材料不足”）、各对象口径不一致，"
+            "或对象之间存在父子/包含关系不宜并列，就不要出表，改用段落叙述并说明缺哪些数据。"
+            "判断为可成表时，优先用表格而不是连续段落，一次把可比的列全列出来。"
+            "表格须有表头与单位、每行列数一致、前后各留一个空行；"
+            "单元格只放材料事实，不要放“数据完备性”“披露情况”这类对信息本身的评价，"
+            "也不要用“材料不足”填满整列凑一张表；"
+            "单元格数字只能来自本章证据与记录，不得复述系统整理数据表已列出的科目。"
+            "上文“不要输出/复制或重写系统表格”只约束服务端附加的数据表，"
+            "不限制按本段自行组织的分析表格。"
+        )
+    elif mode == "limited":
+        body = (
+            "仅在待核验事项或条款对照确有必要时使用 Markdown 表格，其余内容使用段落；"
+            "表格须有表头与单位、每行列数一致、前后各留一个空行；"
+            "关键列多数只能写“材料不足”时不要出表。"
+        )
+    else:
+        return ""
+    return f"{TABLE_INSTRUCTION_MARK}{body}{TABLE_INSTRUCTION_END}"
+
+
+_TABLE_BLOCK_RE = re.compile(r"\s*【表格使用】.*?【表格使用结束】", re.S)
+
+
+def apply_table_instruction(prompt: str, table_mode: str) -> str:
+    """整段替换表格指令（幂等）：先摘掉旧块，再按当前开关追加。
+
+    ⚠️ 必须插在「全局指令」**之前**：`apply_global_directive()` 会从哨兵处截断再重注入，
+    若把表格段追加在哨兵之后，会在下一次读取时被整段截掉（2026-10-26 实测：项目覆盖里
+    连全局指令一起存了，注入长度 3992 读回来仍是 3775）。全局指令是用户声明的最高优先级，
+    本来也应当保持在最末。
+    """
+    text = _TABLE_BLOCK_RE.sub("", str(prompt or "")).rstrip()
+    block = table_instruction(table_mode)
+    if not block:
+        return text
+    at = text.find("【全局强制指令】")
+    if at >= 0:
+        return f"{text[:at].rstrip()}\n\n{block}\n\n{text[at:]}"
+    return f"{text}\n\n{block}"
+
+
 # 业务规则的默认值：与 B1 新增的可编辑字段同源，B1 之前任何配置都落到这两个保守分支。
 DEFAULT_CALCULATION_MODE = "system_only"     # off | system_only | model
 DEFAULT_RECOMMENDATION_MODE = "off"          # off | qualitative | structured
@@ -280,6 +365,13 @@ CALCULATION_SENTENCE_MODEL = (
     "常用指标已由系统预计算，可直接引用；资料未覆盖的指标可自行定义并计算，"
     "但必须在 calculations 中给出名称、定义、公式与冻结记录 ID，由系统复算后采用——"
     "不得引入未冻结的输入，不得叠加增长假设、折扣率或调整值，不得做预测模型。"
+    # 复合指标必须写完整算式（2026-10-28 北投 financial 实测：模型算"货币资金对短期债务
+    # 覆盖倍数"时 value 写 1.05、input_record_ids 只列了「货币资金/短期借款」，分母漏了
+    # 「一年内到期的非流动负债」，复算得 3.47 → value_mismatch → 整章回退）。
+    # calculation 不能引用另一条 calculation，所以分母的多项必须在同一个 formula 里展开。
+    "复合指标必须把完整算式写进一个 formula：分母由多项相加时写成 v1/(v2+v3)，"
+    "并把每个输入按 v1、v2、v3 的顺序列入 input_record_ids；"
+    "不得引用另一条计算的中间结果当输入，系统只认冻结记录。"
 )
 CALCULATION_SENTENCE_OFF = "本章不启用自主计算：只能引用系统预计算结果。"
 
@@ -670,6 +762,11 @@ def chapter_system_prompt(chapter_key: str) -> str:
             lines.append("除确定性冲突块外，不得使用项目符号或编号列表。")
         elif list_mode == "limited":
             lines.append("仅在待核验事项或确定性冲突块中使用简短列表，其余内容使用连贯段落。")
+        # 表格开关走自定界整段（见 TABLE_INSTRUCTION_MARK 注释）：编译时写入，
+        # 读取时再由 `apply_table_instruction()` 按当前开关整段替换。
+        table_block = table_instruction(narrative.get("table_mode", "prohibited"))
+        if table_block:
+            lines.append(table_block)
         avoid_openings = narrative.get("avoid_openings") or []
         if avoid_openings:
             lines.append("不得以以下技术化表达起句：" + "、".join(avoid_openings) + "。")
@@ -838,6 +935,30 @@ def compile_structured_prompt(chapter_key: str, editable: dict) -> str:
     return apply_global_directive(" ".join(lines))
 
 
+def compile_preview_prompt(chapter_key: str, editable: dict, subsections: list[dict] | None = None) -> str:
+    """预览口径：与实际生成同源的 system prompt（含三级小节契约）。
+
+    `compile_structured_prompt` 只编译章节级配置；生成时 `llm._report_request` 还会用
+    「三级小节」替换「必须保留内容区块」「行文顺序」两句，并追加小节输出契约。
+    预览若不补这一步，用户看到的是一份"生成时并不存在"的文本——同一批内容区块会在
+    内容要求、行文顺序和小节清单里各出现一次。
+    """
+    prompt = compile_structured_prompt(chapter_key, editable)
+    if not subsections:
+        return prompt
+    # 局部导入：llm 依赖 chapter_prompts，模块级互相导入会成环。
+    from .llm import apply_subsection_contract
+
+    merged = _merge_editable(load_chapter_config(chapter_key), editable)
+    contract = structured_json_shape(merged) + structured_array_contract(merged)
+    return apply_global_directive(apply_subsection_contract(
+        strip_global_directive(prompt), subsections,
+        replace_contract=contract,
+        extra_keys=extra_shape_keys(merged),
+        table_mode=str((merged.get("narrative_contract") or {}).get("table_mode") or "prohibited"),
+    ))
+
+
 def _decode_structured(value: object) -> dict | None:
     if isinstance(value, dict):
         return value
@@ -956,6 +1077,20 @@ def load_global_directive() -> str:
     return str((item or {}).get("content") or "").strip()
 
 
+def strip_global_directive(prompt: str) -> str:
+    """摘掉已注入的全局指令段（连同哨兵），返回其之前的内容。
+
+    ``apply_global_directive()`` 是**从哨兵处截断**再整体重注入的。因此任何在哨兵
+    **之后**追加的契约段（输出形状句、小节输出契约、表格指令）都会在末尾那次注入时
+    被整段吃掉——2026-10-27 实测：operations 配了两个小节，模型收到的提示词里连
+    ``subsections`` 字样都没有，响应自然不带小节，被判"响应缺少小节内容"整章回退。
+    运行时要追加契约段，先用本函数摘掉，末尾再统一 ``apply_global_directive()``。
+    """
+    text = str(prompt or "")
+    mark_at = text.find(GLOBAL_DIRECTIVE_MARK)
+    return text[:mark_at].rstrip() if mark_at >= 0 else text
+
+
 def apply_global_directive(prompt: str) -> str:
     """把全局指令追加到 prompt 最末；**幂等**（先截到哨兵之前再整体重注入）。
 
@@ -990,6 +1125,18 @@ def chapter_prompt(chapter_key: str, project_id: str | None = None) -> str:
     The database import is deliberately lazy so the prompt pack remains usable by
     isolated validation/tests without initializing the application database.
     """
+    # 表格开关是**行为开关**，不是用户文案：从生效配置现算，读取时注入。
+    # 项目覆盖保存的是编译后的整段字符串，新增的 narrative 字段不会自动进入它
+    # （2026-10-26 实测：YAML 已 allowed，覆盖里仍是"不要输出…系统表格"）。
+    # 放进覆盖/默认两条路径的公共出口，才能保证预览、生成、导出看到同一段话。
+    table_mode = "prohibited"
+    try:
+        effective = effective_chapter_config(chapter_key, project_id) if project_id else load_chapter_config(chapter_key)
+        table_mode = str(
+            (effective.get("narrative_contract") or {}).get("table_mode") or "prohibited"
+        )
+    except Exception:
+        table_mode = "prohibited"
     if project_id:
         try:
             from .database import row
@@ -998,12 +1145,14 @@ def chapter_prompt(chapter_key: str, project_id: str | None = None) -> str:
                 (project_id, chapter_key),
             )
             if item and str(item.get("prompt") or "").strip():
-                return apply_global_directive(str(item["prompt"]))
+                return apply_global_directive(
+                    apply_table_instruction(str(item["prompt"]), table_mode))
         except Exception:
             # A missing table during an old-process hot reload must not break
             # report generation; the checked-in contract remains the fallback.
             pass
-    return apply_global_directive(chapter_default_prompt(chapter_key))
+    return apply_global_directive(
+        apply_table_instruction(chapter_default_prompt(chapter_key), table_mode))
 
 
 def migrate_legacy_prompt_overrides() -> None:

@@ -407,6 +407,39 @@ class LlmSubsection(BaseModel):
     citation_ids: list[str] = Field(default_factory=list)
 
 
+def _blank_text_values(data: object, fields: tuple[str, ...]) -> object:
+    """把文本字段的 ``None``/数字收敛成字符串——**只在 schema 边界**做结构容忍。
+
+    2026-10-27 实测：模型对"不需要额度/费率"的建议返回 ``"amount_value": null``，
+    Pydantic 直接判 ``schema_error``（recommendations.0.amount_value / amount_unit /
+    rate_value / rate_unit），整章被退回确定性草稿。这类偏差是**格式**问题，不该占用
+    安全判定；业务口径仍由 ``recommendation_rules.normalize_and_validate`` 与
+    ``chapter_calculations.verify_calculation`` 承担。
+    """
+    if not isinstance(data, dict):
+        return data
+    cleaned = dict(data)
+    for key in fields:
+        if key not in cleaned:
+            continue
+        value = cleaned[key]
+        if value is None or isinstance(value, bool):
+            cleaned[key] = ""
+        elif isinstance(value, (int, float)):
+            cleaned[key] = str(value)
+    return cleaned
+
+
+_CALCULATION_TEXT_FIELDS = (
+    "calculation_id", "name", "definition", "formula", "unit",
+    "subject", "period", "scope", "cross_period_reason", "content_anchor",
+)
+_RECOMMENDATION_TEXT_FIELDS = (
+    "recommendation_id", "recommendation_type", "content", "basis",
+    "amount_value", "amount_unit", "rate_value", "rate_unit", "content_anchor",
+)
+
+
 class LlmCalculation(BaseModel):
     """模型自主返回的一条计算（《风控约束分层》方案 §三.1）。
 
@@ -436,6 +469,11 @@ class LlmCalculation(BaseModel):
     # 正文里依赖该指标的原句：B2 用它定位"哪句分析必须跟着改"，也为人工复核指路。
     content_anchor: str = Field(default="", max_length=300)
     applies_to: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_blank_text(cls, data: object) -> object:
+        return _blank_text_values(data, _CALCULATION_TEXT_FIELDS)
 
     @field_validator("value", mode="before")
     @classmethod
@@ -470,6 +508,18 @@ class LlmRecommendation(BaseModel):
     rate_unit: str = Field(default="", max_length=20)
     parameters: dict[str, str] = Field(default_factory=dict)
     content_anchor: str = Field(default="", max_length=200)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_blank_text(cls, data: object) -> object:
+        """容忍模型把"不适用的建议参数"写成 ``null``。
+
+        2026-10-27 实测：``recommendation_type: "accept"`` 的一条建议带了
+        ``amount_value/amount_unit/rate_value/rate_unit`` 四个 ``null``，Pydantic 判
+        ``schema_error`` → 整章退回确定性草稿（用户看到的就是"重生没有表"）。
+        空值语义本身就是"未给出该项参数"，收敛成空串即可，业务校验仍在下一层。
+        """
+        return _blank_text_values(data, _RECOMMENDATION_TEXT_FIELDS)
 
 
 class LlmSection(BaseModel):

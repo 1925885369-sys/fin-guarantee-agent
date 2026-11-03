@@ -46,6 +46,18 @@ _GAP_EDGE_RE = re.compile(
     r"|无法形成(?:确定性判断|确定结论|结论)|无法区分|无法确认|无法核实)"
 )
 
+# 边界与方法声明：**不含事实内容**的句子（"本报告不另行评定债券级别""需结合专户安排
+# 进一步核验"）。它们既不该进支持率分母，也不该因"科目在材料里查无"被判无证据——
+# 2026-11-02 北投 rating/cashflow 实测：各有一句这样的边界表述被记 missing_record，
+# 修复轮只能改正文、改不掉"这句话本来就不是事实主张"，整章回退。
+# ⚠️ 使用时**必须同时要求该句没有数字**：带数字的边界句仍要逐个核对数值。
+_BOUNDARY_DECLARATION_RE = re.compile(
+    r"(?:不另行|不再|不重复|不单独|不作|未作)(?:进行)?(?:评定|评级|评估|判断|认定|核验)"
+    r"|仅(?:能|可)?引用(?:材料|评级|披露|上文)"
+    r"|(?:需|应|有待|尚需|仍需)(?:进一步|另行|结合)[^。；]{0,24}(?:核验|核实|确认)"
+    r"|不构成[^。；]{0,40}(?:判断|结论|意见|建议|评价)"
+)
+
 # 冲突并列标记（方案 §二 line 16："冲突必须并列展示全部来源，不得自动选值"）。
 # 2026-10-20 华辰 financial / cashflow 实测：同一张现金流量表在发行文件不同页面有两个版本，
 # 模型按规则把两组值都写出来，但只有一组被抽成冻结记录 → 旧口径判 missing_record
@@ -630,6 +642,16 @@ def _numeric_binding_outcome(project_id: str, records: list[dict], claim: str,
             and len(missing_supported) * 2 <= len(mentions)
         ):
             return "needs_review", "conflict_values_unverified", matched
+        # 长句聚合豁免（2026-10-28 北投 financial/cashflow/debt 实测）：模型常把一组
+        # 同源数字写进一个长句（"经营活动现金流入小计2023年5,500,105.40万元、2024年…、
+        # 2025年…；其中销售商品…"），其中**多数**数字都能被记录接住，只有个别（如模型
+        # 自算的合计/比率）漏网。旧实现"有一个漏网就整句 unsupported"，一句就够把整章
+        # 打回确定性模板——而正文其余部分全部有据可查。
+        # 判据：至少 1 个数字被接住，且未命中不超过 1/3 → 降为待核验（仍计入未决、
+        # 仍阻断最终交付），由人工裁定那个别数值；整段凭空写数（0 命中或过半未命中）
+        # 仍按 unsupported 硬拦。
+        if allowed_numbers >= 1 and len(missing_supported) * 3 <= len(mentions):
+            return "needs_review", "partial_numbers_unverified", matched
         return "unsupported", "missing_record", matched
     binding_records = matchable_records(records)
     allowed_entries = evidence_number_keys(binding_records)
@@ -791,6 +813,12 @@ def _claim_support_outcome(
         return "system_derived", "", []
     if section_key == "risks" and row("SELECT COUNT(*) count FROM risks WHERE project_id=?", (project_id,))["count"] == 0:
         return "system_derived", "", []
+    # 边界/方法声明先于所有事实判定：这类句子没有可核对的业务内容，判"不适用"最准确
+    # （既不进支持率分母、也不会拖累交付）。带数字的句子不走这条，仍按业务事实校验。
+    # ⚠️ 必须放在 `not source_ids` 之前：边界声明常出现在纯方法段落里，那段可能没有
+    # 单独引用，走"无来源 → unsupported"会把合规表述判成无证据。
+    if _BOUNDARY_DECLARATION_RE.search(claim) and not _number_mentions(claim):
+        return "not_applicable", "", []
     if not source_ids:
         if content_origin == "deterministic":
             mentions = _number_mentions(claim)
@@ -910,7 +938,23 @@ def _support_context(project_id: str) -> tuple[dict, dict, set]:
         item["id"]: item["text"]
         for item in rows("SELECT id,text FROM analysis_sources WHERE project_id=?", (project_id,))
     }
-    return citation_map, source_texts, set(source_texts)
+    valid_sources = set(source_texts)
+    # 章节证据的 id 约定是 `c-{analysis_source_id}`（`chapter_guard._evidence_item`），
+    # 而 `citations` 表是**另一套引用池**，两者不保证同步（2026-10-27 北投 operations
+    # 实测：12 条章节证据里 `c-9185c07a`/`c-a5fd12f8` 不在 citations 表）。
+    # 不补这些合成条目，模型"引用了本章给它的材料"会被交付评估判成未授权引用，
+    # 而 safety 修复只能改正文、改不了引用池 —— 首稿与修复稿都必挂，整章回退。
+    # 授权严格性由**章节级** `allowed_citation_ids` 承担（模型只能引用发给它的那几条），
+    # 支持级只看"这条引用能否解析到本项目来源"，两级口径不重复设卡。
+    for source_id in valid_sources:
+        synthetic = f"c-{source_id}"
+        if synthetic in citation_map:
+            continue
+        citation_map[synthetic] = {
+            "id": synthetic, "source_id": source_id,
+            "quote": "", "locator": "", "locator_type": "",
+        }
+    return citation_map, source_texts, valid_sources
 
 
 def _as_list(value: object) -> list:

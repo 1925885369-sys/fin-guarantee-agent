@@ -22,7 +22,8 @@ from decimal import Decimal
 from .database import connect, now_iso, rows
 from .table_block import (
     TableBlock, TableCell, annual_series_block, cell_from_text, conflict_comparison_block,
-    table_block_from_dict, validate_table_block,
+    display_table_title, table_block_from_dict, validate_table_block, validation_status_label,
+    _explicit_unit,
 )
 
 
@@ -481,7 +482,7 @@ def render_table_block(block: TableBlock, *, index: int, total: int) -> str:
     meta.append(f"来源：{_origin_label(block)}")
     # 不写「表 N/M」形式：``N/M`` 与「模型采用率 x/y」的形状相同，成品校验里
     # 「不得泄漏采用率」的守卫会把它一并拦下（实测撞过）。读者也不需要分母。
-    lines = [f"**表 {index}：{block.title}**（{'｜'.join(meta)}）", ""]
+    lines = [f"**表 {index}：{display_table_title(block.title)}**（{'｜'.join(meta)}）", ""]
     lines.append("| " + " | ".join(column.label for column in block.columns) + " |")
     lines.append("| " + " | ".join("---" for _ in block.columns) + " |")
     for row in block.rows:
@@ -489,7 +490,8 @@ def render_table_block(block: TableBlock, *, index: int, total: int) -> str:
     if block.notes:
         lines.extend(["", *block.notes])
     if block.validation_status != "passed":
-        lines.extend(["", f"> 本表校验状态：{block.validation_status}，需人工确认后方可作为数据使用。"])
+        lines.extend(["", f"> 本表校验状态：{validation_status_label(block.validation_status)}，"
+                          "需人工确认后方可作为数据使用。"])
     return "\n".join(lines)
 
 
@@ -568,6 +570,137 @@ def table_snapshot_status(project_id: str, chapter_key: str, *, subject: str) ->
         "outdated": (not snapshot or frozen_hash != current_hash
                      or str(snapshot[0]["rule_version"]) != TABLE_RULE_VERSION),
     }
+
+
+# 系统表格的**归属位置**：table_id 前缀 → 正文锚点关键词（**段落优先，其次小节标题**）。
+#
+# 背景（2026-10-28 用户反馈）：表格原来一律堆在章末的「系统整理数据表」块里，财务章 24 张表
+# 全挤在一处，正文讲固定资产/存货/应收时旁边没有表——"表格失效"其实是表与正文脱节。
+# 关键词要挑**正文段落里真实出现的业务词**（"资产端""应收类""现金流量"），
+# 不能挑"财务""资产"这类宽泛词：它们会命中"1. 财务概览"把小节标题当锚点。
+TABLE_SECTION_ANCHORS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
+    "financial": (
+        ("report-financial-balance", ("资产端",)),
+        ("report-financial-receivables", ("应收类",)),
+        ("report-financial-income", ("利润表方面", "营业成本")),
+        ("report-financial-cashflow", ("现金流量方面",)),
+        ("report-financial-debt", ("负债端",)),
+    ),
+    "cashflow": (
+        ("report-cashflow-sources", ("偿债来源", "第一层来源")),
+    ),
+    "debt": (
+        # 只认小节标题：正文里"有息负债余额、类型和期限结构"这类表名句会把表拖到后文。
+        ("report-debt-structure", ("债务概览",)),
+    ),
+    "rating": (
+        ("report-rating-conclusion", ("评级结论", "评级结果")),
+        ("report-rating-concerns", ("关注", "调级")),
+        ("report-rating-reconciliation", ("口径", "差异")),
+    ),
+}
+
+# 上传材料原表没有固定 table_id（页码后缀随项目变化），按**表名关键词**归位。
+# 分章配置：财务章用精确的段落词（该章正文按"资产端/应收类/负债端/利润表方面/
+# 现金流量方面"分段），其余章用通用词兜底（找不到就回落章末，不会丢表）。
+UPLOAD_TITLE_ANCHORS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
+    "financial": (
+        ("资产负债表", ("资产端",)),
+        ("资产结构", ("资产端",)),
+        ("存货", ("流动资产端",)),
+        ("应收", ("应收类",)),
+        ("利润表", ("利润表方面", "营业成本")),
+        ("投资收益", ("利润表方面",)),
+        ("现金流量", ("现金流量方面",)),
+        ("借款", ("负债端",)),
+        ("应付款", ("负债端",)),
+        ("应付账款", ("负债端",)),
+        ("有息债务", ("负债端",)),
+        ("授信", ("负债端",)),
+        ("财务数据和财务指标", ("资产端",)),
+        ("覆盖情况", ("审查边界", "证据边界")),
+    ),
+    "*": (
+        ("资产负债表", ("资产端", "资产总额", "资产负债")),
+        ("资产结构", ("资产端", "资产结构")),
+        ("存货", ("存货", "流动资产")),
+        ("应收", ("应收类", "应收账款")),
+        ("利润表", ("利润表", "营业成本")),
+        ("投资收益", ("投资收益", "利润表")),
+        ("现金流量表", ("现金流量", "经营活动现金")),
+        ("现金流量情况", ("现金流量", "经营活动现金")),
+        ("借款", ("负债端", "借款")),
+        ("有息债务", ("有息", "负债端", "债务结构")),
+        ("有息负债", ("有息", "负债端", "债务结构")),
+        ("授信", ("授信", "银行")),
+        ("应付款", ("负债端", "应付")),
+        ("应付账款", ("负债端", "应付")),
+        ("评级", ("评级", "关注")),
+        ("覆盖情况", ("审查边界", "证据边界")),
+    ),
+}
+
+
+def _anchor_keywords(chapter_key: str, block: TableBlock) -> tuple[str, ...]:
+    """表 → 锚点关键词；未配置返回空元组（回落章末）。"""
+    table_id = str(block.table_id or "")
+    for prefix, keywords in TABLE_SECTION_ANCHORS.get(chapter_key, ()):
+        if table_id.startswith(prefix):
+            return keywords
+    if table_id.startswith("uploaded-"):
+        title = str(block.title or "")
+        rules = (*UPLOAD_TITLE_ANCHORS.get(chapter_key, ()), *UPLOAD_TITLE_ANCHORS["*"])
+        for keyword, anchors in rules:
+            if keyword in title:
+                return anchors
+    return ()
+
+
+def _anchor_position(parsed: list[dict], keywords: tuple[str, ...]) -> int | None:
+    """锚点在正文分块里的位置：**小节标题优先**，其次段落。
+
+    顺序不能反：评级章正文第 3 节也会提到"评级结论"，段落优先会把「评级结论对照表」
+    拖到章末；而小节标题「1. 评级结论」是权威归属。反过来，财务章的小节标题是
+    「主要会计科目分析」，表要跟着"资产端/应收类"这些**段落**走——所以标题命中后
+    再退段落。
+    """
+    if not keywords:
+        return None
+    for index, block in enumerate(parsed):
+        if block.get("kind") != "heading":
+            continue
+        if not any(keyword in str(block.get("text") or "") for keyword in keywords):
+            continue
+        cursor = index
+        while cursor + 1 < len(parsed) and parsed[cursor + 1].get("kind") != "heading":
+            cursor += 1
+        return cursor
+    for index, block in enumerate(parsed):
+        if block.get("kind") not in {"paragraph", "list", "quote"}:
+            continue
+        text = str(block.get("text") or "") or " ".join(
+            str(item) for item in (block.get("items") or []))
+        if any(keyword in text for keyword in keywords):
+            return index
+    return None
+
+
+def place_blocks_by_anchor(
+    chapter_key: str, blocks: list[TableBlock], parsed: list[dict],
+) -> tuple[dict[int, list[TableBlock]], list[TableBlock]]:
+    """把表格分配到正文分块之后。
+
+    返回 ``(分块下标 → 表列表, 未归属的表)``。未归属的由调用方放回章末（旧行为，保证不丢表）。
+    """
+    placed: dict[int, list[TableBlock]] = {}
+    loose: list[TableBlock] = []
+    for block in blocks:
+        position = _anchor_position(parsed, _anchor_keywords(chapter_key, block))
+        if position is None:
+            loose.append(block)
+        else:
+            placed.setdefault(position, []).append(block)
+    return placed, loose
 
 
 def chapter_table_blocks(project_id: str, chapter_key: str, *, subject: str) -> list[TableBlock]:
@@ -1097,8 +1230,12 @@ def rating_table_blocks(project_id: str, *, subject: str, scope: str = "合并�
             rows=conclusions, source_refs=(),
             notes=("注：评级结论为外部信用评价文件的意见，不等于担保机构的独立判断。",),
         ))
-    rating_cells = _rating_cells(project_id)
+    # 期间先定：评级口径两行必须与档案侧同一期间取列，否则会拿一季度值比年度值。
     latest = (_periods(grouped, RATING_SOURCE_ITEMS) or ["2025"])[0]
+    rating_cells = _rating_cells(project_id, latest)
+    concern_block = _rating_concern_block(project_id, subject=subject)
+    if concern_block:
+        blocks.append(concern_block)
     profile_cells = {
         label: cell_from_text(
             _format(grouped[key][latest]["value"]), unit="万元", origin_type="profile_fact",
@@ -1117,9 +1254,48 @@ def rating_table_blocks(project_id: str, *, subject: str, scope: str = "合并�
             uploaded_cells={label: rating_cells.get(label, TableCell(raw="—", status="not_applicable"))
                             for _, label in RATING_SOURCE_ITEMS},
             left_label="主体档案口径", right_label="评级口径",
+            # 评级口径披露到「亿元」两位小数，与审计口径的万元精确值必然有舍入差；
+            # 0.5% 容忍只吸收披露精度，不掩盖口径分歧。
+            tolerance_ratio=0.005,
             notes=("注：两列口径不同，差异本身即为需核验事项；系统不自动择一采信。",),
         ))
     return blocks
+
+
+def _rating_concern_block(project_id: str, *, subject: str) -> TableBlock | None:
+    """评级关注事项表：逐条列出评级报告「关注」段，附原文来源。
+
+    事实层存的是合并文本（同键多值会进冲突组），这里按「；」拆回条目，每条单独一行，
+    读者能逐条核对；来源仍指向评级报告对应页。
+    """
+    from .facts import strip_canonical_prefix
+
+    record = rows(
+        "SELECT c.text_value,a.source_ids AS source_ids FROM canonical_facts c "
+        "LEFT JOIN fact_assertions a ON a.id=c.selected_assertion_id "
+        "WHERE c.project_id=? AND c.fact_key='rating_concerns' LIMIT 1",
+        (project_id,),
+    )
+    if not record or not str(record[0]["text_value"] or "").strip():
+        return None
+    text = strip_canonical_prefix(str(record[0]["text_value"]))
+    items = [item.strip() for item in text.split("；") if item.strip()]
+    if not items:
+        return None
+    source_ids = _decode(record[0]["source_ids"])
+    return annual_series_block(
+        table_id="report-rating-concerns", title="评级关注事项",
+        subject=subject, scope="评级口径", unit="", period_labels=["关注事项"],
+        rows=[
+            (f"关注{index}", (cell_from_text(item, source_ids=source_ids, fact_key="rating_concerns"),))
+            for index, item in enumerate(items[:6], start=1)
+        ],
+        source_refs=source_ids,
+        # 关注事项是对原文的归纳（不是逐格数值），用 profile_facts 语义：不要求单元格坐标，
+        # 也不进「上传原表」那套 bbox 追溯检查（否则整表会被判 blocked）。
+        origin_mode="profile_facts",
+        notes=("注：关注事项为外部信用评价文件原文的归纳，不等于担保机构的独立判断。",),
+    )
 
 
 def _rating_conclusions(project_id: str) -> list[tuple[str, tuple[TableCell, ...]]]:
@@ -1197,7 +1373,7 @@ def _tranche_rating_rows(project_id: str) -> list[tuple[str, tuple[TableCell, ..
     return output
 
 
-def _rating_cells(project_id: str) -> dict[str, TableCell]:
+def _rating_cells(project_id: str, period: str) -> dict[str, TableCell]:
     output: dict[str, TableCell] = {}
     for key, label in (("rating_revenue", "营业收入"), ("rating_total_debt", "有息负债")):
         record = rows(
@@ -1211,6 +1387,97 @@ def _rating_cells(project_id: str) -> dict[str, TableCell]:
                 _format(record[0]["value"]), unit=str(record[0]["unit"] or "万元"),
                 origin_type="profile_fact", source_ids=_decode(record[0]["source_ids"]), fact_key=key,
             )
+    # 事实层抽不到时（评级报告表格整块落在一个文本行，行级抽取没有列对齐依据），
+    # 改从**结构化表格**按列取同一个期间的值——表格自带列名与行标签，不靠猜。
+    if len(output) < 2:
+        for label, cell in _rating_cells_from_tables(project_id, period).items():
+            output.setdefault(label, cell)
+    return output
+
+
+_RATING_ROW_ALIASES = (
+    ("营业收入", ("营业总收入", "营业收入")),
+    ("有息负债", ("有息负债", "总债务", "有息债务")),
+)
+
+
+def _period_column(table, period: str) -> int | None:
+    """表内哪一列对应 ``period``。支持**两行表头**（年份写在第二行）。
+
+    实测中邮 p6「公司主要财务数据」：首行是「合并口径」跨列，年份在第二行
+    「项目 2023 年 2024 年 2025 年」；``load_tables`` 的 ``columns`` 只保留首行，
+    年份因此要靠扫描 rows 前几行的"纯年份行"补回来。
+    """
+    pattern = re.compile(rf"(?<!\d){re.escape(period)}(?!\d)")
+    for index in range(1, len(table.columns)):
+        if pattern.search(str(table.columns[index])):
+            return index
+    for row in table.rows[:3]:
+        if not row:
+            return None
+        if row[0].text.strip():
+            return None  # 首列有内容 → 已经是数据行，没有更多表头
+        for index in range(1, len(row)):
+            if pattern.search(row[index].text):
+                return index
+    return None
+
+
+def _rating_cells_from_tables(project_id: str, period: str) -> dict[str, TableCell]:
+    """评级口径两行：从评级报告表格取**与主体档案同一期间**的列值，换算为万元。
+
+    北投 p4「财务概况」在 PDF 文本里是「… 2023 2024 2025 2026.3 总资产（亿元）
+    8,747.33 …」一整行（表格块内没有换行），``facts`` 的行级抽取因此拿不到
+    "标签—年度列"的对应关系，按既有纪律只能不抽；表格对象本身有列名（2023/2024/
+    2025/2026.3）和行标签，按列读是唯一不靠猜的取数方式。
+
+    **期间必须与档案侧一致**：先前取"最新列"会拿到 2026 一季度的 329,800 万元去和
+    2025 年度的 1,875,971.19 万元比对，直接误报成冲突；没有同一期间就不取（留空）。
+    """
+    from .table_extraction import normalize_cell
+    from .table_store import load_tables
+
+    if not period:
+        return {}
+    rating_documents = {
+        str(item["id"]) for item in rows(
+            "SELECT id FROM documents WHERE project_id=? AND document_role='rating_report'",
+            (project_id,),
+        )
+    }
+    if not rating_documents:
+        return {}
+    output: dict[str, TableCell] = {}
+    for table in load_tables(project_id):
+        if table.document_id not in rating_documents or len(table.columns) < 2:
+            continue
+        column = _period_column(table, period)
+        if column is None:
+            continue
+        for row in table.rows:
+            if len(row) <= column:
+                continue
+            label = row[0].text.strip()
+            status, number = normalize_cell(row[column].text)
+            if status not in {"number", "zero"} or number is None:
+                continue
+            for display, aliases in _RATING_ROW_ALIASES:
+                if display in output or not any(alias in label for alias in aliases):
+                    continue
+                unit = _explicit_unit(label) or table.unit
+                factor = {"元": Decimal("0.0001"), "万元": Decimal("1"), "亿元": Decimal("10000")}.get(unit)
+                if factor is None:
+                    continue
+                source_ids = tuple(str(item["id"]) for item in rows(
+                    "SELECT id FROM sources WHERE project_id=? AND document_id=? AND page=?",
+                    (project_id, table.document_id, table.page),
+                ))
+                output[display] = cell_from_text(
+                    _format(number * factor), unit="万元", origin_type="uploaded_cell",
+                    source_ids=source_ids,
+                    locator={"page": table.page, "table_key": table.table_key},
+                    fact_key="rating_revenue" if display == "营业收入" else "rating_total_debt",
+                )
     return output
 
 

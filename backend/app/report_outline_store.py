@@ -189,12 +189,14 @@ def outline_fingerprint(outline: dict) -> str:
 
 
 def outline_for_chapter(project_id: str, chapter_key: str) -> dict | None:
-    """在 effective_outline 中按 ``template_key`` 找章节；不在目录/被删返回 None。"""
+    """在 effective_outline 中找章节：内置章按 ``template_key``，自定义章按 ``chapter_id``。"""
     for part in effective_outline(project_id).get("parts", []):
         if not isinstance(part, dict):
             continue
         for chapter in part.get("chapters", []) or []:
-            if isinstance(chapter, dict) and str(chapter.get("template_key") or "") == chapter_key:
+            if not isinstance(chapter, dict):
+                continue
+            if chapter_key in {str(chapter.get("template_key") or ""), str(chapter.get("chapter_id") or "")}:
                 return chapter
     return None
 

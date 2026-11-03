@@ -21,7 +21,7 @@ from pathlib import Path
 import fitz
 
 
-TABLE_PARSER_VERSION = "table-extractor-v3"
+TABLE_PARSER_VERSION = "table-extractor-v4"
 
 UNIT_LINE = re.compile(r"^单位\s*[:：]\s*(?P<unit>.+)$")
 NOTE_LINE = re.compile(r"^注\s*[:：]")
@@ -230,6 +230,18 @@ def _table_page(page: fitz.Page, page_no: int, lines: list[tuple[float, str]],
                 page_headers: frozenset[str] = frozenset()) -> list[ExtractedTable]:
     """把一页上的所有物理表格抽出来（尚未合并续表）。"""
     found = sorted(page.find_tables().tables, key=lambda item: float(item.bbox[1]))
+    # 无边框三线表（中诚信/联合资信评级报告常见）会被线框策略拆成每行一张的碎片表：
+    # 北投 p4「财务概况」实测 10 张 1 行表、数据行全为 0。此时改走坐标重建；正常表
+    # （中邮「图表1…图表25」）不触发，行为逐字不变。
+    from .pdf_table_rebuild import _fragmentary, rebuild_page_tables
+
+    if _fragmentary(found):
+        rebuilt = rebuild_page_tables(
+            page, page_no,
+            caption_for=lambda lower, upper: _caption_block(lines, lower, upper, page_headers),
+        )
+        if rebuilt:
+            return rebuilt
     output: list[ExtractedTable] = []
     previous_bottom = 0.0
     for index, raw in enumerate(found, start=1):

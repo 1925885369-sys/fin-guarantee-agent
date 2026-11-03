@@ -673,3 +673,38 @@ def test_model_needs_review_draft_blocks_final_delivery():
         assert not any("模型待核验稿" in item for item in blockers), blockers
     finally:
         _cleanup(project_id)
+
+
+def test_record_gap_keeps_model_content_but_unverifiable_still_blocks():
+    """记录缺口保留正文待核验；没有记录体系/没有来源时仍按硬失败回退。
+
+    2026-11-02：`missing_record` 的语义是"记录没建/没进本章证据"，不等于模型编造。
+    旧实现一律整章回退，用户丢掉整篇模型稿（cashflow 只因净利润不在本章记录里就中招）。
+    但"记录缺口"必须可核对——本章没有记录体系、或模型压根没拿到来源时，仍要回退。
+    """
+    from backend.app.workflow import _delivery_assessment
+
+    startup()
+    project_id = _fixture()          # with_source=True，来源池非空
+    try:
+        record = {
+            "record_id": "metric:revenue:2025", "record_type": "metric", "value": "100",
+            "unit": "万元", "label": "营业收入", "period": "2025", "status": "verified",
+            "scope": "", "subject": "", "source_ids": [],
+        }
+        base = {"section_key": SECTION, "allowed_source_ids": ["src-1"]}
+
+        gap = _delivery_assessment(
+            project_id, {**base, "evidence_records_json": json.dumps([record], ensure_ascii=False)},
+            "营业收入为999万元。", [], {}, {}, set(), [])
+        assert gap["passed"] is True, "记录缺口不该整章回退"
+        assert gap["soft_unsupported_claims"] == 1
+        assert gap["hard_unsupported_claims"] == 0
+
+        # 没有记录体系 → 无从核对 → 硬失败
+        blind = _delivery_assessment(
+            project_id, {**base, "evidence_records_json": "[]"},
+            "营业收入为999万元。", [], {}, {}, set(), [])
+        assert blind["passed"] is False
+    finally:
+        _cleanup(project_id)

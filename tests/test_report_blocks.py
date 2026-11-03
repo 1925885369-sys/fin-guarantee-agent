@@ -409,6 +409,51 @@ def test_word_adds_native_table_from_table_block_snapshot() -> None:
     assert not any(paragraph.text.strip().startswith("|") for paragraph in document.paragraphs)
 
 
+def test_model_authored_table_becomes_flagged_block(project) -> None:
+    """正文里的 Markdown 表格 → 独立 ``table`` 块（三端走"非系统表"渲染分支）。
+
+    标记只给内部统计（``model_generated``），**不在成品加痕迹**；表格行也不能漏进
+    段落块——否则网页/Word 会同时出现一张表和一个带竖线的段落。
+    """
+    from backend.app.report_blocks import section_blocks
+
+    content = (
+        "### 经营情况\n\n业务板块保持稳定。\n\n"
+        "| 板块 | 2025 | 2024 |\n| --- | --- | --- |\n| 轨交 | 120.5 | 118.0 |\n\n"
+        "综上，收入结构未发生重大变化。"
+    )
+    blocks = section_blocks(project["id"], {"section_key": "operations", "content": content}, subject=SUBJECT)
+    tables = [block for block in blocks if block.get("kind") == "table"]
+    assert len(tables) == 1
+    assert tables[0]["model_generated"] is True
+    assert tables[0]["validation_status"] == "needs_review"
+    assert len(tables[0]["rows"]) == 3
+    assert all(
+        "|" not in str(block.get("text") or "")
+        for block in blocks if block.get("kind") == "paragraph"
+    ), blocks
+
+
+def test_model_table_renders_as_native_word_table() -> None:
+    """无 ``table`` 快照的正文表格 → Word 原生表（不是竖线文本）。
+
+    这条守住三端一致性的底线：放开模型表格后，Word 里仍是真表格。
+    """
+    from backend.app.exports import _add_section_blocks
+    from docx import Document as _Document
+
+    document = _Document()
+    _add_section_blocks(document, [{
+        "kind": "table",
+        "rows": ["| 板块 | 2025 |", "| --- | --- |", "| 轨交 | 120.5 |"],
+        "model_generated": True,
+    }])
+    assert len(document.tables) == 1
+    assert len(document.tables[0].rows) == 2  # 分隔行不写入表格
+    assert document.tables[0].rows[0].cells[0].text == "板块"
+    assert document.tables[0].rows[1].cells[1].text == "120.5"
+
+
 def test_exports_have_no_forbidden_wording(project) -> None:
     """禁用材料名、内部 UUID、内部字段键都不得进入成品。"""
     write_financial_section(project)

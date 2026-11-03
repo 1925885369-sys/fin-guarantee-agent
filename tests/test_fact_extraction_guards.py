@@ -22,6 +22,7 @@ from backend.app.facts import (
     _amount_numbers,
     _find_alias,
     deterministic_extract,
+    rating_concerns_from_text,
     source_supports_fact_value,
     strip_canonical_prefix,
     text_value_token,
@@ -278,3 +279,30 @@ def test_rating_document_fallback_scans_whole_report_for_announcement_fields() -
     # 负例：非评级报告文档不触发兜底（不扩大其它文档的字段来源）。
     assert _rating_document_fallback_facts(
         [{**source_rows[0], "document_role": "prospectus"}], [], {}) == []
+
+
+def test_rating_concerns_from_text_merges_wrapped_lines():
+    """联合资信式「关注」段：按项目符号切条，折行并回上一条。
+
+    实测中邮 p5：每条的末行都折到下一行（"…需对公" / "司流动性管理保持关注。"），
+    按行拆会把一条关注劈成两条。
+    """
+    text = (
+        "信用评级报告 | 2\n"
+        "关注\n"
+        "\uf06e 公司经营易受外部环境影响。经济周期变化可能带来不利影\n响。\n"
+        "\uf06e 需对流动性管理情况保持关注。短期债务占比较高，需对公\n司流动性管理保持关注。\n"
+        "\uf06e 监管趋严对合规管理及风险管理提出了更高要求。需持续提升合规能力。\n"
+        "评级展望\n未来随着资本市场发展…"
+    )
+    items = rating_concerns_from_text(text)
+    assert len(items) == 3
+    assert items[0].endswith("带来不利影响。")
+    assert items[1].endswith("司流动性管理保持关注。")
+    assert all("评级展望" not in item for item in items)
+
+
+def test_rating_concerns_only_starts_at_heading():
+    """正文里的「需对…保持关注」不能开启段落——必须有独占一行的「关注」标题。"""
+    text = "公司经营情况\n需对流动性管理情况保持关注。短期债务占比较高。\n"
+    assert rating_concerns_from_text(text) == []

@@ -2068,8 +2068,19 @@ def preview_report_prompt(project_id: str, chapter_key: str, payload: ReportProm
         raise HTTPException(422, "确定性章节不支持结构化预览")
     # 预览不落库、不调模型；仅回带当前环境的编辑权限供前端展示。
     permissions = prompt_edit_permissions(project_id, request)
+    # 预览必须与生成同源：三级小节存在时，生成阶段会用小节契约替换内容区块/行文顺序句。
+    from .chapter_prompts import compile_preview_prompt
+    from .report_outline_store import outline_for_chapter
+
+    chapter = outline_for_chapter(project_id, chapter_key) or {}
+    subsections = [
+        {"subsection_id": str(item.get("subsection_id") or ""), "title": str(item.get("title") or "").strip(),
+         "prompt": str(item.get("prompt") or "").strip()}
+        for item in (chapter.get("subsections") or [])
+        if isinstance(item, dict) and item.get("enabled", True) and str(item.get("title") or "").strip()
+    ]
     return {"chapter_key": chapter_key, **_prompt_permission_fields(permissions),
-            "prompt": compile_structured_prompt(chapter_key, payload.config.model_dump(mode="json"))}
+            "prompt": compile_preview_prompt(chapter_key, payload.config.model_dump(mode="json"), subsections)}
 
 
 @app.delete("/api/projects/{project_id}/report-prompts/{chapter_key}")
@@ -2483,9 +2494,16 @@ def regenerate_section(project_id: str, section_key: str, x_project_token: Optio
             chapter_context.get("source_attribution_block"),
         ) if block],
     }, *_support_context(project_id))
-    if pre_support["unsupported_claims"]:
+    # 与生成期同一口径（2026-11-02）：记录缺口（missing_record）保留正文、标待核验；
+    # 只有明确错配（explicit_mismatch 等）才拒绝采用本次候选。
+    _hard_claims = [
+        item for item in (pre_support.get("claims") or [])
+        if item.get("support_status") == "unsupported"
+        and str(item.get("reason_code") or "") != "missing_record"
+    ]
+    if _hard_claims:
         failure = (
-            f"模型正文有 {pre_support['unsupported_claims']} 条主张未获证据支持，"
+            f"模型正文有 {len(_hard_claims)} 条主张与冻结记录明确冲突，"
             "已保留已有正文为旧版本（本次未采用）"
         )
         execute(

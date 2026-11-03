@@ -433,11 +433,13 @@ test("report prompt workspace supports structured chapter editing, preview, and 
   await page.locator(".prompt-manager-link").click();
 
   await expect(page.locator(".prompt-workspace")).toBeVisible();
-  await expect(page.locator(".prompt-chapter-option")).toHaveCount(17);
+  // 「全局指令」入口也带 .prompt-chapter-option（且排在章节之前），章节计数与索引须排除它。
+  const chapterButtons = page.locator(".prompt-chapter-option:not(.prompt-directive-entry)");
+  await expect(chapterButtons).toHaveCount(17);
 
   const selectChapter = async (index: number) => {
     if (testInfo.project.name === "mobile") await page.locator(".prompt-mobile-picker select").selectOption({ index });
-    else await page.locator(".prompt-chapter-option").nth(index).click();
+    else await chapterButtons.nth(index).click();
   };
 
   await selectChapter(0);
@@ -445,14 +447,47 @@ test("report prompt workspace supports structured chapter editing, preview, and 
   await expect(page.getByRole("button", { name: "保存项目配置" })).toHaveCount(0);
 
   await selectChapter(5);
+  // 只读风控约束入口已迁到「全局指令」页：章节视图不再重复展示。
+  await expect(page.locator(".prompt-constraints-summary")).toHaveCount(0);
+
+  const openDirective = async () => {
+    if (testInfo.project.name === "mobile") await page.locator(".prompt-mobile-picker select").selectOption("__directive__");
+    else await page.locator(".prompt-directive-entry").click();
+  };
+  await openDirective();
   await expect(page.locator(".prompt-constraints-summary")).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "查看详情" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("dialog")).toContainText("必须保留");
   await expect(page.getByRole("dialog")).toContainText("禁止事项");
+  // 逐章差异：弹窗内切换章节，必须保留项跟着变（bond_overview vs governance）
+  await page.getByLabel("查看章节").selectOption("bond_overview");
+  await expect(page.getByRole("dialog")).toContainText("拟议保证声明");
+  await page.getByLabel("查看章节").selectOption("governance");
+  await expect(page.getByRole("dialog")).toContainText("待核验声明");
+  await expect(page.getByRole("dialog")).not.toContainText("拟议保证声明");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // 高亮互斥：全局指令视图下只有它自己是选中态
+  await expect(page.locator(".prompt-chapter-nav .prompt-chapter-option.active")).toHaveCount(1);
+  await expect(page.locator(".prompt-chapter-nav .prompt-chapter-option.active.prompt-directive-entry")).toHaveCount(1);
+  await expect(page.locator('.prompt-chapter-nav [aria-current="page"]')).toHaveCount(1);
+
+  // 回到章节：指令项不再高亮（移动端下拉也必须能切回）
+  await selectChapter(5);
+  await expect(page.locator(".prompt-chapter-nav .prompt-chapter-option.active.prompt-directive-entry")).toHaveCount(0);
+  await expect(page.locator(".prompt-chapter-nav .prompt-chapter-option.active")).toHaveCount(1);
+
+  // 内容要求与三级小节去重：不再有「必需报告内容」编辑区，改为一句说明 + 打开小节
+  await page.locator("summary").filter({ hasText: "写作规则" }).first().click();
+  await expect(page.locator(".prompt-derived-hint").first()).toBeVisible();
+  await expect(page.getByText("必需报告内容")).toHaveCount(0);
+  await page.getByRole("button", { name: "打开三级小节" }).click();
+  await expect(page.locator(".prompt-outline-toggle")).toHaveAttribute("aria-expanded", "true");
+  await page.locator(".prompt-outline-toggle").click();
+  await expect(page.locator(".prompt-outline-toggle")).toHaveAttribute("aria-expanded", "false");
 
   const editor = page.getByLabel("章节目标");
   await expect(editor).toBeVisible();
@@ -464,30 +499,130 @@ test("report prompt workspace supports structured chapter editing, preview, and 
   await selectChapter(5);
   await expect(editor).toHaveValue(changed);
   // 篇幅由逐章 Prompt 控制：编辑器展示目标区间与实际口径，且不再有系统字符硬上限。
-  await page.locator("summary").filter({ hasText: "行文组织" }).first().click();
+  await page.locator("summary").filter({ hasText: "篇幅与排版" }).first().click();
   await expect(page.getByText("目标最小字符")).toBeVisible();
   await expect(page.locator(".prompt-length-policy")).toContainText("目标篇幅");
   await expect(page.locator(".prompt-length-policy")).not.toContainText("硬上限");
   await expect(page.locator(".prompt-length-policy")).toContainText("只统计分析正文");
   await page.screenshot({ path: testInfo.outputPath("prompt-length-policy.png") });
 
-  await page.getByRole("button", { name: "保存项目配置" }).click();
+  await page.getByRole("button", { name: "保存配置" }).click();
   await expect(page.locator(".prompt-detail-badges .custom")).toBeVisible();
-  const globalButton = page.locator(".prompt-action-bar .secondary-button");
-  await expect(globalButton).toBeEnabled();
-  await globalButton.click();
   await expect(page.locator(".prompt-action-bar")).toContainText("当前配置已保存");
   await expect(page.locator(".prompt-action-bar")).toContainText("最近更新");
   await page.getByRole("tab", { name: "完整 Prompt" }).click();
   await expect(page.locator(".prompt-preview textarea")).toHaveValue(/不可修改的风控约束/);
   await page.getByRole("tab", { name: "结构化配置" }).click();
   await page.getByRole("button", { name: "撤销项目覆盖" }).click();
-  if (await page.getByRole("button", { name: "撤销全局默认" }).count()) {
-    await page.getByRole("button", { name: "撤销全局默认" }).click();
-  }
 
   await page.screenshot({ path: testInfo.outputPath("report-prompts.png"), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("report prompt workspace pins outline editor on top and scrolls columns independently", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "独立双栏滚动是桌面端专属行为");
+  await page.goto("/");
+  await page.locator(".prompt-manager-link").click();
+  await expect(page.locator(".prompt-workspace")).toBeVisible();
+
+  // ① DOM 顺序：章节头 → 三级小节折叠条（默认收起）→ 配置 Tab
+  await expect(page.locator(".prompt-detail-head + .prompt-outline-top")).toHaveCount(1);
+  await expect(page.locator(".prompt-outline-top .prompt-outline-summary")).toBeVisible();
+  await expect(page.locator(".prompt-outline-top .outline-subsection-editor")).toHaveCount(0);
+  await expect(page.locator(".prompt-outline-top .outline-action-bar")).toHaveCount(0);
+  await expect(page.locator(".prompt-outline-top + .prompt-tabs")).toHaveCount(1);
+  const ordered = await page.evaluate(() => {
+    const head = document.querySelector(".prompt-detail-head")!;
+    const top = document.querySelector(".prompt-outline-top")!;
+    const tabs = document.querySelector(".prompt-tabs")!;
+    const after = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    return after(head, top) && after(top, tabs);
+  });
+  expect(ordered).toBe(true);
+
+  // ①b 默认收起；展开后才出现原编辑区与保存条，再收起供首屏断言使用
+  const outlineToggle = page.locator(".prompt-outline-toggle");
+  await expect(outlineToggle).toHaveAttribute("aria-expanded", "false");
+  await outlineToggle.click();
+  await expect(outlineToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".prompt-outline-top .outline-subsection-editor")).toBeVisible();
+  await expect(page.locator(".prompt-outline-top .outline-action-bar")).toBeVisible();
+  await outlineToggle.click();
+  await expect(outlineToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".prompt-outline-top .outline-subsection-editor")).toHaveCount(0);
+
+  // ② 页面不滚；左右两栏各自可滚
+  const layout = await page.evaluate(() => {
+    const nav = document.querySelector<HTMLElement>(".prompt-chapter-nav")!;
+    const detail = document.querySelector<HTMLElement>(".prompt-detail")!;
+    return {
+      docOverflow: document.documentElement.scrollHeight - window.innerHeight,
+      navScrollable: nav.scrollHeight > nav.clientHeight,
+      detailScrollable: detail.scrollHeight > detail.clientHeight,
+      navOverflowY: getComputedStyle(nav).overflowY,
+      detailOverflowY: getComputedStyle(detail).overflowY,
+    };
+  });
+  expect(layout.docOverflow).toBeLessThanOrEqual(1);
+  expect(layout.navScrollable).toBe(true);
+  expect(layout.detailScrollable).toBe(true);
+  expect(layout.navOverflowY).toBe("auto");
+  expect(layout.detailOverflowY).toBe("auto");
+
+  // ③ 两栏互不干扰
+  const nav = page.locator(".prompt-chapter-nav");
+  const detail = page.locator(".prompt-detail");
+  await nav.evaluate((el) => { el.scrollTop = 180; });
+  expect(await nav.evaluate((el) => el.scrollTop)).toBe(180);
+  await detail.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  expect(await nav.evaluate((el) => el.scrollTop)).toBe(180);
+
+  // ④ 切章回顶，且内容仍可滚（不是内容过短夹出来的 0）
+  await page.locator(".prompt-chapter-option:not(.prompt-directive-entry)").nth(5).click();
+  await expect.poll(() => detail.evaluate((el) => el.scrollTop)).toBe(0);
+  expect(await detail.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100);
+
+  // ⑤ Tab 切换：完整 Prompt 整段落在首屏内，且不卷动整页（预览高度随视口自适应）
+  await page.getByRole("tab", { name: "完整 Prompt" }).evaluate((el) => (el as HTMLElement).click());
+  await expect(page.locator(".prompt-preview")).toBeVisible();
+  const preview = await page.evaluate(() => {
+    const detail = document.querySelector<HTMLElement>(".prompt-detail")!;
+    const area = document.querySelector<HTMLElement>(".prompt-preview textarea")!.getBoundingClientRect();
+    const box = detail.getBoundingClientRect();
+    return { inside: area.top >= box.top - 1 && area.bottom <= box.bottom + 1, windowY: window.scrollY };
+  });
+  expect(preview.inside).toBe(true);
+  expect(preview.windowY).toBe(0);
+
+  // ⑥ 全局指令视图不出现三级小节
+  await page.locator(".prompt-directive-entry").click();
+  await expect(page.locator(".prompt-outline-top")).toHaveCount(0);
+  await expect(page.locator(".outline-subsection-editor")).toHaveCount(0);
+  await expect(page.locator(".outline-action-bar")).toHaveCount(0);
+
+  // ⑦ 无横向溢出
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("report prompt workspace mobile keeps single column and resets scroll on chapter pick", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "移动端降级断言");
+  await page.goto("/");
+  await page.locator(".menu-button").click();
+  await page.locator(".prompt-manager-link").click();
+  await expect(page.locator(".prompt-workspace")).toBeVisible();
+  await expect(page.locator(".prompt-chapter-nav")).toBeHidden();
+  expect(await page.locator(".prompt-detail").evaluate((el) => getComputedStyle(el).overflowY)).toBe("visible");
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.locator(".prompt-mobile-picker select").selectOption({ index: 5 });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(160);
+
+  // 移动端也必须能从「全局指令」切回章节（旧 bug：下拉不清 showDirective）
+  await page.locator(".prompt-mobile-picker select").selectOption("__directive__");
+  await expect(page.locator(".prompt-constraints-summary")).toBeVisible();
+  await page.locator(".prompt-mobile-picker select").selectOption({ index: 5 });
+  await expect(page.locator(".prompt-constraints-summary")).toHaveCount(0);
+  await expect(page.getByLabel("章节目标")).toBeVisible();
 });
 
 test("bond flagship exposes transaction materials and bond report structure", async ({ page }, testInfo) => {

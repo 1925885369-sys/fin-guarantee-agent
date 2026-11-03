@@ -89,6 +89,45 @@ def _fact_sources(project_id: str, keys: set[str]) -> list[str]:
     return list(dict.fromkeys(output))
 
 
+# 评级章的叙事素材在**评级报告的分析页**里：评级观点、关注因素、行业与财务判断、
+# 外部支持理由。只按 rating_* 事实绑定取页时，北投实测只拿到 2 页（p3 评级结果 +
+# p19 外部支持），模型看不到任何"评级观点"，评级章只能写材料不足或套固定模板。
+_RATING_ANALYSIS_ROLES = (
+    "rating_result", "rating_issuer_profile", "rating_operations",
+    "rating_financial_analysis", "external_support",
+)
+
+
+def _rating_report_sources(project_id: str, *, max_pages: int = 14) -> list[str]:
+    """按已定位的评级报告分析节取页（去重、限量）。
+
+    14 = 评级结果 1 + 发行人概况 1 + 经营 6 + 财务分析 4 + 外部支持 1（北投实测 13 页），
+    留 1 页余量；再多会被章节证据配额（``max_evidence_items=12``）截掉，没有意义。
+    """
+    placeholders = ",".join("?" for _ in _RATING_ANALYSIS_ROLES)
+    windows = rows(
+        "SELECT s.document_id, s.start_page, s.end_page FROM document_sections s "
+        "JOIN documents d ON d.id=s.document_id AND d.project_id=s.project_id "
+        "WHERE s.project_id=? AND d.document_role='rating_report' AND s.status='located' "
+        f"AND s.section_role IN ({placeholders}) AND s.start_page IS NOT NULL "
+        "ORDER BY s.start_page",
+        (project_id, *_RATING_ANALYSIS_ROLES),
+    )
+    output: list[str] = []
+    for item in windows:
+        start = int(item["start_page"])
+        end = int(item["end_page"] or start)
+        for record in rows(
+            "SELECT id FROM analysis_sources WHERE project_id=? AND document_id=? "
+            "AND page BETWEEN ? AND ? ORDER BY page",
+            (project_id, item["document_id"], start, end),
+        ):
+            if len(output) >= max_pages:
+                return list(dict.fromkeys(output))
+            output.append(str(record["id"]))
+    return list(dict.fromkeys(output))
+
+
 ANNUAL_PERIOD_RE = re.compile(r"(?:19|20)\d{2}")
 
 
@@ -274,9 +313,9 @@ def generate_bond_chapters(project_id: str, configured: bool = False) -> list[Bo
         ), financial_sources),
         ("rating", BOND_CHAPTER_TITLES["rating"], section(
             ("评级结论", f"评级机构认为，发行人主体评级为{_value(facts, 'issuer_rating')}，本期债项评级为{_value(facts, 'bond_rating')}，评级展望为{_value(facts, 'rating_outlook')}。"),
-            ("评级关注因素", f"评级报告所列关注因素为：{_value(facts, 'rating_downgrade_trigger')}。相关表述仅反映评级报告所载观点及其评级口径。"),
+            ("评级关注因素", f"评级报告所列关注因素为：{_value(facts, 'rating_concerns', '') or _value(facts, 'rating_downgrade_trigger')}。相关表述仅反映评级报告所载观点及其评级口径。"),
             ("使用边界", "评级机构意见不等同于担保机构独立判断。评级报告未披露或与其他来源口径不同的事项，应保留材料不足或口径差异说明，不以评级观点替代其他事实。"),
-        ), _fact_sources(project_id, {"issuer_rating", "bond_rating", "rating_outlook", "rating_downgrade_trigger", "rating_revenue", "rating_total_debt"})),
+        ), _fact_sources(project_id, {"issuer_rating", "bond_rating", "rating_outlook", "rating_downgrade_trigger", "rating_revenue", "rating_total_debt"}) + _rating_report_sources(project_id)),
         ("investor_protection", BOND_CHAPTER_TITLES["investor_protection"], section(
             ("已披露条款", f"据募集说明书披露，投资者保护措施为：{_value(facts, 'investor_protection')}；交叉违约条款为：{_value(facts, 'cross_default_clause')}。"),
             ("审查边界", "通知期限、持有人会议表决门槛及增信措施变更后的救济安排，应以受托管理协议和正式条款原文为准；未提供的内容标记为材料未披露或材料不足。"),

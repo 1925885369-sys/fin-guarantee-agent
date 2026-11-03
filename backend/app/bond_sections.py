@@ -144,7 +144,14 @@ def _toc_like_indices(source_rows: list[dict], contract: DocumentContract) -> se
     return output
 
 
-_HEADING_PREFIX = re.compile(r"^(?:第[一二三四五六七八九十百\d]+节|第[一二三四五六七八九十百\d]+[章节]|附[一二三四五六七八九十\d]+[：:]?|[一二三四五六七八九十]+、)")
+_HEADING_PREFIX = re.compile(
+    r"^(?:第[一二三四五六七八九十百\d]+节|第[一二三四五六七八九十百\d]+[章节]"
+    # 联合资信式附件编号：「附件1-1 公司股权结构图」「附件2 主要财务指标…」。
+    # 不加这一段，评级报告附录节（股权/公式/符号）永远定位不到——实测中邮 9 节缺失
+    # 里有 4 节是这一类。
+    r"|附(?:件|录)?[一二三四五六七八九十\d]+(?:[-－—]\d+)?[：:]?"
+    r"|[一二三四五六七八九十]+、)"
+)
 _DECORATION_PREFIX = re.compile(r"^[\s\u3000\-—–•●◆◇▪▫■□◆☑\uf0a3\uf06c\(（\[]*\s*")
 
 
@@ -177,6 +184,20 @@ def _looks_like_toc_line(line: str) -> bool:
     return bool(_TOC_PAGE_SUFFIX.search(compact))
 
 
+def _short_heading_suffix_ok(suffix: str, limit: int = 8) -> bool:
+    """短锚点（≤5 字）后面的剩余文字要像"副标题"，不能是正文。
+
+    实测联合资信 p6 有正文行「外部支持调整因素：股东支持 +2」——锚点「外部支持」在行首、
+    剩余 11 字，原阈值 12 放它通过，于是 external_support 被定位到 p6，而真正的
+    「十、外部支持」在 p19。收紧到 8 字后两侧都对：真标题剩余 0 字，正文行被拒。
+
+    括注不算正文：「附件1-1 公司股权结构图（截至2026 年5 月末）」去掉「（截至…）」后
+    剩余为空，必须照常认作标题。
+    """
+    without_notes = re.sub(r"[（(][^）)]*[）)]", "", suffix)
+    return len(re.sub(r"^[\s：:、.，,]+", "", without_notes).strip()) <= limit
+
+
 def _heading_line_matches(line: str, anchor: str) -> bool:
     """Match an anchor only where the line itself can reasonably be a title."""
     candidate = _DECORATION_PREFIX.sub("", line).strip()
@@ -197,13 +218,22 @@ def _heading_line_matches(line: str, anchor: str) -> bool:
         # punctuation or a short qualifier, while longer anchors like the
         # rating-result table label remain valid on a single table line.
         suffix = compact_line[len(compact_anchor):]
-        if len(compact_anchor) <= 5 and not _HEADING_PREFIX.match(compact_anchor) and len(suffix.strip("：:")) > 12:
+        if len(compact_anchor) <= 5 and not _HEADING_PREFIX.match(compact_anchor) and not _short_heading_suffix_ok(suffix):
             return False
         return True
-    # A heading may be prefixed by “附一：发行人股权…”.  Do not admit arbitrary
-    # body prose merely because it contains a short title phrase.
+    # A heading may be prefixed by “附一：发行人股权…” / “附件3-1 主体长期信用等级设置…”.
+    # Do not admit arbitrary body prose merely because it contains a short title phrase:
+    # 编号与锚点之间只允许很短的修饰词（附件名/栏目名），且短锚点仍要看后缀。
     prefix = compact_line[:position]
-    return bool(_HEADING_PREFIX.match(prefix))
+    if not _HEADING_PREFIX.match(prefix):
+        return False
+    prefix_rest = _HEADING_PREFIX.sub("", prefix, count=1).strip()
+    if len(prefix_rest) > 4:
+        return False
+    suffix = compact_line[position + len(compact_anchor):]
+    if len(compact_anchor) <= 5 and not _short_heading_suffix_ok(suffix):
+        return False
+    return True
 
 
 def _source_has_title(source: dict, title: str, anchors: Iterable[str]) -> bool:

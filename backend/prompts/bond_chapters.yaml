@@ -86,13 +86,21 @@ chapters:
     llm: true
     # 按 PLAN_new_p0_p1.md P0-2 / PLAN.md P0-B：第一部分经营章同 governance 切为模型直接撰写。
     generation_mode: generate
-    role: 经营分析员
-    goal: 基于募集说明书和访谈材料分析主营业务、上下游集中度与经营持续性。
+    # 视角=担保尽调业务负责人（不是行业研究员）：结论要落到"这条业务对本期债券偿付能力的
+    # 支撑与薄弱环节"，并给出可承保性判断与需补充核验的经营事项。
+    role: 担保尽调业务负责人
+    goal: >-
+      从担保尽调业务负责人视角判断主营业务对本期债券偿付能力的支撑：结合募集说明书的业务披露
+      与评级报告的经营分析，说明业务定位与区域专营性（运营里程、客运量、票款收入）、
+      收入结构与稳定性、上下游集中度，以及在建与拟建线路、车辆段综合利用带来的资本支出压力
+      （总投资、已投资），形成可承保性结论并列出需补充核验的经营事项。
     required_inputs: [facts, sources, cross_checks]
     required_sections: [经营与集中度事实, 审查边界]
     preserve_blocks: [集中度核验状态, 材料不足声明]
     rules:
       - 经营持续性、在手订单和产能只能依据材料中明确出现的事实；缺失时生成待核验任务而非补写结论。
+      - 引用评级机构的经营判断（区域地位、政府支持、在建规模、业务板块划分）时必须标明来自评级报告，不得与发行人披露混写；两者口径不一致时并列呈现，不自动选值。
+      - 经营结论要落到偿付能力与承保口径：收入稳定性、现金生成能力、资本支出压力对本息覆盖的影响，不要停留在行业描述。
     forbidden:
       - 不得虚构订单、产能、市场份额或客户稳定性。
     # 篇幅目标与 governance 对齐：2000–4000 字符；不写 paragraph_order，结构交给
@@ -104,15 +112,27 @@ chapters:
       preferred_min_chars: 2000
       preferred_max_chars: 4000
       list_mode: limited
+      # 经营章是首个试点：业务板块、客户/供应商集中度、订单结构天然适合"条目 × 期间"表格。
+      # allowed = 模型按材料是否"可并列且信息完整"自主决定出不出表；校验器据此放行正文表格。
+      # 表格里的数字仍受章节允许集约束，凭空造数会整章被拒。
+      table_mode: allowed
       avoid_openings: [系统识别到, 规则状态为, 经模型分析]
       prohibited_terms: [warning, insufficient, rule_key, 字段]
     input_contract:
       fact_keys: [main_business, top_customer_share, top5_customer_share, top_supplier_share, top5_supplier_share, order_backlog, capacity_utilization]
       metric_keys: []
       rule_keys: [customer_concentration, supplier_concentration, revenue_cash_quality]
-      source_kinds: [募集说明书, 合同订单, 访谈纪要]
-      max_evidence_items: 12
-      max_evidence_chars: 18000
+      # 评级报告是经营事实的第二大来源（rating_operations 一节省 6 页：业务板块、区域地位、
+      # 在建规模、政府支持）。此前只列募集说明书，这 6 页从未进入经营章视野（2026-10-27 实测：
+      # 该章 12 条证据全部来自募集说明书）。
+      source_kinds: [募集说明书, 信用评级报告, 合同订单, 访谈纪要]
+      # 18 / 26000：募集说明书与评级报告各能进 6–9 条；按页限流 2 条时评级报告 p9–14 可占满。
+      max_evidence_items: 18
+      max_evidence_chars: 26000
+      # 检索词只进 BM25 query，不进 Prompt：评级报告的经营事实集中在 p9–14（运营里程、
+      # 客运量、票款、在建/拟建线路、车辆段综合利用），这些词不写进检索词就永远选不到
+      # （写进 goal 会被长句稀释，2026-10-27 实测 p11/p14 仍进不来）。
+      retrieval_terms: [运营里程, 客运量, 票款收入, 在建线路, 拟建线路, 车辆段综合利用, 总投资, 已投资, 资本支出]
     output_contract:
       # P0-3：移除“据募集说明书披露”强制项。
       required_phrases: []

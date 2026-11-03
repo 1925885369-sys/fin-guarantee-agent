@@ -959,3 +959,39 @@ def test_calculation_records_register_display_precision_and_unit_alias():
     }])
     assert ("50000", "万元") not in money
     assert not [key for key in money if key[0].lstrip("-") == "50000" and not key[0].startswith("-")]
+
+
+def test_long_sentence_partial_numbers_become_review_not_unsupported():
+    """长句聚合豁免：多数数字有记录、个别（自算合计/比率）漏网时降为待核验。
+
+    2026-10-28 北投实测：模型常把一组同源数字写进一个长句（"经营活动现金流入小计
+    2023年…、2024年…、2025年…"），句里夹一个自算值就整句判 missing_record，
+    一句话足以把整章打回确定性模板——而正文其余部分全部有据可查。
+    """
+    from backend.app.chapter_guard import _number_mentions
+    from backend.app.p0 import _numeric_binding_outcome
+
+    records = _records_for(
+        metrics=[{
+            "metric_key": "debt_ratio", "name": "资产负债率", "period": "2025", "value": 64.8,
+            "unit": "%", "formula": "负债/资产", "input_fact_ids": ["f1"], "source_ids": ["s1"],
+        }, {
+            "metric_key": "debt_ratio", "name": "资产负债率", "period": "2024", "value": 66.05,
+            "unit": "%", "formula": "负债/资产", "input_fact_ids": ["f2"], "source_ids": ["s2"],
+        }],
+    )
+
+    def outcome(claim: str):
+        return _numeric_binding_outcome("p", records, claim, _number_mentions(claim), "numeric_fact")
+
+    # 3 个数字里 2 个命中、1 个自算漏网（1/3）→ 待核验，不整章回退
+    status, code, _ = outcome("资产负债率2025年末为64.8%、2024年末为66.05%，短期借款为999万元")
+    assert (status, code) == ("needs_review", "partial_numbers_unverified")
+
+    # 过半数字查无（2/3）→ 仍按无支持硬拦
+    status, code, _ = outcome("资产负债率为64.8%，短期借款为999万元，应付账款为888万元")
+    assert (status, code) == ("unsupported", "missing_record")
+
+    # 全部查无 → 硬拦
+    status, code, _ = outcome("短期借款为999万元，应付账款为888万元")
+    assert (status, code) == ("unsupported", "missing_record")

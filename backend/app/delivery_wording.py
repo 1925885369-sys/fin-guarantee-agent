@@ -51,10 +51,30 @@ _INTERNAL_UUID = re.compile(
 # 范围连接号必须含**全角破折号**（—–―－）：PDF 回流把"第77—81页"写成全角破折号，
 # 类里只有 ASCII `-` 时漏剔，77/81 会被读成裸数字（北投 financial 缺口句实测）。
 PAGE_REFERENCE_PATTERN = r"第\s*[\d,，、\s\-~～—–―－至]+\s*页"
-CITATION_ALIAS_PATTERN = r"\bE\d{2,}\b"
+CITATION_ALIAS_PATTERN = r"(?<![A-Za-z0-9])E\d{2,}(?![0-9])"
 REFERENCE_PATTERN = re.compile(rf"〔\s*资料\s*\d+\s*〕|{PAGE_REFERENCE_PATTERN}|{CITATION_ALIAS_PATTERN}")
 # 单独一份，供**展示层剔除**使用（`REFERENCE_PATTERN` 还含页码与引用别名，不能拿来删正文）。
 MATERIAL_SERIES_PATTERN = re.compile(r"〔\s*资料\s*\d+\s*〕")
+# 引用别名整组（含括号）：`（E05）`、`（E05、E06）`、`(E05, E06)`。
+# 先删整组、再删裸别名，避免留下空括号「（）」。
+CITATION_GROUP_PATTERN = re.compile(rf"[（(]\s*(?:{CITATION_ALIAS_PATTERN}[\s、,，/]*)+[）)]")
+CITATION_ALIAS_RE = re.compile(CITATION_ALIAS_PATTERN)
+
+
+def strip_citation_aliases(text: str) -> str:
+    """剔除正文里的引用别名（``E01``/``E05``）。幂等。
+
+    别名是**模型与系统之间的对账标记**：`_citation_aliases()` 把证据 id 映射成
+    ``E01…`` 发给模型，模型在正文里写 `（E05）`、在 ``citation_ids`` 里回填同一个别名，
+    服务端据此还原真实来源。它只服务这条对账链，**不是给业务方看的**——
+    2026-10-27 用户实测：「2025年度实现收入117.76亿元（E05）」直接暴露在报告正文里。
+
+    剔除不影响溯源：引用关系仍存在 ``citation_ids``（来源索引/引用详情照常显示），
+    正文里的括号别名纯属内部痕迹。
+    """
+    body = CITATION_GROUP_PATTERN.sub("", str(text or ""))
+    return CITATION_ALIAS_RE.sub("", body)
+
 
 
 def strip_references(text: str) -> str:
@@ -108,13 +128,15 @@ def normalize_report_text(text: str, numbers: dict[str, str] | None = None) -> s
 
     2026-10-23：**成品不再出现「资料01」这类系统编号**。业务方看的是自己的真实文件，
     编号只是内部对账用的定位（`document_series`），写进报告反而像内部痕迹。
-    这里做两件事：
+    这里做三件事：
     1. 剔除正文里**已经存着**的旧编号（历史正文下次导出即干净，不动存量数据）；
-    2. 材料名只替换成规范名称，不再追加 `〔资料NN〕`。
+    2. 剔除引用别名 `（E05）`（同上：内部对账标记，见 `strip_citation_aliases`）；
+    3. 材料名只替换成规范名称，不再追加 `〔资料NN〕`。
     """
     if not text:
         return text
     output = MATERIAL_SERIES_PATTERN.sub("", text)
+    output = strip_citation_aliases(output)
     for source, target, _label in MATERIAL_ALIASES:
         output = output.replace(source, target)
     return output

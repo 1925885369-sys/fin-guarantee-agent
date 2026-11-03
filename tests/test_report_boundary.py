@@ -86,3 +86,22 @@ def test_future_or_pending_wording_is_not_a_made_decision():
     # 反例：已经作出的决定不能被"后续"二字洗白——同一分句里出现决策主语即拦截。
     assert _report_boundary_safe("本所审核意见：核定担保额度为5亿元。") is False
     assert _report_boundary_safe("同意担保，后续再行确定担保额度。") is False
+
+
+def test_negative_boundary_statement_is_not_a_decision():
+    """「不得作为核定担保额度…的依据」是在划边界，不是我们下的结论。
+
+    2026-10-28 北投 rating 实测：`_boundary_hit_is_decision` 只判主语/引用/提议三类
+    语境，没有否定判定，落到"保守按决策处理"分支 → 整章被判"包含禁止的承保或审批结论"。
+    """
+    content = (
+        "评级机构观点仅作外部信用参考，不构成对发行人的独立信用判断，"
+        "也不得作为核定担保额度、担保费率或承保决定的依据。"
+    )
+    assert _report_boundary_safe(content) is True
+
+
+def test_negative_marker_only_covers_the_adjacent_hit():
+    """否定豁免只看命中位置前 12 字——远距离的"不得"不能给决策词开后门。"""
+    content = "募集资金不得用于再融资。经评审，本所同意担保本期债券。"
+    assert _report_boundary_safe(content) is False

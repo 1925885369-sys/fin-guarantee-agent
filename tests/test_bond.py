@@ -70,7 +70,10 @@ def test_flagship_bond_case_inventory_summary_rules_and_report():
         assert all(item.get("content_origin") for item in report)
         text = "\n".join(item["content"] for item in report)
         # 成品用词：原材料种类名一律换成规范化表述（见 PLAN3 §3）。
-        assert "发行文件〔资料01〕" in text
+        # 2026-10-23 产品决定：成品不再出现「资料01」这类系统编号（见
+        # delivery_wording.normalize_report_text 注释），材料名只保留规范表述。
+        assert "发行文件" in text
+        assert "〔资料" not in text
         assert "募集说明书" not in text
         assert "评级机构认为" in text
         assert "未取得审计报告原件" in text

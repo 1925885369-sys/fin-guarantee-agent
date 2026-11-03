@@ -1462,6 +1462,9 @@ def build_chapter_context(project_id: str, chapter_key: str, draft: str, source_
         *[str(item.get("name") or item.get("fact_key") or "") for item in selected_facts],
         *[str(item.get("metric_key") or "") for item in metrics],
         *[str(item.get("title") or item.get("rule_key") or "") for item in checks],
+        # 章节专属检索词（`input_contract.retrieval_terms`）：与写作指令分离，
+        # 避免长句稀释 BM25 权重。空表时行为与旧版完全一致。
+        *[str(term) for term in (contract.get("retrieval_terms") or []) if str(term).strip()],
         str(config.get("goal") or ""), " ".join(config.get("rules") or []),
         *outline_query_bits,
     ])
@@ -1739,7 +1742,7 @@ def _narrative_style_notes(content: str, context: dict) -> list[str]:
 
 
 # Markdown 表格行：整行以竖线开头结尾。正文里正常不会出现这种形状。
-_MARKDOWN_TABLE_ROW = re.compile(r"^[ \t]*\|.*\|[ \t]*$", re.MULTILINE)
+_MARKDOWN_TABLE_ROW = re.compile(r"^[ \t]*\|[^\n]*\|", re.MULTILINE)
 
 _MD_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]*", re.MULTILINE)
 _MD_LIST_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.、])[ \t]+", re.MULTILINE)
@@ -1766,6 +1769,9 @@ def count_report_chars(content: str, conflict_block: str = "",
             text = text.replace(block, "")
     for pattern in (_MD_HEADING_RE, _MD_LIST_RE, _MD_QUOTE_RE):
         text = pattern.sub("", text)
+    # 正文里的 Markdown 表格行也不计入分析篇幅：表格是结构化呈现，不是分析文字。
+    # 只有放开 `table_mode` 的章节才会出现这种行（其余章节已被"自行输出表格"拦住）。
+    text = _MARKDOWN_TABLE_ROW.sub("", text)
     text = _MD_EMPHASIS_RE.sub("", text)
     return len(re.sub(r"\s+", "", text))
 
@@ -1782,7 +1788,14 @@ SOURCE_ATTRIBUTION_BLOCK = (
 # （中邮/华辰 cashflow"经营现金流预测直接等同于可偿付现金的做法不成立"实测——
 # 原实现只看命中位置之前 40 字，把这类合规的限定句判成 forbidden）。
 # **刻意不含"不足以/不满足"**：那是业务事实（"可偿付现金不足以覆盖利息"仍须核验）。
-NEGATION_POST_MARKERS = ("不成立", "不能成立", "并不成立", "不正确", "不准确", "不恰当", "不可取", "行不通")
+NEGATION_POST_MARKERS = (
+    "不成立", "不能成立", "并不成立", "不正确", "不准确", "不恰当", "不可取", "行不通",
+    # 后置的"禁止据此推论"（2026-10-28 debt 实测）：「但授信获批与续融资可行性**不得据此推断**」
+    # 是明确的边界表述，旧表只收元评价词（不成立/不正确…），把它判成 forbidden。
+    # 刻意都带"据此/以此/作为/将其"：只收**限定推论方向**的表述，
+    # 单纯"不得再融资"这类业务禁令不在其列。
+    "不得据此", "不应据此", "不得以此", "不得将其", "不得作为", "不得用作",
+)
 NEGATION_POST_WINDOW = 20
 
 
@@ -3018,6 +3031,16 @@ def _generation_mode(context: dict) -> str:
     return str(((context.get("prompt_config") or {}).get("generation_mode")) or "rewrite")
 
 
+def _model_tables_allowed(context: dict) -> bool:
+    """章节 Prompt 是否允许模型在正文里输出 Markdown 表格（默认不允许）。
+
+    只在 ``narrative_contract.table_mode`` 显式设为 ``allowed``/``limited`` 时放行；
+    缺省 ``prohibited`` 保持"表格一律系统生成"的既有纪律。
+    """
+    narrative = (context.get("prompt_config") or {}).get("narrative_contract") or {}
+    return str(narrative.get("table_mode") or "prohibited") in {"allowed", "limited"}
+
+
 def _prompt_scope_limits(context: dict) -> set[str]:
     """从项目 Prompt（goal/rules/附加要求）里取**显式**口径限定；无则空集。"""
     config = context.get("prompt_config") or {}
@@ -3104,12 +3127,14 @@ def validate_chapter_output(content: str, citation_ids: list[str], context: dict
     if table_block and table_block not in content:
         reasons.append("系统整理数据表未原样保留")
     if table_block:
-        # 表格一律由系统生成。模型自行画表属于越权，且会与系统表形成重复披露。
+        # 表格默认由系统生成：模型自行画表会与系统表形成重复披露，按越权拒绝。
+        # 例外是章节 Prompt 显式放开（``narrative_contract.table_mode`` = allowed/limited）——
+        # 此时允许模型按内容自行出表，但表格里的数字仍受"允许集"校验约束（造数整章被拒）。
         # 判定前先摘掉系统块本身，否则会把系统表误判成模型输出。
         analysis = content.replace(table_block, "")
         if conflict_block:
             analysis = analysis.replace(conflict_block, "")
-        if _MARKDOWN_TABLE_ROW.search(analysis):
+        if _MARKDOWN_TABLE_ROW.search(analysis) and not _model_tables_allowed(context):
             reasons.append("章节正文自行输出了表格")
     if context.get("chapter_key") in {"financial", "cashflow", "debt"}:
         # 修订稿 §3.1：**移除"季度/半年度一律禁止"与"混入非采用口径一律禁止"**。

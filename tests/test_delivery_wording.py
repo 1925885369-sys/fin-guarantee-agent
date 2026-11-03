@@ -330,3 +330,30 @@ def test_conflict_block_is_product_grade(client) -> None:
     assert wording_violations(body) == [], wording_violations(body)
     assert "断言 " not in body
     assert "字段 " not in body
+
+
+# --------------------------------------------- 引用别名必须从成品剔除 --
+
+def test_strip_citation_aliases_removes_grouped_and_bare():
+    """`E05` 是模型与系统之间的对账别名，不进成品正文（2026-10-27 用户实测）。"""
+    from backend.app.delivery_wording import strip_citation_aliases
+
+    assert strip_citation_aliases("实现收入117.76亿元（E05）。") == "实现收入117.76亿元。"
+    assert strip_citation_aliases("数据（E05、E06）显示") == "数据显示"
+    assert strip_citation_aliases("数据(E05, E06)显示") == "数据显示"
+    assert strip_citation_aliases("见E05所述") == "见所述"
+    # 不得误伤普通英文词
+    assert strip_citation_aliases("EBITDA 为 100 亿元") == "EBITDA 为 100 亿元"
+    assert strip_citation_aliases("") == ""
+    # 幂等
+    once = strip_citation_aliases("收入（E05）。")
+    assert strip_citation_aliases(once) == once
+
+
+def test_normalize_report_text_drops_alias_and_material_names():
+    from backend.app.delivery_wording import normalize_report_text
+
+    out = normalize_report_text("据募集说明书披露，票款收入81.34亿元（E05）。")
+    assert "E05" not in out
+    assert "募集说明书" not in out      # 材料名仍按既有别名表规范化
+    assert "81.34亿元" in out           # 数据本身不动

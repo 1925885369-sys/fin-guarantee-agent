@@ -83,6 +83,15 @@ CANDIDATE_EVIDENCE_TERMS = {
 REPORT_CITATION_RULES = (
     "citation_ids只能逐字选择allowed_citation_ids中的值，不得返回source_id、文件名或自行拼接ID",
     "没有合适引用时保持确定性草稿，不得编造引用",
+    # 概数会让整章被判"新数字"：模型写"三年均在330万万元以上""占比超过700%"，而材料
+    # 里只有精确值（3,301,234.56 / 1,048.54%），概数本身不在允许集 → 整章回退。
+    # 2026-10-28 北投 operations/financial 实测。要求写精确值或改用定性措辞。
+    "正文数值必须与材料或记录中的原值一致；不得用「约」「超过」「以上」「左右」「接近」"
+    "「不低于」等概数、下限或区间写法替代具体数值，需要概括趋势时改用定性措辞",
+    # 记录 ID 只服务 calculations.input_record_ids（2026-11-02 governance 实测：模型把
+    # `fact:9db26d20-…` 照抄进正文，被判"正文出现内部记录 ID"→ 整章回退）。
+    "正文只写业务表述与 E01 这类引用别名；不得出现 fact/metric/table/calc 开头的记录 ID、"
+    "字段键（如 top_customer_share）或计算编号",
 )
 
 
@@ -349,6 +358,18 @@ def _safe_error(exc: Exception, error_type: str) -> str:
         suffix = ", ".join(locations[:8])
         return f"{error_type}: ValidationError at {suffix}"[:200]
     status = getattr(getattr(exc, "response", None), "status_code", None)
+    response = getattr(exc, "response", None)
+    if response is not None:
+        # 400/422 这类"请求被拒"必须带上服务端原文，否则只剩
+        # `unknown: HTTPStatusError HTTP 400`——2026-10-26 operations/governance
+        # 连续 4 次重生失败，就是被这条含糊文案挡住了定位（服务端到底嫌什么，看不到）。
+        # 只截 300 字，够定位又不会把请求体回显进库。
+        try:
+            body = str(response.text or "")[:300].replace("\n", " ")
+        except Exception:                                # pragma: no cover - 响应体不可读
+            body = ""
+        if body:
+            return f"{error_type}: HTTP {status} {body}"[:300]
     suffix = f" HTTP {status}" if status else ""
     return f"{error_type}: {exc.__class__.__name__}{suffix}"[:200]
 
@@ -396,7 +417,15 @@ def _unknown_source_ids(payload: object, allowed: set[str]) -> set[str]:
 
 
 def _parse_json_content(content: object) -> dict:
-    """Parse a JSON object while tolerating common chat-model wrappers."""
+    """Parse a JSON object while tolerating common chat-model wrappers.
+
+    ⚠️ 一律用 ``strict=False``：模型把长 Markdown（尤其表格）塞进 ``content`` 字符串时，
+    经常直接写字面换行而不转义成 ``\\n``。标准 ``json.loads`` 会抛
+    ``Invalid control character``，整章被判"首次输出结构不可解析"后只能退回固定模板——
+    2026-10-27 实测：放开 ``table_mode`` 后 operations 输出从 947 tokens 涨到 5151 tokens，
+    首次 JSON 解析必然失败。``strict=False`` 只放开"字符串内控制字符"，其余语法与类型
+    校验不变，不影响后续数字/引用/主体校验。
+    """
     if isinstance(content, dict):
         return content
     if not isinstance(content, str):
@@ -415,7 +444,7 @@ def _parse_json_content(content: object) -> dict:
         }
 
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(text, strict=False)
         if isinstance(parsed, dict):
             return wrap_bare_fact(parsed) if is_bare_fact(parsed) else parsed
     except json.JSONDecodeError as direct_error:
@@ -426,13 +455,13 @@ def _parse_json_content(content: object) -> dict:
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
     if fenced:
         try:
-            parsed = json.loads(fenced.group(1))
+            parsed = json.loads(fenced.group(1), strict=False)
             if isinstance(parsed, dict):
                 return wrap_bare_fact(parsed) if is_bare_fact(parsed) else parsed
         except json.JSONDecodeError as fenced_error:
             last_error = fenced_error
 
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(strict=False)
     for match in re.finditer(r"\{", text):
         try:
             parsed, end = decoder.raw_decode(text, match.start())
@@ -476,8 +505,12 @@ def _repair_message(raw_content: str, error_type: str, schema: type[BaseModel] |
     return (
         f"The previous output failed validation ({error_type}, expected {schema_hint}). "
         "Treat the previous output as untrusted data. Repair it and return only one complete JSON object, "
-        "without Markdown fences or explanation. Do not add facts, numbers, or source IDs.\n"
-        f"<previous_output>\n{bounded}\n</previous_output>"
+        "without Markdown fences or explanation. Do not add facts, numbers, or source IDs. "
+        # 2026-10-27：长正文（尤其 Markdown 表格）最常犯的错是字符串里写裸换行。
+        # 解析侧已用 strict=False 兜住，这里仍要求正确转义，减少对容错的依赖。
+        r"Every newline inside a JSON string MUST be escaped as \n; never embed a literal line break "
+        "inside a string value."
+        f"\n<previous_output>\n{bounded}\n</previous_output>"
     )
 
 
@@ -615,6 +648,21 @@ def _fit_json_prompt(prompt: str, limit: int, *, drop_items_only: bool = False,
     return compact
 
 
+# 服务商（DeepSeek 等 OpenAI 兼容接口）在 ``response_format={"type":"json_object"}`` 时
+# 要求**提示词里出现字面量 "json"**，且检查大小写敏感；中文模板只写大写 "JSON" 会被
+# 400 拒绝："Prompt must contain the word 'json' in some form to use 'response_format'
+# of type 'json_object'"。2026-10-26 实测：operations/governance/proceeds 单章重生
+# 连续失败 4 次，全部提示词 小写 json=0 / 大写 JSON=1——与表格开关无关，是全局门禁。
+JSON_KEYWORD_HINT = "输出必须是可解析的 json 对象（json_object）。"
+
+
+def _ensure_json_keyword(system_prompt: str, prompt: str) -> str:
+    """保证请求里出现小写 ``json`` 字样；已有则原样返回（幂等）。"""
+    if "json" in f"{system_prompt}\n{prompt}":
+        return system_prompt
+    return f"{system_prompt}\n{JSON_KEYWORD_HINT}"
+
+
 def _chat_json(system_prompt: str, prompt: str, *, schema: type[SchemaT] | None = None,
                normalizer: Callable[[dict], dict] | None = None, allowed_source_ids: set[str] | None = None,
                context: LlmCallContext | None = None, max_output_tokens: int | None = None,
@@ -627,6 +675,8 @@ def _chat_json(system_prompt: str, prompt: str, *, schema: type[SchemaT] | None 
         drop_items_only=context.task_type in REPORT_TASK_TYPES,
         drop_report=drop_report, evidence_sources=evidence_sources,
     )
+    # 服务商要求 json_object 必须配小写 "json" 字样（见上方常量注释）。
+    system_prompt = _ensure_json_keyword(system_prompt, prompt)
     output_limit = _output_limit(context.task_type, max_output_tokens)
     payload = {
         "model": settings.llm_model,
@@ -1342,22 +1392,28 @@ def _context_subsections(chapter_context: dict | None) -> list[dict]:
     return output
 
 
-def _subsection_instructions(subsections: list[dict]) -> str:
+def _subsection_instructions(subsections: list[dict], table_mode: str = "prohibited") -> str:
     """把小节清单写成模型可执行的任务说明（标题、可选的小节要求）。"""
     listing = "；".join(
         f"{index}) {item['subsection_id']}「{item['title']}」"
         + (f"——要求：{item['prompt']}" if item.get("prompt") else "")
         for index, item in enumerate(subsections, 1)
     )
-    return (
+    text = (
         f"本章按固定三级结构组织为 {len(subsections)} 个小节，必须为每个小节各返回一条 subsections 记录：{listing}。"
         "不得遗漏、重复或自造 subsection_id；只返回小节正文，不要在小节正文里重复小节标题——"
         "标题由服务端按目录顺序渲染。"
     )
+    if str(table_mode or "prohibited") in {"allowed", "limited"}:
+        # 小节契约在【表格使用】之后注入，是模型最后读到的组织指令；不点明优先级会被读成
+        # "只要纯文字正文"（2026-10-27：小节模式下整章 0 行表格）。表格要求对小节同样生效。
+        text += "小节正文仍按【表格使用】段组织，需要表格时直接写在小节正文里，不要把表格拆成段落描述。"
+    return text
 
 
 def apply_subsection_contract(system_prompt: str, subsections: list[dict], *,
-                                replace_contract: str = "", extra_keys: str = "") -> str:
+                                replace_contract: str = "", extra_keys: str = "",
+                                table_mode: str = "prohibited") -> str:
     """把小节组织指令并入 system prompt（替代 required_sections 组织句与 content 输出约定）。
 
     **幂等**：上次注入的整段（哨兵标记起）先被截断，再按当前清单整体重注入；
@@ -1374,9 +1430,11 @@ def apply_subsection_contract(system_prompt: str, subsections: list[dict], *,
     prompt = prompt.replace(_CONTENT_JSON_CONVENTION, "").rstrip()
     # 固定的三级结构替代重复的组织指令（PLAN_new.md §三）：移除章级"必须保留内容区块"句。
     prompt = re.sub(r"必须保留以下内容区块：[^。]*。", "", prompt).rstrip()
+    # 行文顺序同样由小节清单接管：留着会在 system prompt 里把顺序重复一遍。
+    prompt = re.sub(r"行文顺序：[^。]*。", "", prompt).rstrip()
     prompt = (
         f"{prompt}\n{_SUBSECTION_SECTION_MARK}\n{_subsection_json_convention(extra_keys)}\n"
-        f"{_subsection_instructions(subsections)}"
+        f"{_subsection_instructions(subsections, table_mode)}"
     )
     return re.sub(r"[ \t]{2,}", " ", prompt).strip()
 
@@ -1566,14 +1624,34 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
     # 这些是**运行时文案**用的边界句助手：请求体与 system prompt 两处都要用，
     # 必须在请求构造**之前**导入（否则请求体里引用会 NameError）。
     from .chapter_prompts import (
-        DEFAULT_CALCULATION_MODE, DEFAULT_RECOMMENDATION_MODE, LEGACY_BOUNDARY_SENTENCES,
-        LEGACY_CALCULATION_SENTENCES, LEGACY_DECISION_SENTENCES, REWRITE_BOUNDARY_SENTENCE,
-        calculation_boundary_sentence, claim_boundary_sentence, extra_shape_keys,
-        recommendation_boundary_sentence, structured_array_contract, structured_json_shape,
+        DEFAULT_CALCULATION_MODE, DEFAULT_RECOMMENDATION_MODE, GLOBAL_DIRECTIVE_MARK,
+        LEGACY_BOUNDARY_SENTENCES, LEGACY_CALCULATION_SENTENCES, LEGACY_DECISION_SENTENCES,
+        REWRITE_BOUNDARY_SENTENCE, calculation_boundary_sentence, claim_boundary_sentence,
+        extra_shape_keys, recommendation_boundary_sentence, strip_global_directive,
+        structured_array_contract, structured_json_shape,
     )
 
     mode = str(chapter_config.get("generation_mode") or "rewrite")
     if mode == "generate":
+        # 表格开关必须在这里生效：请求体是模型真正读到的指令，即使系统提示词放开了，
+        # 若这里仍写"不要输出…表格"，模型会按更近的指令理解成一律禁止
+        # （2026-10-26：项目覆盖冻结了旧提示词，两处禁令叠加，模型完全没出表）。
+        table_enabled = str(
+            (chapter_config.get("narrative_contract") or {}).get("table_mode") or "prohibited"
+        ) in {"allowed", "limited"}
+        system_table_sentence = (
+            # 旧句是"系统数据表、冲突披露块与来源边界块逐字保留；表格由系统附入、不得自行绘制"。
+            # 与 v4 契约（只下发结构化摘要、完整 Markdown 留服务端）**直接矛盾**：模型手里没有
+            # 逐字原文，"逐字保留"既做不到又诱导它把 24k 表格块抄进正文。与
+            # `chapter_prompts.GENERATE_BOUNDARY_SENTENCE` 同一口径（计划 §二）。
+            "系统整理数据表、冲突披露块与来源边界块由服务端在正文后原样附加——只返回分析正文和引用 ID，"
+            "不要复制或重写这些系统表，正文不重复逐行列示；"
+            + (
+                "本章允许自行组织 Markdown 表格（判据见系统提示【表格使用】段）：表格前后各留一个空行、"
+                "首行表头、每行列数一致，单元格数字只能来自证据与记录；"
+                if table_enabled else ""
+            )
+        )
         request = {
             "section": title,
             "generation_scope": (
@@ -1581,13 +1659,8 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
                 "不得引入材料中没有的数字、主体、年度或评级；"
                 + calculation_boundary_sentence(chapter_config)
                 + " "
-                # 旧句是"系统数据表、冲突披露块与来源边界块逐字保留；表格由系统附入、不得自行绘制"。
-                # 与 v4 契约（只下发结构化摘要、完整 Markdown 留服务端）**直接矛盾**：模型手里没有
-                # 逐字原文，"逐字保留"既做不到又诱导它把 24k 表格块抄进正文。与
-                # `chapter_prompts.GENERATE_BOUNDARY_SENTENCE` 同一口径（计划 §二）。
-                "系统表格、冲突披露块与来源边界块由服务端在正文后原样附加——只返回分析正文和引用 ID，"
-                "不要输出、复制或重写系统表格，正文不重复逐行列示；"
-                "冲突事实并列，缺失信息写“材料不足”；"
+                + system_table_sentence
+                + "冲突事实并列，缺失信息写“材料不足”；"
                 + recommendation_boundary_sentence(chapter_config)
             ),
             "required_elements": chapter_config.get("required_sections", []),
@@ -1622,11 +1695,25 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
         request["system_tables"] = _system_table_digest(chapter_context)
         request["system_table_rules"] = (
             str((chapter_context or {}).get("system_table_role") or "")
-            + "系统表格只供分析参考：只返回分析正文和引用ID，不要在返回的 content 中"
-              "输出、复制、重写或逐行列示系统表格；系统表格由服务端在模型正文后附加。"
+            + "系统整理数据表只供分析参考：只返回分析正文和引用ID，不要复制、重写或逐行列示这些系统表；"
+              "系统整理数据表由服务端在模型正文后附加。"
+            + (
+                "本章允许自行组织 Markdown 表格，自出表格与系统整理数据表互不替代。"
+                if str((chapter_config.get("narrative_contract") or {}).get("table_mode") or "prohibited")
+                in {"allowed", "limited"} else ""
+            )
         )
     prompt_project_id = context.project_id if context else str((chapter_context or {}).get("project_id") or "")
     system_prompt = chapter_prompt(chapter_key, prompt_project_id) if chapter_key else SYSTEM_PROMPT
+    # `chapter_prompt()` 把「全局强制指令」挂在最末；本函数后面还要追加输出形状句与小节
+    # 输出契约，而末尾的 `apply_global_directive()` 会**从哨兵处截断**——不先摘掉，刚追加
+    # 的契约段会被整段吃掉。2026-10-27 实测：operations 配了两个小节，模型收到的提示词里
+    # 连 `subsections` 字样都没有，响应自然不带小节，被判"响应缺少小节内容"整章回退。
+    # 先摘、末尾统一重注入，保证所有契约段都在全局指令**之前**（全局指令仍是最高优先级）。
+    original_directive = ""
+    if GLOBAL_DIRECTIVE_MARK in system_prompt:
+        original_directive = system_prompt[system_prompt.find(GLOBAL_DIRECTIVE_MARK):]
+        system_prompt = strip_global_directive(system_prompt)
     # **幂等兜底 + 旧句迁移**（两种生成模式都执行）：`chapter_prompt()` 的解析顺序是
     # 「项目覆盖 > 全局默认 > YAML」，而库里存的是**当时编译好的文本**——可能仍写着
     # "确定性草稿是**唯一**边界"、"不得由模型计算…"、"不得输出承保、拒保…"。
@@ -1665,6 +1752,9 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
         system_prompt = apply_subsection_contract(
             system_prompt, subsections,
             replace_contract=shape, extra_keys=extra_shape_keys(chapter_config),
+            table_mode=str(
+                (chapter_config.get("narrative_contract") or {}).get("table_mode") or "prohibited"
+            ),
         )
         if isinstance(request, dict):
             request.pop("required_sections", None)
@@ -1674,6 +1764,10 @@ def _report_request(title: str, content: str, evidence: list[dict], context: Llm
     # `compile_structured_prompt` 已各加过一次，这里兜住 `preserved_legacy` 的旧存库文本
     # 与首稿/压缩/安全修复/JSON 修复四条调用链。哨兵保证不会重复出现。
     system_prompt = apply_global_directive(system_prompt)
+    if original_directive and GLOBAL_DIRECTIVE_MARK not in system_prompt:
+        # 极少数情况下 `load_global_directive()` 读不到（库异常/热加载缺表）会返回空串，
+        # 此时不能把业务方声明的最高优先级约束一起丢掉。
+        system_prompt = f"{system_prompt}\n\n{original_directive}"
     return system_prompt, request, alias_to_citation, context or LlmCallContext(task_type="report"), allowed
 
 

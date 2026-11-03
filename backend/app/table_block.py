@@ -192,6 +192,29 @@ class TableBlock:
         }
 
 
+# 表格校验状态的中文标签：`needs_review`/`passed` 是内部枚举，**不进成品**
+# （2026-10-27 用户实测：表注里出现「本表校验状态：needs_review」）。
+VALIDATION_STATUS_LABELS = {
+    "passed": "已核验",
+    "needs_review": "待人工核验",
+    "rejected": "未通过校验",
+}
+# 材料自带的表名前缀（"表：…"、"表12：…"）：渲染时统一由"表 N："承接，
+# 否则会拼成「表 17：表：最近三年末…」。
+_TABLE_TITLE_PREFIX_RE = re.compile(r"^表\s*\d*\s*[：:]\s*")
+
+
+def validation_status_label(status: str) -> str:
+    return VALIDATION_STATUS_LABELS.get(str(status or ""), "待人工核验")
+
+
+def display_table_title(title: str) -> str:
+    """表名显示用：去掉材料自带的前缀，空标题退回原文。"""
+    raw = str(title or "").strip()
+    cleaned = _TABLE_TITLE_PREFIX_RE.sub("", raw).strip()
+    return cleaned or raw
+
+
 def table_block_from_dict(payload: dict) -> TableBlock:
     columns = tuple(TableColumn(**item) for item in payload.get("columns", []))
     rows = tuple(TableRow(
@@ -387,11 +410,30 @@ ADOPTION_BASIS = {
 }
 
 
+def _values_within_tolerance(left: str | None, right: str | None, ratio: float) -> bool:
+    """两个规范化数值是否只在**精度**上不同。
+
+    评级报告用「亿元」两位小数（187.60 亿元 = 1,876,000 万元），审计报表是万元精确值
+    （1,875,971.19 万元）：差额 28.81 万元来自披露精度，不是口径分歧。严格相等会把这类
+    对照行全判成"冲突"，读者只看得到噪音。默认 ``ratio=0`` 表示不容忍，既有核对表
+    （档案值 vs 上传值）行为逐字不变。
+    """
+    if not left or not right or ratio <= 0:
+        return False
+    try:
+        a, b = Decimal(left), Decimal(right)
+    except (InvalidOperation, ValueError):
+        return False
+    base = max(abs(a), abs(b))
+    return base > 0 and abs(a - b) <= base * Decimal(str(ratio))
+
+
 def reconciliation_block(
     *, table_id: str, title: str, subject: str, scope: str, period: str,
     profile_cells: dict[str, TableCell], uploaded_cells: dict[str, TableCell],
     source_refs: Iterable[str] = (), notes: Iterable[str] = (),
     left_label: str = "档案值", right_label: str = "上传值",
+    tolerance_ratio: float = 0.0,
 ) -> TableBlock:
     """双来源核对表：科目／档案值／上传值／采用值／状态。
 
@@ -412,7 +454,11 @@ def reconciliation_block(
         uploaded = uploaded_cells.get(label) or TableCell(raw="—", status="not_applicable")
         has_profile = profile.status not in {"not_applicable", "blank"}
         has_upload = uploaded.status not in {"not_applicable", "blank"}
-        if has_profile and has_upload and profile.normalized != uploaded.normalized:
+        same = (
+            profile.normalized == uploaded.normalized
+            or _values_within_tolerance(profile.normalized, uploaded.normalized, tolerance_ratio)
+        )
+        if has_profile and has_upload and not same:
             adopted = TableCell(status="conflict", adoption_basis=ADOPTION_BASIS["conflict"])
             status = "conflict"
         elif has_profile and has_upload:
@@ -422,7 +468,8 @@ def reconciliation_block(
                 source_ids=tuple(dict.fromkeys([*profile.source_ids, *uploaded.source_ids])),
                 adoption_basis=ADOPTION_BASIS["agreed"],
             )
-            status = "一致"
+            # 数值在容差内但不逐字相等 → 这是披露精度差异，不是同一口径的完全一致。
+            status = "一致" if profile.normalized == uploaded.normalized else "一致（精度差异）"
         elif has_upload:
             adopted = TableCell(
                 raw=uploaded.raw, normalized=uploaded.normalized, unit=uploaded.unit,

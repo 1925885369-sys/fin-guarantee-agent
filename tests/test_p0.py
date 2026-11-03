@@ -581,3 +581,27 @@ def test_conflict_parallel_values_degrade_to_review_not_unsupported():
 
     # 反例④：常规勾稽句里的"差异0万元"不是冲突并列。
     assert _CONFLICT_PARALLEL_RE.search("评级与审计收入差异0万元、有息负债差异0万元") is None
+
+
+def test_boundary_declaration_is_not_factual_claim():
+    """边界/方法声明不含事实内容，既不进支持率分母，也不能被判无证据。
+
+    2026-11-02 北投实测：rating「本报告不另行评定债券级别」、cashflow「需结合专户安排
+    进一步核验」各被判 missing_record，修复轮只能改正文、改不掉"这句本来就不是事实主张"，
+    整章回退。
+    """
+    from backend.app.p0 import _claim_support_outcome
+
+    cases = [
+        ("rating", "就本次复核而言，债项评级仅能引用材料已披露的结果，本报告不另行评定债券级别。"),
+        ("cashflow", "本期债券如由发行人本部偿付，母公司口径现金流的可动用程度需结合偿债专户安排进一步核验。"),
+        ("rating", "本复核意见不构成对债券级别、担保额度、担保费率或投资价值的判断。"),
+    ]
+    for key, claim in cases:
+        status, code, _ = _claim_support_outcome("p", key, claim, "factual", [], {})
+        assert (status, code) == ("not_applicable", ""), claim
+
+    # 带数字的句子**不得**走豁免：仍要按业务事实核对
+    status, _code, _ = _claim_support_outcome(
+        "p", "debt", "1年以内有息债务合计3,856,300万元，占有息债务合计的8.05%。", "factual", [], {})
+    assert status != "not_applicable"

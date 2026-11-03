@@ -192,3 +192,78 @@ def test_extract_query_limit_covers_every_section_slot() -> None:
     )
     assert slots > 0
     assert settings.retrieval_extract_query_limit >= slots
+
+
+def test_zhongyou_style_headings_are_located(monkeypatch):
+    """联合资信式标题（主体概况/行业分析/经营分析/附件N-M）必须能定位。
+
+    实测中邮评级报告原先 13 节只定位到 4 节：契约锚点是中诚信写法（发行人概况、
+    宏观经济与行业政策、附一：），联合资信的「一、主体概况」「附件1-1 公司股权结构图」
+    全部落空。同时守住反例：p6 正文「外部支持调整因素：股东支持 +2」不能被当成
+    「十、外部支持」的标题。
+    """
+    monkeypatch.setattr(bond_sections, "is_configured", lambda: False)
+    sources = [
+        {"id": "s2", "page": 2, "text": "信用评级报告\n联合〔2026〕5855 号"},
+        {"id": "s4", "page": 4, "text": "中邮证券有限责任公司2026 年面向专业投资者\n债项及评级结果\nAAA"},
+        {"id": "s6", "page": 6, "text": "本次评级使用的评级方法、模型及结果\n外部支持调整因素：股东支持 +2"},
+        {"id": "s8", "page": 8, "text": "一、主体概况\n二、本期债项概况\n三、宏观经济和政策环境分析"},
+        {"id": "s9", "page": 9, "text": "四、行业分析"},
+        {"id": "s11", "page": 11, "text": "七、经营分析"},
+        {"id": "s15", "page": 15, "text": "八、财务分析"},
+        {"id": "s19", "page": 19, "text": "十、外部支持"},
+        {"id": "s25", "page": 25, "text": "附件1-1 公司股权结构图（截至2026 年5 月末）"},
+        {"id": "s26", "page": 26, "text": "附件2 公司主要财务指标的计算公式"},
+        {"id": "s27", "page": 27, "text": "附件3-1 主体长期信用等级设置及含义"},
+    ]
+    located, _ = locate_document_sections(sources, "rating_report")
+    by_role = {item.role: item for item in located}
+    assert by_role["rating_methodology"].start_page == 6
+    assert by_role["rating_issuer_profile"].start_page == 8
+    assert by_role["external_environment"].start_page == 8
+    assert by_role["rating_operations"].start_page == 11
+    assert by_role["rating_financial_analysis"].start_page == 15
+    assert by_role["external_support"].start_page == 19, "必须命中「十、外部支持」，不能被 p6 正文抢走"
+    assert by_role["ownership_appendix"].start_page == 25
+    assert by_role["excluded_formula"].start_page == 26
+    assert by_role["excluded_rating_symbols"].start_page == 27
+
+
+def test_rating_chapter_reads_rating_analysis_pages():
+    """评级章要能读到评级观点/经营/财务分析页，而不只是事实绑定的两页。
+
+    实测北投 rating 章原先 source_ids 只有 p3、p19：评级报告的「关注/优势/行业与
+    财务判断」全在 p5-18，模型拿不到就只能写"材料不足"，评级章沦为模板复读。
+    """
+    startup()
+    from backend.app.bond_report import generate_bond_chapters
+
+    chapter = next(item for item in generate_bond_chapters(BEITOU_PROJECT_ID, False) if item.key == "rating")
+    placeholders = ",".join("?" for _ in chapter.source_ids)
+    pages = {
+        int(item["page"])
+        for item in rows(
+            f"SELECT page FROM sources WHERE project_id=? AND id IN ({placeholders})",
+            (BEITOU_PROJECT_ID, *chapter.source_ids),
+        )
+    }
+    # p3 评级结果 / p6 发行人概况 / p9-14 运营 / p15-18 财务分析 / p19 外部支持
+    assert {3, 6, 9, 15, 19} <= pages, pages
+    assert len(pages) >= 10, pages
+
+
+def test_rating_concerns_from_beitou_adjustment_table():
+    """中诚信式：关注事项在「调级因素」表的「关 注」板块，按项目符号逐条切分。
+
+    北投实测 3 条（资本支出压力 / 地铁运营盈利能力 / 房地产调控），每条首行带
+    ``\\uf06e``、续行不带；切分错了会把一条拆成两三条或把「正面」板块混进来。
+    """
+    from backend.app.facts import rating_concerns_from_tables
+
+    startup()
+    items = rating_concerns_from_tables(BEITOU_PROJECT_ID)
+    assert len(items) == 3, items
+    assert any("资本支出压力" in text for text, _ in items)
+    assert any("地铁运营" in text for text, _ in items)
+    assert all(page == 3 for _, page in items)
+    assert all("正面" not in text for text, _ in items)
